@@ -1,0 +1,17 @@
+// ElDrawer forwards this class inside its Teleport; scoped ancestor selectors cannot reach it.
+.application-drawer {
+  font-size:12px;
+  --el-font-size-base:12px;
+  --el-font-size-small:12px;
+  --el-component-size:28px;
+  --el-component-size-small:28px;
+  .el-drawer__title,h2 {font-size:16px}
+  h3 {font-size:12px}
+  .el-drawer__body,.el-form-item__label,.el-button,.el-input__inner,.el-textarea__inner,.el-select__wrapper,.el-radio__label,.el-checkbox__label,.el-collapse-item__header,.el-alert__title,.el-timeline-item__timestamp {font-size:12px}
+  .el-descriptions__body .el-descriptions__table .el-descriptions__cell {font-size:12px;line-height:18px;padding:4px 7px}
+  .el-button {height:28px;padding:4px 8px}
+  .el-input__wrapper {height:28px;box-sizing:border-box}
+  .el-select__wrapper {min-height:28px;line-height:16px;padding:4px 8px}
+  .el-input__inner {height:26px;line-height:26px}
+  .el-date-editor.el-input,.el-radio,.el-checkbox {height:28px}
+}

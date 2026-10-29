@@ -1,0 +1,206 @@
+{
+  "schemaContent": {
+    "items": [
+      {
+        "componentName": "TextField",
+        "props": {
+          "id": "TextField-IH4TZP18",
+          "label": "Modelos型号",
+          "required": true
+        }
+      },
+      {
+        "componentName": "DDSelectField",
+        "props": {
+          "id": "DDSelectField_YLFSPZ54MMO0",
+          "label": "4G O 5G",
+          "options": [
+            "{\"value\":\"4G\",\"key\":\"option_0\"}",
+            "{\"value\":\"5G\",\"key\":\"option_1\"}",
+            "{\"value\":\"3G\",\"key\":\"option_2\"}"
+          ],
+          "required": false
+        }
+      },
+      {
+        "componentName": "DDSelectField",
+        "props": {
+          "id": "DDSelectField_3DGZZWYSEZ20",
+          "label": "大孔或精孔Agujero grande o fino",
+          "options": [
+            "{\"value\":\"大孔Gran agujero\",\"key\":\"option_0\"}",
+            "{\"value\":\"精孔Agujero fino\",\"key\":\"option_1\"}"
+          ],
+          "required": false
+        }
+      },
+      {
+        "componentName": "TextareaField",
+        "props": {
+          "id": "TextareaField_1WR63M7QNFSW0",
+          "label": "手机功能función de teléfono móvil",
+          "required": false
+        }
+      },
+      {
+        "componentName": "DDSelectField",
+        "props": {
+          "id": "DDSelectField-JFX38WE3",
+          "label": "Tipo类型",
+          "options": [
+            "{\"value\":\"清水套TPU Liso\",\"key\":\"option_JX42MIP9\"}",
+            "{\"value\":\"三合一UsoRudo\",\"key\":\"option_JX42MIPA\"}",
+            "{\"value\":\"亮甲Rainbow 3.0\",\"key\":\"option_751YKDDDA2YO\"}",
+            "{\"value\":\"Alterna幻甲\",\"key\":\"option_JX42MIPB\"}",
+            "{\"value\":\"幻影Fantasía Case\",\"key\":\"option_DGO18DA7BRS0\"}",
+            "{\"value\":\"超队Súper Capitán\",\"key\":\"option_MOF4LSWKZ6O0\"}",
+            "{\"extension\":{\"image\":\"\"},\"value\":\"圣殿Case Blindaje\",\"key\":\"option_1IOC87FL0KU80\"}",
+            "{\"extension\":{\"image\":\"\"},\"value\":\"亮甲Rainbow 2.0\",\"key\":\"option_1JECPWGDLCCG0\"}",
+            "{\"extension\":{\"image\":\"\"},\"value\":\"titanio 骑士2.0\",\"key\":\"option_1AINNM21JJ7K0\"}",
+            "{\"extension\":{\"image\":\"\"},\"value\":\"IML自研\",\"key\":\"option_8TDHG1UJFY00\"}",
+            "{\"extension\":{\"image\":\"\"},\"value\":\"SUPER APITAN 2 GEN 超队2.0\",\"key\":\"option_1O6JPUBWK1R40\"}",
+            "{\"extension\":{\"image\":\"\"},\"value\":\"waves薇武士\",\"key\":\"option_1ZA2NETY95DS0\"}",
+            "{\"value\":\"Alterna Mate幻甲-磨砂款\",\"key\":\"option_1DA0R6Y324PS0\"}"
+          ],
+          "required": true
+        }
+      },
+      {
+        "componentName": "DDSelectField",
+        "props": {
+          "id": "DDSelectField-JXM5A55C",
+          "label": "Prioridad 紧急度",
+          "options": [
+            "{\"value\":\"Alta 高\",\"key\":\"option_0\"}",
+            "{\"value\":\"Medio中\",\"key\":\"option_1\"}",
+            "{\"value\":\"General一般\",\"key\":\"option_2\"}"
+          ],
+          "required": false
+        }
+      },
+      {
+        "componentName": "DDSelectField",
+        "props": {
+          "id": "DDSelectField-JXM6BWXW",
+          "label": "Lugar de fabricación制造地",
+          "options": [
+            "{\"value\":\"China\",\"key\":\"option_0\"}",
+            "{\"value\":\"Mexico\",\"key\":\"option_1\"}"
+          ],
+          "required": false
+        }
+      },
+      {
+        "componentName": "DDSelectField",
+        "props": {
+          "id": "DDSelectField_1X7JB5IV2VTS0",
+          "label": "是否为新型号（模具印字）",
+          "options": [
+            "{\"value\":\"是\",\"key\":\"option_0\"}",
+            "{\"value\":\"否\",\"key\":\"option_1\"}"
+          ],
+          "required": false
+        }
+      },
+      {
+        "componentName": "TextField",
+        "props": {
+          "id": "TextField-JR8J9S3P",
+          "label": "Selle en el molde模具印字",
+          "required": false
+        }
+      },
+      {
+        "componentName": "TextField",
+        "props": {
+          "id": "TextField_1MELQ5RM265C0",
+          "label": "销售渠道 Canales venta",
+          "required": false
+        }
+      },
+      {
+        "componentName": "NumberField",
+        "props": {
+          "id": "NumberField_VO6B7HSBOE80",
+          "label": "价格Precio de Celular",
+          "required": false
+        }
+      },
+      {
+        "componentName": "TextField",
+        "props": {
+          "id": "TextField_4RM8KO328XE0",
+          "label": "网站链接Pagina",
+          "required": false
+        }
+      },
+      {
+        "componentName": "TextareaField",
+        "props": {
+          "id": "TextareaField-IH4TZP1I",
+          "label": "其他备注说明Otras notas",
+          "required": false
+        }
+      },
+      {
+        "componentName": "DDDateField",
+        "props": {
+          "id": "DDDateField-IH4TZP1H",
+          "label": "Expectante Facha期望交付时间",
+          "required": false
+        }
+      },
+      {
+        "componentName": "DDPhotoField",
+        "props": {
+          "id": "DDPhotoField_1MXBBIMPHTFK0",
+          "label": "样板/测试真机图片Imágenes de muestra/prueba de la máquina ",
+          "required": false
+        }
+      },
+      {
+        "componentName": "TextareaField",
+        "props": {
+          "id": "TextareaField_1P7S0CILENOG0",
+          "label": "测试结果说明Descripción de los resultados de las pruebas",
+          "required": false
+        }
+      },
+      {
+        "componentName": "DDPhotoField",
+        "props": {
+          "id": "DDPhotoField-IH4TZP1K",
+          "label": "关键图片foto",
+          "required": false
+        }
+      },
+      {
+        "componentName": "DDSelectField",
+        "props": {
+          "id": "DDSelectField_BRB3EHMILSW0",
+          "label": "信息是否填写完成",
+          "options": [
+            "{\"value\":\"点击生成编码\",\"key\":\"option_0\"}"
+          ],
+          "required": false
+        }
+      },
+      {
+        "componentName": "TextField",
+        "props": {
+          "id": "TextField_1U6D0QQC4P340",
+          "label": "生成的编码",
+          "required": false
+        }
+      },
+      {
+        "componentName": "DDAttachment",
+        "props": {
+          "id": "DDAttachment-JKI4M3HZ",
+          "label": "Adjunto附件"
+        }
+      }
+    ]
+  },
+  "gmtModified": "2026-10-28T17:26Z"
+}

@@ -1,0 +1,74 @@
+import {DOMWrapper,mount,flushPromises,type VueWrapper} from '@vue/test-utils'
+import {createPinia,setActivePinia} from 'pinia'
+import {createMemoryHistory,createRouter,type Router} from 'vue-router'
+import ElementPlus,{ElButton,ElInput,ElMessageBox,ElOption,ElSelect,ElTabs} from 'element-plus'
+import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
+const api=vi.hoisted(()=>({getPhoneBrands:vi.fn(),getPhoneSelectionBrands:vi.fn().mockResolvedValue([{id:1,brandId:1,name:"Apple",status:"enabled"}]),getPhoneModels:vi.fn(),getPhoneModelOptions:vi.fn(),getPhoneModelCoverage:vi.fn(),createPhoneBrand:vi.fn(),savePhoneBrand:vi.fn(),createPhoneModel:vi.fn(),savePhoneModel:vi.fn(),inspectPhoneReference:vi.fn(),phoneReferenceAction:vi.fn()}))
+const review=vi.hoisted(()=>vi.fn())
+vi.mock('@/api/modules/phoneReference',()=>api)
+vi.mock('../components/PhoneCodeGroups.vue',()=>({default:{template:'<p>型号编码组</p>'}}))
+vi.mock('../components/PhoneModelIntake.vue',()=>({default:{props:['visible','editable','keyword'],emits:['changed'],template:'<section data-test="phone-intake">待补手机型号工作区</section>'}}))
+vi.mock('@/api/modules/code',()=>({getCodeItems:vi.fn().mockResolvedValue({content:[]}),getPhoneModelReview:review}))
+import PhoneReferenceManager from '../components/PhoneReferenceManager.vue'
+import PhoneModelIntake from '../components/PhoneModelIntake.vue'
+import SharedCompatiblePhoneSelector from '../components/SharedCompatiblePhoneSelector.vue'
+import {useUserStore} from '@/stores/user'
+import {useCollaborationWorkspace} from '@/stores/collaborationWorkspace'
+const phone={id:1,phoneModelId:1,brandId:1,brandName:'Apple',modelName:'iPhone 17 Pro',aliases:[],codeItemId:1144,phoneModelCode:'1144',codeLinkStatus:'linked',status:'enabled'}
+let w:VueWrapper|undefined
+beforeEach(()=>{vi.clearAllMocks();setActivePinia(createPinia());useUserStore().token='reference-test';api.getPhoneSelectionBrands.mockResolvedValue([{id:1,brandId:1,name:'Apple',status:'enabled'}]);api.getPhoneBrands.mockResolvedValue({content:[{id:1,brandId:1,name:'Apple',status:'enabled'}],totalElements:1});api.getPhoneModels.mockResolvedValue({content:[phone],totalElements:1});api.getPhoneModelOptions.mockResolvedValue([phone]);api.createPhoneModel.mockResolvedValue(phone);api.savePhoneModel.mockResolvedValue({status:'saved',row:phone});api.savePhoneBrand.mockResolvedValue({status:'saved'});api.inspectPhoneReference.mockResolvedValue({id:1,name:'iPhone 17 Pro',status:'enabled',version:0,canDelete:true,canDeactivate:true,canActivate:false,hasRestrictedReferences:false,references:[]})})
+afterEach(()=>{w?.unmount();w=undefined;document.body.innerHTML='';vi.restoreAllMocks()})
+async function start(editable=true,router?:Router){w=mount(PhoneReferenceManager,{props:{modelValue:false,editable},global:{plugins:[ElementPlus,...(router?[router]:[])]}});await w.setProps({modelValue:true});await flushPromises();w.getComponent(ElTabs).vm.$emit('update:modelValue','phones');await flushPromises();return w}
+async function click(text:string){await w!.findAllComponents(ElButton).find(b=>b.text()===text)!.trigger('click');await flushPromises()}
+describe('embedded phone reference maintenance',()=>{
+  it('adds intake inside the existing reference entry without replacing identity review or querying the whole phone list',async()=>{w=mount(PhoneReferenceManager,{props:{modelValue:true,inline:true,editable:true,initialTab:'intake',keyword:'待核对原文'},global:{plugins:[ElementPlus]}});await flushPromises();expect(w.getComponent(PhoneModelIntake).props()).toEqual({visible:true,editable:true,keyword:'待核对原文'});expect(api.getPhoneModels).not.toHaveBeenCalled();expect(w.text()).toContain('资料问题／集中处理');expect(w.text()).toContain('历史关系核对');w.getComponent(PhoneModelIntake).vm.$emit('changed');expect(w.emitted('changed')).toHaveLength(1)})
+  it('reuses the same member editor inline and resolves a stable ID beyond the paged search without allocating a code',async()=>{
+    api.getPhoneModelOptions.mockResolvedValue([{...phone,phoneModelId:599,modelName:'iPhone 19 Pro',phoneModelCode:'0001'}])
+    w=mount(PhoneReferenceManager,{props:{modelValue:true,inline:true,editable:true,initialTab:'phones',phoneModelId:599},global:{plugins:[ElementPlus]}})
+    await flushPromises()
+    expect(w.find('.reference-manager--inline').exists()).toBe(true)
+    expect(w.findAllComponents({name:'ElDialog'}).some(dialog=>dialog.props('title')==='手机型号与品牌资料')).toBe(false)
+    expect(api.getPhoneModelOptions).toHaveBeenCalledWith([599]);expect(api.getPhoneModels).not.toHaveBeenCalled()
+    expect(w.text()).toContain('iPhone 19 Pro');expect(w.text()).toContain('0001')
+    await click('编辑');const editor=w.findAllComponents({name:'ElDialog'}).at(-1)!
+    editor.findAllComponents(ElInput)[0].vm.$emit('update:modelValue','iPhone 19 Pro Max');await flushPromises();await click('保存资料')
+    expect(api.savePhoneModel).toHaveBeenCalledWith(599,{changes:{modelName:'iPhone 19 Pro Max'},original:{modelName:'iPhone 19 Pro'}})
+    expect(api.createPhoneModel).not.toHaveBeenCalled()
+  })
+  it('can query all members again after following a focused phone link and supports tab changes without a modal',async()=>{
+    w=mount(PhoneReferenceManager,{props:{modelValue:true,inline:true,editable:false,initialTab:'phones',phoneModelId:1,keyword:'0001'},global:{plugins:[ElementPlus]}})
+    await flushPromises();await click('查询')
+    expect(api.getPhoneModels).toHaveBeenCalledWith({page:1,size:50,keyword:'0001'})
+    await w.setProps({initialTab:'brands'});await flushPromises()
+    expect(w.getComponent(ElTabs).props('modelValue')).toBe('brands')
+    expect(w.emitted('tabChange')?.at(-1)).toEqual(['brands'])
+    expect(api.savePhoneModel).not.toHaveBeenCalled();expect(api.savePhoneBrand).not.toHaveBeenCalled()
+  })
+  it('explains coverage review and routes the exact physical set to the compatibility editor from phone references',async()=>{const router=createRouter({history:createMemoryHistory(),routes:[{path:'/phone-reference',component:{template:'<p>references</p>'}},{path:'/molds',component:{template:'<p>molds</p>'}}]});await router.push('/phone-reference');await router.isReady();api.getPhoneModelCoverage.mockResolvedValue([{productLineId:50,productLineName:'骑士',state:'partial',states:['partial'],applications:[],molds:[{itemId:45,moldSetId:67,moldName:'17 / 18 共模',styleName:'骑士',setNo:1,physicalCode:'MS-000067',engravedCode:'1144',state:'partial',reusable:false,compatibilityConfirmed:false,pcCode:'MFA201144',tpuCode:'MFA101144',pcConfirmed:true,tpuConfirmed:false,pcLocation:'china_maker',tpuLocation:'mexico_factory',pcLocationDetail:'制模厂 A',tpuLocationDetail:'墨厂 B',reviewReasons:[{code:'tpu_fit_unconfirmed',message:'TPU与本手机的本套适配尚未确认',action:'confirm_fit',field:'compatiblePhones'}]}]}]);await start(true,router);await click('查看产品／模具');const coverage=new DOMWrapper(document.querySelector<HTMLElement>('.phone-coverage')!);expect(coverage.text()).toContain('TPU与本手机的本套适配尚未确认');expect(coverage.text()).toContain('PC 位置 中国制模厂 制模厂 A');expect(coverage.text()).toContain('TPU 位置 墨西哥工厂 墨厂 B');expect(coverage.text()).toContain('MFA201144');await click('核对本套适配');expect(router.currentRoute.value.path).toBe('/molds');expect(router.currentRoute.value.query).toEqual({itemId:'45',phoneModelId:'1',moldSetId:'67',tab:'master'});expect(api.savePhoneModel).not.toHaveBeenCalled();expect(w!.emitted('update:modelValue')?.at(-1)).toEqual([false])})
+  it('opens the existing reference entry on code groups by default without losing the member and history tabs',async()=>{w=mount(PhoneReferenceManager,{props:{modelValue:false,editable:true},global:{plugins:[ElementPlus]}});await w.setProps({modelValue:true});await flushPromises();expect(w.getComponent(ElTabs).props('modelValue')).toBe('groups');expect(w.text()).toContain('型号编码组');expect(w.text()).toContain('标准手机成员');expect(w.text()).toContain('历史关系核对');expect(api.getPhoneModels).not.toHaveBeenCalled()})
+  it('maintains a brand alias separately from a prefix replacement with original-value conflict protection',async()=>{api.getPhoneBrands.mockResolvedValue({content:[{id:1,brandId:1,name:'Apple',aliases:['苹果'],prefixes:[{prefix:'IP',replacement:'iPhone'}],status:'enabled'}],totalElements:1});const v=await start();v.getComponent(ElTabs).vm.$emit('update:modelValue','brands');await flushPromises();await click('编辑');v.findAllComponents({name:'ElDialog'}).at(-1)!.findAllComponents(ElInput).at(-1)!.vm.$emit('update:modelValue','Apple iPhone');await flushPromises();await click('保存资料');expect(api.savePhoneBrand).toHaveBeenCalledWith(1,{changes:{name:'Apple',aliases:['苹果'],prefixes:[{prefix:'IP',replacement:'Apple iPhone'}]},original:{name:'Apple',aliases:['苹果'],prefixes:[{prefix:'IP',replacement:'iPhone'}]}});expect(useCollaborationWorkspace().revision).toBe(1)})
+
+  it('opens pending history review on demand and switches both ambiguity kinds while retaining original names and codes',async()=>{review.mockResolvedValue({content:[{key:'0064',codeValues:['0064'],modelNames:['iPhone 6','iPhone 7'],sourceCount:2}],totalElements:1});const v=await start();expect(review).not.toHaveBeenCalled();v.getComponent(ElTabs).vm.$emit('update:modelValue','review');await flushPromises();expect(review).toHaveBeenCalledWith({kind:'code_many_names',page:1,size:50,reviewState:'pending'});expect(v.text()).toContain('0064');expect(v.text()).toContain('iPhone 7');v.getComponent(ElSelect).vm.$emit('update:modelValue','name_many_codes');await flushPromises();expect(review).toHaveBeenLastCalledWith({kind:'name_many_codes',page:1,size:50,reviewState:'pending'});expect(v.text()).toContain('原型号与刻码保留');expect(api.createPhoneModel).not.toHaveBeenCalled();expect(api.savePhoneModel).not.toHaveBeenCalled();expect(v.findAllComponents(ElButton).some(b=>b.text()==='新增手机成员')).toBe(false)})
+  it('creates a named brand member with code unassigned without generating a physical record',async()=>{const v=await start();await click('新增手机成员');const dialogs=v.findAllComponents({name:'ElDialog'}),editor=dialogs[dialogs.length-1];editor.findComponent(ElSelect).vm.$emit('update:modelValue',1);editor.findAllComponents(ElInput)[0].vm.$emit('update:modelValue','iPhone 19 Pro');await flushPromises();await click('保存资料');expect(api.createPhoneModel).toHaveBeenCalledWith({brandId:1,modelName:'iPhone 19 Pro',aliases:[],codeItemId:null});expect(v.emitted('changed')).toHaveLength(1);expect(useCollaborationWorkspace().revision).toBe(1)})
+  it('retains edits and shows the specific original-value conflict without reporting a successful save',async()=>{api.getPhoneModels.mockResolvedValue({content:[{...phone,brandStatus:'disabled'}],totalElements:1});api.savePhoneModel.mockResolvedValue({status:'conflict',conflicts:[{field:'modelName',current:'别人名称',pending:'新名称'}]});const v=await start();api.getPhoneBrands.mockResolvedValue({content:[],totalElements:0});await click('编辑');const editor=v.findAllComponents({name:'ElDialog'}).at(-1)!;const historicalBrand=editor.findComponent(ElSelect).getComponent(ElOption);expect(historicalBrand.props()).toMatchObject({value:1,label:'Apple',disabled:true});editor.findAllComponents(ElInput)[0].vm.$emit('update:modelValue','iPhone 17 Pro Max');await flushPromises();await click('保存资料');expect(api.savePhoneModel).toHaveBeenCalledWith(1,expect.objectContaining({changes:{modelName:'iPhone 17 Pro Max'},original:{modelName:'iPhone 17 Pro'}}));expect(v.emitted('changed')).toBeUndefined();expect(useCollaborationWorkspace().revision).toBe(0);expect(v.text()).toContain('资料已被其他人员修改，请刷新后逐项核对原值');expect(editor.props('modelValue')).toBe(true)})
+  it('keeps reference browsing read-only when the actor lacks maintenance duties',async()=>{const v=await start(false);expect(v.text()).toContain('iPhone 17 Pro');expect(v.findAll('button').some(b=>b.text()==='新增手机成员')).toBe(false);expect(v.findAll('button').some(b=>b.text()==='编辑')).toBe(false);v.getComponent(ElTabs).vm.$emit('update:modelValue','brands');await flushPromises();expect(v.text()).toContain('Apple');expect(api.savePhoneBrand).not.toHaveBeenCalled()})
+  it('routes stop through reference inspection and reasoned lifecycle rather than the old status patch',async()=>{const v=await start();await click('停用');await flushPromises();expect(api.inspectPhoneReference).toHaveBeenCalledWith('phone-models',1);expect(api.savePhoneModel).not.toHaveBeenCalled();expect(api.phoneReferenceAction).not.toHaveBeenCalled();expect(v.emitted('changed')).toBeUndefined();expect(useCollaborationWorkspace().revision).toBe(0);expect(document.body.textContent).toContain('停用原因')})
+  it('does not submit a reference status change after the login identity changes while confirmation is open',async()=>{let confirm!:()=>void;const pending=new Promise<'confirm'>(resolve=>{confirm=()=>resolve('confirm')});vi.spyOn(ElMessageBox,'confirm').mockImplementation(()=>pending as ReturnType<typeof ElMessageBox.confirm>);const v=await start();await click('停用');useUserStore().token='another-login';await flushPromises();const sessionRevision=useCollaborationWorkspace().revision;confirm();await flushPromises();expect(api.savePhoneModel).not.toHaveBeenCalled();expect(api.savePhoneBrand).not.toHaveBeenCalled();expect(v.emitted('changed')).toBeUndefined();expect(useCollaborationWorkspace().revision).toBe(sessionRevision)})
+})
+describe('shared phone selector business adapter',()=>{
+  it('inherits the parent readonly form and keeps the existing explicit review action unavailable',async()=>{
+    w=mount({components:{SharedCompatiblePhoneSelector},template:'<el-form disabled><SharedCompatiblePhoneSelector :model-value="[1]"/></el-form>'},{global:{plugins:[ElementPlus]}});await flushPromises()
+    expect(w.get('.phone-model-trigger').attributes('disabled')).toBeDefined()
+    await w.get('.phone-model-trigger').trigger('click');await flushPromises()
+    expect(w.find('.phone-model-panel').exists()).toBe(false)
+  })
+  it('retains the explicit engineering review action and never confirms adaptation just by opening the picker',async()=>{
+    const candidate={...phone,id:99,phoneModelId:99,status:'disabled'}
+    w=mount(SharedCompatiblePhoneSelector,{props:{modelValue:[],members:[candidate],reviewPhoneId:99},global:{plugins:[ElementPlus]}});await flushPromises()
+    expect(w.get('.review-phone').text()).toContain('手机已停用');expect(w.get('.review-phone button').attributes('disabled')).toBeDefined()
+    await w.get('.review-phone button').trigger('click');expect(w.emitted('update:modelValue')).toBeUndefined()
+    await w.setProps({members:[{...candidate,status:'enabled'}]});await flushPromises();await w.get('.review-phone button').trigger('click')
+    expect(w.emitted('update:modelValue')?.at(-1)).toEqual([[99]])
+    expect(api.savePhoneModel).not.toHaveBeenCalled();expect(api.createPhoneModel).not.toHaveBeenCalled()
+  })
+})

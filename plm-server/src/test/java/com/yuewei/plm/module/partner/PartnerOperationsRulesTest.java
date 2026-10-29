@@ -1,0 +1,44 @@
+package com.yuewei.plm.module.partner;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.LocalDate;
+import java.util.*;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+import static com.yuewei.plm.module.partner.PartnerValues.*;
+
+class PartnerOperationsRulesTest {
+ private final String today=LocalDate.now().toString();
+ private Map<String,Object> event(long id,String action,Map<String,Object> d){return Map.of("id",id,"action",action,"data",d);}
+ private Map<String,Object> input(Object... pairs){var d=new LinkedHashMap<String,Object>();for(int i=0;i<pairs.length;i+=2)d.put(text(pairs[i]),pairs[i+1]);return d;}
+ private Map<String,Object> fee(String amount){return input("amount",amount,"date",today,"reason","真实约定","evidence","供应商实际确认","payer","按本单约定甲方","payee","本单乙方","executor","实际经办岗位");}
+ private Map<String,Object> source(boolean bulk){return Map.of("sourceKind",bulk?"fulfilment":"sample","allowedScope",List.of(Map.of("specId",7,"specName","0185透明款","qty",10)));}
+ private Map<String,Object> check(boolean bulk){return input("date",today,"factory","真实工厂","checks","实际检查结果","result","pass","onsite",true,"scope",List.of(input("specId",7,"checkedQty",2,"releaseQty",bulk?10:0)),"refs",List.of());}
+ @Test void recordTypesCannotFallThroughToCustomerSalesPrefix(){assertEquals("SQ",PartnerStore.prefix("supplier_quote"));assertEquals("SF",PartnerStore.prefix("sample_fee"));assertEquals("QC",PartnerStore.prefix("inspection"));assertEquals("WF",PartnerStore.prefix("fulfilment"));assertEquals("XS",PartnerStore.prefix("sale"));assertThrows(RuntimeException.class,()->PartnerStore.prefix("surprise"));}
+ @Test void unknownFeeIsNotInventedAsAPaidBalance(){assertEquals(0L,SampleFeeLedger.balances(List.of()).get("chargedCents"));var f=SampleFeeLedger.prepare("agreement",input("date",today,"reason","先留原约定","terms","具体条件待双方确认"),List.of());assertFalse(f.containsKey("amountCents"));assertFalse(f.containsKey("currency"));}
+ @Test void offsetAndCashRefundConsumeTheSameOriginalFeeOnlyOnce(){
+  var charge=SampleFeeLedger.prepare("charge",fee("100"),List.of());var events=new ArrayList<>(List.of(event(1,"fee_charge",charge)));
+  var offset=fee("60");offset.put("bulkReference","本单大货结算原件");events.add(event(2,"fee_offset",SampleFeeLedger.prepare("offset",offset,events)));
+  assertThrows(RuntimeException.class,()->SampleFeeLedger.prepare("refund",fee("41"),events));events.add(event(3,"fee_refund",SampleFeeLedger.prepare("refund",fee("40"),events)));
+  assertEquals(Map.of("chargedCents",10000L,"refundedCents",4000L,"offsetCents",6000L,"remainingCents",0L),SampleFeeLedger.balances(events));
+ }
+ @Test void actualFeeNeedsEvidenceAndActualPartiesWithoutFixedFundingRoute(){var f=fee("1");f.remove("evidence");assertThrows(RuntimeException.class,()->SampleFeeLedger.prepare("charge",f,List.of()));f.put("refs",List.of(Map.of("id",5)));f.put("executor","");assertThrows(RuntimeException.class,()->SampleFeeLedger.prepare("charge",f,List.of()));}
+ @Test void offsetCannotBeRecordedWithoutItsOwnBulkEvidence(){assertThrows(RuntimeException.class,()->SampleFeeLedger.prepare("offset",fee("1"),List.of(event(1,"fee_charge",Map.of("amountCents",100)))));}
+ @Test void correctionPreservesOriginalEventsAndRejectsDependentOrRepeatedReversals(){
+  var events=new ArrayList<>(List.of(event(1,"fee_charge",Map.of("amountCents",10000)),event(2,"fee_refund",Map.of("amountCents",3000))));
+  var reverse=input("date",today,"reason","更正真实登记","originalEventId",1);assertThrows(RuntimeException.class,()->SampleFeeLedger.prepare("reverse",reverse,events));reverse.put("originalEventId",2);events.add(event(3,"fee_reverse",SampleFeeLedger.prepare("reverse",reverse,events)));assertEquals(10000L,SampleFeeLedger.balances(events).get("remainingCents"));assertEquals(3,events.size());assertThrows(RuntimeException.class,()->SampleFeeLedger.prepare("reverse",reverse,events));
+ }
+ @Test void anUnlistedSpecificationDoesNotPassByFamilyName(){var d=check(false);d.put("scope",List.of(Map.of("specId",8,"checkedQty",1)));assertThrows(RuntimeException.class,()->PartnerQualityRules.result(source(false),d));d.put("scope",List.of());assertThrows(RuntimeException.class,()->PartnerQualityRules.result(source(false),d));}
+ @Test void reportOrSignatureCannotSubstituteCompanyOnsiteInspection(){var d=check(false);d.put("onsite",false);assertThrows(RuntimeException.class,()->PartnerQualityRules.result(source(false),d));}
+ @Test void samplePassDoesNotChangeStockOrExpandCoverage(){var d=PartnerQualityRules.result(source(false),check(false));assertFalse(d.containsKey("balances"));assertFalse(d.containsKey("releaseQty"));assertEquals(7,number(maps(d.get("scope")).get(0).get("specId")));assertFalse(PartnerQualityRules.passed(Map.of("status","pending_signature","resultSnapshot",d),7));assertTrue(PartnerQualityRules.passed(Map.of("status","signed","resultSnapshot",d),7));assertFalse(PartnerQualityRules.passed(Map.of("status","signed","resultSnapshot",d),8));}
+ @Test void checkedQuantityIsNotReleaseQuantity(){var d=PartnerQualityRules.result(source(true),check(true));var s=maps(d.get("scope")).get(0);assertEquals(2L,s.get("checkedQty"));assertEquals(10L,s.get("releaseQty"));}
+ @Test void explicitlyCoveredRemainderCanPassWithoutInventingFailureForPreviouslyShippedGoods(){var input=check(true);input.put("scope",List.of(Map.of("specId",7,"checkedQty",2,"coveredQty",4,"releaseQty",4)));var result=PartnerQualityRules.result(source(true),input);assertEquals("pass",result.get("result"));assertEquals(4L,maps(result.get("scope")).get(0).get("coveredQty"));assertEquals(4L,maps(result.get("scope")).get(0).get("releaseQty"));}
+ @Test void partialReleaseNeedsProblemsAndIsolationAndFailedResultCannotRelease(){var d=check(true);d.put("result","partial");d.put("scope",List.of(Map.of("specId",7,"checkedQty",2,"releaseQty",6)));assertThrows(RuntimeException.class,()->PartnerQualityRules.result(source(true),d));d.put("issues","剩余部分有不良");assertThrows(RuntimeException.class,()->PartnerQualityRules.result(source(true),d));d.put("isolation","合格部分独立标记和存放");assertEquals("partial",PartnerQualityRules.result(source(true),d).get("result"));d.put("result","fail");assertThrows(RuntimeException.class,()->PartnerQualityRules.result(source(true),d));}
+ @Test void digestBindsIssuesScopeAndResultButNotMapInsertionOrder(){var json=new ObjectMapper();var a=input("issues","问题一","scope",List.of(7),"result","fail");var b=input("result","fail","scope",List.of(7),"issues","问题一");assertEquals(PartnerQualityRules.digest(json,a),PartnerQualityRules.digest(json,b));b.put("issues","已被改写");assertNotEquals(PartnerQualityRules.digest(json,a),PartnerQualityRules.digest(json,b));}
+ private Map<String,Object> qc(String status){return input("status",status,"resultSnapshot",Map.of("scope",List.of(Map.of("specId",7,"specName","原规格","releaseQty",6))));}
+ private Map<String,Object> dispatch(int qty){return input("date",today,"tracking","原运单","destination","本单真实收货点","evidence","装箱原件","allocations",List.of(Map.of("inspectionId",11,"specId",7,"qty",qty)));}
+ @Test void noSignatureOrUncoveredSpecificationCannotShip(){assertThrows(RuntimeException.class,()->PartnerFulfilmentRules.dispatch(dispatch(1),List.of(),Map.of(11L,qc("pending_signature"))));var d=dispatch(1);d.put("allocations",List.of(Map.of("inspectionId",11,"specId",8,"qty",1)));assertThrows(RuntimeException.class,()->PartnerFulfilmentRules.dispatch(d,List.of(),Map.of(11L,qc("signed"))));}
+ @Test void releaseAllocationIsNotReusedAcrossPartialShipments(){var first=PartnerFulfilmentRules.dispatch(dispatch(4),List.of(),Map.of(11L,qc("signed")));var events=List.of(event(1,"dispatch",first));assertThrows(RuntimeException.class,()->PartnerFulfilmentRules.dispatch(dispatch(3),events,Map.of(11L,qc("signed"))));assertEquals(2L,number(maps(PartnerFulfilmentRules.dispatch(dispatch(2),events,Map.of(11L,qc("signed"))).get("allocations")).get(0).get("qty")));}
+ @Test void duplicateAllocationInsideOneRequestIsRejected(){var d=dispatch(1);d.put("allocations",List.of(Map.of("inspectionId",11,"specId",7,"qty",1),Map.of("inspectionId",11,"specId",7,"qty",1)));assertThrows(RuntimeException.class,()->PartnerFulfilmentRules.dispatch(d,List.of(),Map.of(11L,qc("signed"))));}
+ @Test void receiptIsSeparateFromDispatchAndCannotExceedItEvenWithShortage(){var events=new ArrayList<>(List.of(event(1,"dispatch",PartnerFulfilmentRules.dispatch(dispatch(6),List.of(),Map.of(11L,qc("signed"))))));var receipt=input("dispatchId",1,"specId",7,"qty",5,"shortage",1,"difference","真实短少","date",today,"evidence","实际收货依据");var actual=PartnerFulfilmentRules.receipt(receipt,events);events.add(event(2,"receipt",actual));assertThrows(RuntimeException.class,()->PartnerFulfilmentRules.receipt(receipt,events));assertEquals(1L,actual.get("shortage"));}
+}

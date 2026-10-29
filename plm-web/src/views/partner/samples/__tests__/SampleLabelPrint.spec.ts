@@ -1,0 +1,21 @@
+import {mount,flushPromises,type VueWrapper} from '@vue/test-utils'
+import {createPinia,setActivePinia} from 'pinia'
+import ElementPlus,{ElInputNumber} from 'element-plus'
+import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
+import {useUserStore} from '@/stores/user'
+import request from '@/api/request'
+import LabelPrint from '../SampleLabelPrint.vue'
+let wrapper:VueWrapper
+const sample={sampleIdentityId:71,sampleCode:'SY-000071',name:'透明壳',phoneName:'OPPO A40 / A60',colorName:'黑色',supplierName:'真实样品供应商'}
+beforeEach(()=>{setActivePinia(createPinia());useUserStore().token='u1';vi.spyOn(request,'post').mockRejectedValue(new Error('打印不得写业务'));vi.spyOn(request,'put').mockRejectedValue(new Error('打印不得写业务'));vi.spyOn(request,'delete').mockRejectedValue(new Error('打印不得写业务'))})
+afterEach(()=>{wrapper?.unmount();document.body.innerHTML='';vi.restoreAllMocks()})
+async function start(){wrapper=mount(LabelPrint,{props:{modelValue:true,samples:[sample]},global:{plugins:[ElementPlus],stubs:{Teleport:true}},attachTo:document.body});await flushPromises()}
+describe('sample label browser printing',()=>{
+ it('defaults to the confirmed 60 by 50 millimetres and previews the stable existing code',async()=>{await start();expect(wrapper.findAllComponents(ElInputNumber).map(i=>i.props('modelValue')).slice(0,2)).toEqual([60,50]);expect(wrapper.text()).toContain('SY-000071');expect(wrapper.get('.label-preview img').attributes('src')).toMatch(/^data:image\/svg\+xml/);expect(request.post).not.toHaveBeenCalled()})
+ it('changes copy count independently, opens browser print preview once, and never writes stock',async()=>{await start();wrapper.findAllComponents(ElInputNumber)[2]!.vm.$emit('update:modelValue',3);await flushPromises();const print=vi.fn(),focus=vi.fn(),original=document.createElement.bind(document);vi.spyOn(document,'createElement').mockImplementation(((tag:string,options?:ElementCreationOptions)=>{const element=original(tag,options);if(tag.toLowerCase()==='iframe')Object.defineProperty(element,'contentWindow',{configurable:true,value:{focus,print,document:{images:[]}}});return element}) as typeof document.createElement);await wrapper.findAll('button').find(b=>b.text()==='打开浏览器打印预览')!.trigger('click');await flushPromises();document.querySelector('iframe')!.dispatchEvent(new Event('load'));await flushPromises();expect(print).toHaveBeenCalledOnce();expect(document.querySelector('iframe')!.srcdoc.match(/class="label"/g)).toHaveLength(3);expect(sample.sampleCode).toBe('SY-000071');expect(request.post).not.toHaveBeenCalled();expect(request.put).not.toHaveBeenCalled();expect(request.delete).not.toHaveBeenCalled()})
+ it('clears prepared codes and closes the dialog on account change',async()=>{await start();useUserStore().token='u2';await flushPromises();expect(wrapper.text()).not.toContain('SY-000071');expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([false])})
+ it('keeps a long real supplier name in the 60×50 preview and blocks printing until the configured height fits',async()=>{const original=Element.prototype.getBoundingClientRect;vi.spyOn(Element.prototype,'getBoundingClientRect').mockImplementation(function(this:Element){return this.classList.contains('label-preview')?new DOMRect(0,0,226,260):original.call(this)});await start();const name='真实供应商有限公司'.repeat(15);await wrapper.setProps({samples:[{...sample,supplierName:name}]});await flushPromises();expect(wrapper.get('.label-preview').text()).toContain(name);expect(wrapper.text()).toContain('内容超出当前标签高度');expect(wrapper.findAll('button').find(b=>b.text()==='打开浏览器打印预览')!.attributes('disabled')).toBeDefined();wrapper.findAllComponents(ElInputNumber)[1]!.vm.$emit('update:modelValue',80);await flushPromises();expect(wrapper.findAll('button').find(b=>b.text()==='打开浏览器打印预览')!.attributes('disabled')).toBeUndefined();expect(request.post).not.toHaveBeenCalled()})
+
+ it('rejects more than 200 selected codes before generating a huge QR preview or changing any stock',async()=>{await start();await wrapper.setProps({samples:Array.from({length:201},(_,i)=>({...sample,sampleIdentityId:i+1,sampleCode:'SY-'+String(i+1).padStart(6,'0')}))});await flushPromises();expect(wrapper.text()).toContain('单次最多选择200种样品');expect(wrapper.findAll('.label-preview')).toHaveLength(0);expect(request.post).not.toHaveBeenCalled()})
+
+})

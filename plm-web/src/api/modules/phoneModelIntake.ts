@@ -1,0 +1,10 @@
+import request, { unwrapResponse, type PageResponse } from '../request'
+import type { PhoneIntakeClassification, PhoneIntakeDetail, PhoneIntakePage, PhoneIntakeResolutionInput, PhoneIntakeResolutionPreview, PhoneIntakeResolutionResult, PhoneIntakeSource, PhoneIntakeSourceInput, PhoneIntakeSourcePreview, PhoneIntakeSourceResult, PhoneIntakeState } from '@/types/phoneModelIntake'
+const root = '/molds/reference-data/phone-models/intake'
+export async function getPhoneIntake(query: { page: number; size: number; keyword?: string; state?: PhoneIntakeState | 'all'; classification?: PhoneIntakeClassification | 'all'; brandId?: number }): Promise<PhoneIntakePage> { return unwrapResponse(await request.get(root, { params: query })) }
+export async function getPhoneIntakeDetail(id: number): Promise<PhoneIntakeDetail> { return unwrapResponse(await request.get(`${root}/${id}`)) }
+export async function getPhoneIntakeSources(id: number, query: { page: number; size: number }): Promise<PageResponse<PhoneIntakeSource>> { return unwrapResponse(await request.get(`${root}/${id}/sources`, { params: query })) }
+export async function previewPhoneIntakeSource(input: PhoneIntakeSourceInput): Promise<PhoneIntakeSourcePreview> { return unwrapResponse(await request.post(`${root}/source-preview`, input)) }
+export async function savePhoneIntakeSource(input: PhoneIntakeSourceInput & { requestId: string; previewToken: string }): Promise<PhoneIntakeSourceResult> { return unwrapResponse(await request.post(`${root}/sources`, input)) }
+export async function previewPhoneIntakeResolution(id: number, input: PhoneIntakeResolutionInput): Promise<PhoneIntakeResolutionPreview> { return unwrapResponse(await request.post(`${root}/${id}/resolution-preview`, input)) }
+export async function savePhoneIntakeResolution(id: number, input: PhoneIntakeResolutionInput & { requestId: string; previewToken: string }): Promise<PhoneIntakeResolutionResult> { return unwrapResponse(await request.post(`${root}/${id}/resolutions`, input)) }

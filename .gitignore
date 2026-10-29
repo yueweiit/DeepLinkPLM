@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+
+# Environment files with secrets
+.env.database
+.env
+*.env
+!.env.example
+!.env.database.example
+
+# IDE
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+
+# Claude Code
+.claude/
+
+# Local toolchains
+.jdks/
+
+# CoDEX temporary workspace
+.codex_tmp/
+
+# Private OA runtime data and credentials
+plm-server/data/uploads/mold-applications/
+**/dingtalk-mold-backups/
+*.local.json
+
+# Browser verification screenshots may contain local business data.
+/output/playwright/
+/.playwright-cli/
+
+# Per-machine Vite backend target; keep local acceptance ports out of shared config.
+/plm-web/.env.development.local
+
+# Runtime files and private source materials
+.env
+.env.*
+!**/.env.example
+!**/.env.*.example
+**/node_modules/
+**/target/
+**/dist/
+**/__pycache__/
+**/.pytest_cache/
+**/*.pyc
+**/*.log
+**/*.pid
+**/*.dump
+**/*.sql.gz
+**/*.key
+**/*.pem
+**/*.p12
+**/*.jks
+**/data/
+**/logs/
+**/backups/
+output/
+.codex_tmp/
+.codex-task-artifacts/
+
+# Immutable private business-data migration originals
+plm-server/src/main/resources/db/migration/V20260727_1300__ecount_material_groups.sql
+plm-server/src/main/resources/db/migration/V20260730_1130__seed_inventory_from_ecount_workbook_and_archive_minor_groups.sql
+plm-server/src/main/resources/db/migration/V20260703_1600__m1_auth_and_operation_log.sql

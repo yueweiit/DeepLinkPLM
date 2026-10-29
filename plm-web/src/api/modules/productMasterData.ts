@@ -1,0 +1,9 @@
+import request,{unwrapPage,unwrapResponse,type PageResponse} from '../request'
+import type {MasterDataInspection,MasterDataLifecycleAction,MasterDataLifecycleInput} from '@/types/masterDataLifecycle'
+export interface ProductMasterRecord {id:number;name:string;code:string;productType:'product_line'|'model_variant'|'sku';parentProductId?:number|null;productSpecificCode?:string|null;phoneModelId?:number|null;model?:string|null;material?:string|null;remark?:string|null;sourceSystem?:string|null;sourceOwned:boolean;projectKind?:string|null;editingPath?:string;status:'active'|'inactive';version:number;canMaintain:boolean}
+export interface ProductMasterInput {productName:string;productType:'product_line'|'model_variant'|'sku';parentProductId?:number|null;productCode?:string;productSpecificCode?:string|null;phoneModelId?:number|null;model?:string|null;material?:string|null;remark?:string|null;version:number;requestId:string;reason:string}
+export async function getProductMasters(keyword='',page=1,size=50):Promise<PageResponse<ProductMasterRecord>> {return unwrapPage(await request.get('/products/master-data',{params:{keyword,page,size}}))}
+export async function getProductMaster(id:number):Promise<ProductMasterRecord>{return unwrapResponse(await request.get(`/products/master-data/${id}`))}
+export async function saveProductMaster(id:number|undefined,input:ProductMasterInput):Promise<ProductMasterRecord>{return unwrapResponse(await(id?request.put(`/products/master-data/${id}`,input):request.post('/products/master-data',input)))}
+export async function inspectProductMaster(id:number|string):Promise<MasterDataInspection>{return unwrapResponse(await request.get(`/products/${id}/master-data-references`))}
+export async function actOnProductMaster(id:number|string,action:MasterDataLifecycleAction,input:MasterDataLifecycleInput):Promise<unknown>{return unwrapResponse(await request.post(`/products/${id}/master-data-actions/${action}`,input))}

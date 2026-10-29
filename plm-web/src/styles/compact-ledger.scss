@@ -1,0 +1,48 @@
+// Opt-in density shared by collaboration, physical molds and schedules.
+.compact-ledger {
+  font-size: 12px;
+  line-height: 16px;
+  min-width: 0;
+  box-sizing: border-box;
+
+  .el-button--small { height: 28px; font-size: 12px; padding: 4px 8px; }
+  .el-button + .el-button { margin-left: 0; }
+  .el-radio-button__inner { height: 28px; padding: 5px 8px; font-size: 12px; line-height: 16px; }
+  .ledger-filters {
+    .el-input__wrapper, .el-select__wrapper { min-height: 28px; box-sizing: border-box; }
+    .el-checkbox { height: 28px; margin-right: 8px; }
+    .el-checkbox__label { font-size: 12px; }
+  }
+  .compact-table {
+    font-size: 12px;
+    .el-table__body tr, td.el-table__cell { height: 40px; }
+    td.el-table__cell { padding: 0; box-sizing: border-box; }
+    th.el-table__cell { height: 32px; padding: 0; }
+    .cell { padding: 4px; font-size: 12px; line-height: 16px; white-space: nowrap; }
+    th .cell { padding: 2px 4px; }
+    .el-tag { height: 20px; padding: 0 4px; font-size: 12px; }
+    td.milestone-opening { background: #f3f6fc; }
+    th.milestone-opening { background: #eaf0fa; }
+    td.milestone-shipping { background: #fcf8f0; }
+    th.milestone-shipping { background: #f7f0e3; }
+    td.milestone-mexico { background: #f0f8f5; }
+    th.milestone-mexico { background: #e6f3ee; }
+    td.is-overdue { background: #fff1f0; color: #ad4444; }
+    td.is-overdue .plan-cell:not(.is-dirty) :is(input,select,.readonly-value) { color: #ad4444; }
+  }
+  .ledger-cell {
+    position: relative;
+    .plan-cell { height: 28px; min-height: 0; padding: 0 2px; border-radius: 2px; box-sizing: border-box; background: transparent; border: 1px solid transparent; font-size: 12px; line-height: 16px; }
+    .plan-cell:focus-within { border-color: #4d82ed; background: #f0f6ff; box-shadow: 0 0 0 1px #4d82ed; }
+    .is-dirty { background: #fff5d6; border-color: #edc76a; }
+    .plan-cell.is-dirty:focus-within { background: #fff5d6; }
+    input, select, textarea { height: 26px; padding: 4px 0; box-sizing: border-box; font-size: 12px; line-height: 16px; outline: none; }
+    input:focus, select:focus, textarea:focus { outline: none; }
+    textarea { white-space: pre; }
+    input[type=date]::-webkit-calendar-picker-indicator { width: 12px; margin: 0; padding: 0; }
+    .readonly-value { white-space: nowrap; display: block; overflow: hidden; text-overflow: ellipsis; }
+    .dirty-dot { position: absolute; right: 0; top: 0; margin: 0; }
+    .expand-cell { width: 14px; height: 20px; padding: 0; font-size: 12px; }
+  }
+  .is-dirty-value { background: #fff5d6; border: 1px solid #edc76a; border-radius: 2px; padding: 2px; }
+}

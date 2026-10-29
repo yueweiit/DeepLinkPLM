@@ -1,0 +1,65 @@
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+import PartnerFiles from '../PartnerFiles.vue'
+import type { CatalogStyle } from '@/types/partnerCatalog'
+import type { SupplierPriceOption } from '@/types/partnerSelections'
+import { moqScopeLabel, supplierCurrency, supplierPriceValue } from '@/utils/partnerPrice'
+import { catalogPhoneSummary } from './catalogPresentation'
+import { modelEntryMatches, modelSheetIssues } from './catalogModelSheet'
+
+const props = defineProps<{ row: CatalogStyle; canReadCost: boolean; canEdit?:boolean }>()
+const emit = defineEmits<{ product: [id: number]; source: []; 'model-sheet': []; edit: [] }>()
+const phoneSearch = ref(''), phonePage = ref(1)
+const filteredPhones = computed(() => {
+  const keyword = phoneSearch.value.trim().toLocaleLowerCase().replace(/\s+/g, '')
+  return (props.row.phones || []).filter(phone => !keyword || [phone.modelName, phone.phoneModelCode, phone.brandName].some(value => String(value || '').toLocaleLowerCase().replace(/\s+/g, '').includes(keyword)))
+})
+const visiblePhones = computed(() => filteredPhones.value.slice((phonePage.value - 1) * 12, phonePage.value * 12))
+const modelEntries = computed(() => (props.row.supplierModelEntries || []).filter(entry => modelEntryMatches(entry, phoneSearch.value)))
+const visibleModelEntries = computed(() => modelEntries.value.slice((phonePage.value - 1) * 20, phonePage.value * 20))
+const facts = computed(() => ([
+  ['我方款式号', props.row.catalogStyleLabel||props.row.catalogStyleCode||'待补码'], ['供方款号', props.row.supplierItemCode], ['系列', props.row.series], ['材质', props.row.material],
+  ['规格／结构', props.row.specification], ['厚度', props.row.thickness], ['功能／特点', props.row.features],
+  ['起订数量', props.row.moqQuantity], ['起订单位', props.row.moqUnit], ['起订口径', props.row.moqScope?moqScopeLabel(props.row.moqScope):undefined], ['起订补充', props.row.moqNote], ['包装', props.row.packaging], ['参考生产周期', props.row.leadTimeNote]
+] as [string,unknown][]).filter(([, value]) => value!==undefined&&value!==null&&value!==''))
+const fileRefs = computed(() => props.row.refs || [])
+const quotes = computed(() => Array.isArray(props.row.priceOptions) ? props.row.priceOptions : [])
+const quoteRows = computed<SupplierPriceOption[]>(()=>quotes.value.length?quotes.value:[props.row])
+watch(() => props.row.rowId, () => { phoneSearch.value = ''; phonePage.value = 1 })
+watch(phoneSearch, () => { phonePage.value = 1 })
+</script>
+
+<template>
+  <div class="supplier-style-detail">
+    <section class="catalog-panel catalog-materials">
+      <PartnerFiles kind="partner-selections" :id="row.recordId" :files="row.fileDetails||[]" :model-value="fileRefs" :can-write="false" :can-write-money="false"/>
+    </section>
+    <section class="catalog-panel">
+      <header class="detail-heading"><div><h2>{{ row.name || '未命名款式' }}</h2><p>{{ row.supplierName }}<template v-if="row.supplierItemCode"> · {{ row.supplierItemCode }}</template></p></div><el-button v-if="canEdit" type="primary" @click="emit('edit')">修改名称</el-button><el-button v-if="row.productId" link type="primary" @click="emit('product',row.productId)">关联我方产品 {{ row.productCode || '' }}</el-button></header>
+      <dl v-if="facts.length" class="style-facts"><div v-for="[label,value] in facts" :key="label"><dt>{{ label }}</dt><dd>{{ value }}</dd></div></dl>
+    </section>
+    <section class="catalog-panel model-panel">
+      <header><h3>{{row.supplierModelEntries?.length?'供应商型号表':'供应商提供的型号'}} <small>（{{ row.supplierModelEntries?.length?`${row.supplierModelEntries.length} 条原记录 · `:'' }}{{ row.phones?.length || 0 }} 个关联型号）</small></h3><el-button v-if="row.canMaintainModelSheet" link type="primary" @click="emit('model-sheet')">型号表核对</el-button><el-input v-model="phoneSearch" :placeholder="row.supplierModelEntries?.length?'搜索原型号、状态或现有编码':'搜索型号或四位编码'" aria-label="搜索本款手机型号" clearable/></header>
+      <div v-if="row.modelSheetFileDetails?.length" class="model-sheet-originals"><PartnerFiles kind="partner-selections" :id="row.recordId" :files="row.modelSheetFileDetails" :model-value="row.modelSheetRefs||[]" :can-write="false" :can-write-money="false"/></div>
+      <template v-if="row.supplierModelEntries?.length">
+        <div class="supplier-model-entries"><article v-for="entry in visibleModelEntries" :key="entry.supplierIndex+'-'+entry.rawModelText" class="supplier-model-entry"><div><small>原表 {{entry.supplierIndex}} · {{entry.rawBrandGroup}}</small><strong>{{entry.rawModelText}}</strong><b>{{entry.rawStatus||'原表未注明进度'}}</b><p v-if="entry.rawNote">{{entry.rawNote}}</p></div><div class="supplier-model-links"><span v-for="phone in entry.phones||[]" :key="phone.phoneModelId"><strong>{{phone.modelName||phone.displayName}}</strong><small>{{phone.phoneModelCode||'编码未分配'}}<template v-if="phone.productionStatus==='discontinued'"> · 已停产</template></small></span><p v-if="!entry.phones?.length">原文待关联</p><details v-if="modelSheetIssues(entry).length||entry.matchNote" class="model-review-notes"><summary>核对说明</summary><p v-if="entry.matchNote">人工核对：{{entry.matchNote}}</p><p v-for="issue in modelSheetIssues(entry)" :key="issue" class="model-exceptions">{{issue}}</p></details></div></article></div><p v-if="!modelEntries.length" class="muted">没有匹配的原型号条目</p><el-pagination v-if="modelEntries.length>20" v-model:current-page="phonePage" :page-size="20" :total="modelEntries.length" :pager-count="5" layout="total,prev,pager,next"/>
+      </template>
+      <template v-else><div v-if="visiblePhones.length" class="catalog-phone-list"><div v-for="phone in visiblePhones" :key="phone.phoneModelId" class="catalog-phone"><strong>{{ phone.modelName }}</strong><span>{{ phone.brandName }}<template v-if="phone.phoneModelCode"> · {{ phone.phoneModelCode }}</template><span v-if="phone.productionStatus==='discontinued'" class="discontinued"> · 已停产</span></span></div></div><p v-else class="muted">{{ phoneSearch?'没有匹配的型号':catalogPhoneSummary(row) }}</p><el-pagination v-if="filteredPhones.length>12" v-model:current-page="phonePage" :page-size="12" :total="filteredPhones.length" :pager-count="5" layout="prev,pager,next"/></template>
+      <details v-if="row.phoneMatchIssues?.length" class="model-review-notes model-diagnostics"><summary>型号核对说明</summary><p class="model-exceptions">{{ row.phoneMatchIssues.join('；') }}</p></details>
+      <p v-if="row.phones?.length" class="model-reuse">已匹配现有手机资料。加入我方选品时只勾本次需要的型号，不必重新匹配；其他型号仍保留在供应商目录。<template v-if="row.supplierModelEntries?.length">供方原进度不等于现货、实收或质检结论。</template></p>
+    </section>
+    <section class="catalog-panel"><h3>供应商颜色</h3><p class="color-description">{{ row.color || '原资料未提供颜色' }}</p></section>
+    <section v-if="canReadCost" class="catalog-panel quote-panel"><h3>供应商报价</h3>
+      <div class="quote-options"><article v-for="(quote,index) in quoteRows" :key="index"><strong v-if="quotes.length">{{ quote.label || `报价 ${index+1}` }}</strong><dl class="style-facts"><div><dt>报价</dt><dd>{{supplierPriceValue(quote)}}</dd></div><div><dt>币种</dt><dd>{{supplierCurrency(quote)}}<small v-if="quote.currencySource==='business_default'">（业务默认）</small></dd></div><div><dt>计价单位</dt><dd>{{quote.priceUnit||'未提供'}}</dd></div><div><dt>起订数量</dt><dd>{{quote.moqQuantity??'未确认'}}</dd></div><div><dt>起订单位</dt><dd>{{quote.moqUnit||'未确认'}}</dd></div><div><dt>起订口径</dt><dd>{{moqScopeLabel(quote.moqScope)}}</dd></div></dl><p v-if="quote.moqNote">起订补充：{{quote.moqNote}}</p><p v-if="quote.packaging">包装：{{ quote.packaging }}</p><p v-if="quote.priceNote">报价条件：{{ quote.priceNote }}</p><details v-if="quote.moq"><summary>原始起订条款</summary><p>{{quote.moq}}</p></details></article></div><p v-if="row.sampleFeeNote">样品费用约定：{{ row.sampleFeeNote }}</p>
+    </section>
+    <section v-if="canReadCost&&row.sourceOriginals?.length" class="catalog-panel source-originals"><h3>来源原件</h3><PartnerFiles kind="partner-selections" :id="row.recordId" :files="row.sourceOriginals" :model-value="[]" :can-write="false" :can-write-money="false"/></section>
+    <details class="catalog-panel catalog-source"><summary>来源与版本</summary><dl class="style-facts"><div><dt>资料</dt><dd>{{ row.sourceName }}<template v-if="row.sourceCode"> · {{ row.sourceCode }}</template> <el-button v-if="row.canWrite" link type="primary" @click="emit('source')">打开来源资料</el-button></dd></div><div v-if="row.sourceVersion||row.recordVersion"><dt>版本</dt><dd>{{ row.sourceVersion || `V${row.recordVersion}` }}</dd></div><div v-if="row.sourceSheet||row.sourcePosition"><dt>原件位置</dt><dd>{{ [row.sourceSheet,row.sourcePosition].filter(Boolean).join(' · ') }}</dd></div><div v-if="row.modelText"><dt>型号原文</dt><dd>{{ row.modelText }}</dd></div></dl><p v-if="row.notes" class="style-notes">{{row.notes}}</p></details>
+  </div>
+</template>
+
+<style scoped>
+.model-review-notes>summary{cursor:pointer;font-size:12px;line-height:1.6;color:var(--el-text-color-secondary)}.model-review-notes{margin-top:3px;min-width:0}.model-diagnostics{margin-top:8px}
+.model-sheet-originals :deep(.partner-files>header){display:none}.supplier-model-entries{margin-top:7px}.supplier-model-entry{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:10px;padding:7px 0;border-bottom:1px solid var(--el-border-color-lighter);font-size:13px;line-height:1.6}.supplier-model-entry>div{display:flex;flex-direction:column;gap:2px;min-width:0;overflow-wrap:anywhere}.supplier-model-entry>div>strong{font-size:15px;color:#284d7c}.supplier-model-entry small{color:var(--el-text-color-secondary);font-size:12px}.supplier-model-entry b{font-weight:600}.supplier-model-entry p{margin:2px 0}.supplier-model-links>span{display:flex;gap:5px 12px;flex-wrap:wrap}.supplier-model-links strong{font-weight:500}.supplier-style-detail{container-type:inline-size}@container(max-width:650px){.supplier-model-entry{grid-template-columns:minmax(0,1fr);gap:4px}.supplier-model-links{padding-left:8px}}
+.source-originals :deep(.partner-files>header),.source-originals :deep(.partner-files>.no-photo){display:none}
+.supplier-style-detail{display:flex;flex-direction:column;gap:8px;min-width:0}.catalog-panel{background:var(--el-bg-color);border:1px solid var(--el-border-color-lighter);border-radius:6px;padding:12px;min-width:0}.catalog-panel h3{margin:0 0 8px;font-size:14px}.catalog-panel p{font-size:13px;line-height:1.65;overflow-wrap:anywhere}.detail-heading{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}.detail-heading>div{min-width:0}.detail-heading h2{font-size:17px;line-height:1.5;margin:0;overflow-wrap:anywhere}.detail-heading p{color:var(--el-text-color-secondary);margin:4px 0}.style-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(250px,100%),1fr));gap:9px 24px;margin:10px 0 0}.style-facts>div{display:grid;grid-template-columns:78px minmax(0,1fr);gap:6px;min-width:0;font-size:13px;line-height:1.6}.style-facts dt{color:var(--el-text-color-secondary)}.style-facts dd{margin:0;overflow-wrap:anywhere}.style-notes{white-space:pre-wrap;margin-bottom:0}.model-panel>header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.model-panel h3{margin:0}.model-panel small{font-weight:400;color:var(--el-text-color-secondary)}.model-panel .el-input{width:min(250px,100%)}.catalog-phone-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(250px,100%),1fr));gap:0 16px;margin-top:8px}.catalog-phone{display:flex;flex-direction:column;gap:2px;border-bottom:1px solid var(--el-border-color-lighter);padding:8px 0;min-width:0;font-size:13px;overflow-wrap:anywhere}.catalog-phone>span{color:var(--el-text-color-secondary);font-size:12px}.catalog-phone strong{font-weight:600;font-size:14px}.discontinued{color:var(--el-color-warning-dark-2)}.model-reuse,.muted{color:var(--el-text-color-secondary)}.model-reuse{font-size:12px!important;margin:9px 0 0}.model-exceptions{color:var(--el-color-warning-dark-2)}.color-description{font-weight:600;margin:0}.quote-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:10px}.quote-options article{padding:10px;background:var(--el-fill-color-light);border-radius:5px}.quote-options b{display:block;margin-top:5px;color:var(--el-color-primary)}.quote-options p{margin:4px 0}.reference-price{font-size:16px;color:var(--el-color-primary)}.catalog-source summary{cursor:pointer;font-size:13px;color:var(--el-text-color-secondary)}.supplier-style-detail :deep(.el-button){max-width:100%;white-space:normal;line-height:1.5;overflow-wrap:anywhere;height:auto}.supplier-style-detail :deep(.el-button>span){white-space:normal;min-width:0}.supplier-style-detail :deep(.el-pagination){margin-top:8px}.source-originals>h3{margin-bottom:2px}
+</style>

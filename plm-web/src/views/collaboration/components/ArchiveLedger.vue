@@ -1,0 +1,67 @@
+<script setup lang="ts">
+import { computed, reactive, ref, watch } from 'vue'
+import { useElementSize } from '@vueuse/core'
+import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { FullScreen, Refresh, QuestionFilled } from '@element-plus/icons-vue'
+import * as api from '@/api/modules/collaboration'
+import type { CollaborationRow, PlanField } from '@/types/collaboration'
+import { archiveLinked, archiveModelName, archivePlatformName, platformRoute, statusNames } from '@/utils/collaboration'
+import { useArchiveLedger } from '../composables/useArchiveLedger'
+import FixedTableViewport from '@/components/FixedTableViewport/index.vue'
+import CollaborationCell from './CollaborationCell.vue'
+import CollaborationImportDialog from './CollaborationImportDialog.vue'
+import ArchiveRecordList from './ArchiveRecordList.vue'
+import ArchiveRowMenu from './ArchiveRowMenu.vue'
+const props=defineProps<{kind:'market'|'production';title:string;fieldKeys:readonly string[];initialItemId?:number}>()
+const emit=defineEmits<{action:[command:string,row:CollaborationRow]}>()
+const l=reactive(useArchiveLedger(props.kind,props.fieldKeys,()=>props.initialItemId)),router=useRouter(),importVisible=ref(false)
+const panel=ref<HTMLElement>(),panelSize=useElementSize(panel)
+const records=computed(()=>panelSize.width.value>0 && panelSize.width.value<716+l.fields.reduce((sum,f)=>sum+width(f),0))
+defineExpose({ledger:l})
+watch(()=>l.options,options=>{if(!options)importVisible.value=false})
+const width=(f:PlanField)=>['money','count'].includes(f.kind)?120:f.key==='brandId'?180:f.kind==='currency'?72:f.maxLength>=4000?280:160
+const display=(v:unknown)=>v==null?'—':typeof v==='object'?JSON.stringify(v):String(v)
+function action(command:string,row:CollaborationRow) {
+  if(command==='history')void l.openHistory(row);else if(command==='references')void l.openReferences(row);else if(command==='reason')void l.explain(row)
+  else if(command==='platform' && row.productLineId)void router.push(platformRoute(row.productLineId))
+  else if(command==='phone')void router.push({path:'/molds',query:{itemId:row.itemId,panel:'reference-data',keyword:row.linkedPhoneModelCode || row.phoneModelCode || row.compatibleModels}})
+  else if(command==='molds')void router.push({path:'/molds',query:{itemId:row.itemId}})
+  else if(command==='schedule')void router.push({path:'/mold-schedules',query:{itemId:row.itemId}})
+  else emit('action',command,row)
+}
+function openImport(){if(l.dirtyCells){ElMessage.warning('请先保存或撤销当前模块草稿');return}importVisible.value=true}
+</script>
+<template>
+  <main class="archive-ledger compact-ledger" :class="{'is-expanded':l.expanded}">
+    <header><h2>{{ title }}</h2><div class="tools"><slot name="tools" :ledger="l" /><el-popover trigger="click" :width="340"><template #reference><el-button size="small" text :icon="QuestionFilled">填写说明</el-button></template><p>同一款式与兼容型号组共用档案，不按颜色或模具套数重复累计。黄色为草稿，保存只提交当前模块字段。</p><slot name="help" /></el-popover><el-button size="small" :icon="FullScreen" @click="l.expanded=!l.expanded">{{ l.expanded?'退出宽屏':'宽屏录入' }}</el-button><el-button size="small" :icon="Refresh" @click="l.refresh">刷新</el-button><el-dropdown trigger="click"><el-button size="small">更多</el-button><template #dropdown><el-dropdown-menu><el-dropdown-item @click="api.downloadCollaborationTemplate(kind,l.query())">下载本页模板（含 ID）</el-dropdown-item><el-dropdown-item @click="openImport">Excel 导入预览</el-dropdown-item><el-dropdown-item @click="router.push('/molds')">打开模具台账</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div></header>
+    <section ref="panel" class="archive-panel">
+      <div class="filters ledger-filters"><el-input v-model="l.keyword" size="small" clearable placeholder="搜索款式 / 品牌 / 型号 / 编码" class="search" /><el-select v-model="l.productLineId" size="small" clearable placeholder="全部产品平台"><el-option v-for="p in l.options?.productLines" :key="p.productLineId" :label="p.productName" :value="p.productLineId" /></el-select><el-select v-model="l.status" size="small" clearable placeholder="全部状态"><el-option v-for="s in kind==='market'?['candidate','linked']:['missing','recorded']" :key="s" :label="statusNames[s]" :value="s" /></el-select><el-checkbox v-model="l.mineOnly" size="small">待我填写</el-checkbox><el-button v-if="l.itemId" link size="small" @click="l.itemId=undefined;l.reset()">清除档案定位</el-button><span class="record-count">共 {{ l.total }} 条档案</span></div>
+      <el-alert v-if="l.error || l.request.error" :title="l.error || l.request.error" type="error" :closable="false" />
+      <FixedTableViewport v-slot="{tableHeight}" fill :refresh-key="l.rows"><ArchiveRecordList v-if="records" v-loading="l.request.loading" :ledger="l" :height="tableHeight" @action="action"><template #row-actions="{row}"><slot name="row-actions" :row="row" :ledger="l" /></template></ArchiveRecordList><el-table v-else :data="l.rows" :height="tableHeight" v-loading="l.request.loading" row-key="itemId" border class="compact-table archive-table">
+        <el-table-column label="产品平台 / 款式" fixed="left" width="112" show-overflow-tooltip><template #default="{row}"><button class="identity-link" :title="`当前：${archivePlatformName(row)}；原始款式：${row.styleName}`" @click="row.productLineId ? action('platform',row) : action('associate',row)">{{ archivePlatformName(row) }}</button></template></el-table-column>
+        <el-table-column label="兼容手机型号 / 共模组" fixed="left" width="240" show-overflow-tooltip><template #default="{row}"><button class="identity-link" :title="`当前：${archiveModelName(row)}；原始型号：${row.compatibleModels}`" @click="action(archiveLinked(row)?'phone':'associate',row)">{{ archiveModelName(row) }}</button></template></el-table-column>
+        <el-table-column label="原型号编码" width="78"><template #default="{row}">{{ row.linkedPhoneModelCode || row.phoneModelCode || '—' }}</template></el-table-column>
+        <el-table-column label="基础关联" width="78"><template #default="{row}"><el-button size="small" link :type="archiveLinked(row)?'success':'warning'" :title="`原始：${row.styleName} / ${row.compatibleModels}${row.phoneModelLinkStatus==='disabled'?'；编码已停用，历史关联保留':''}`" @click="action('associate',row)">{{ archiveLinked(row)?'已关联':'待关联' }}</el-button></template></el-table-column>
+        <el-table-column v-for="f in l.fields" :key="f.key" :label="f.key==='brandId'?'手机品牌':f.label" :width="width(f)"><template #default="{row}"><div class="ledger-cell"><CollaborationCell :field="f" :value="l.value(row,f.key)" :editable="l.editable(f)" :dirty="l.dirty(row,f.key)" :brands="l.brands" :brand-name="row.brandName || row.brand" :brand-source="row.brandSource" compact expandable @preview="l.preview(row,f,$event)" @edit="l.edit(row,f,$event)" @paste="l.paste(row,f,$event)" @expand="l.openEditor(row,f)" /></div></template></el-table-column>
+        <el-table-column label="项目" width="50" align="center"><template #default="{row}"><el-button size="small" link @click="action('references',row)">{{ row.projectCount }}</el-button></template></el-table-column>
+        <el-table-column label="状态" width="90"><template #default="{row}">{{ statusNames[row.status] }}</template></el-table-column>
+        <el-table-column label="操作" fixed="right" width="48"><template #default="{row}"><ArchiveRowMenu :row="row" :dirty="l.drafts.rows.has(`item:${row.itemId}`)" @action="action"><slot name="row-actions" :row="row" :ledger="l" /></ArchiveRowMenu></template></el-table-column>
+      </el-table></FixedTableViewport>
+      <el-pagination v-model:page-size="l.size" :current-page="l.page" size="small" :page-sizes="[20,50,100]" :total="l.total" :pager-count="5" :layout="records?'prev,pager,next,total':'total,sizes,prev,pager,next,jumper'" @current-change="l.page=$event;l.load()" />
+    </section>
+    <section v-if="l.dirtyCells" class="save-dock"><strong>{{ l.dirtyCells }} 个单元格待保存 · {{ l.patches.length }} 行</strong><div class="tools"><el-button size="small" @click="l.reviewVisible=true">查看草稿 / 填写说明</el-button><el-button size="small" @click="l.discard">撤销未保存修改</el-button><el-button size="small" type="primary" data-test="save-plans" :loading="l.saving" @click="l.save">保存当前模块</el-button></div></section>
+    <el-drawer v-model="l.reviewVisible" title="当前模块草稿与冲突" size="min(760px,95vw)"><section v-for="d in l.draftRows" :key="d.key" class="draft-row"><strong>{{ d.draft.source.styleName }} / {{ d.draft.source.compatibleModels }}</strong><el-button link @click="l.explain(d.draft.source)">填写更正 / 核对说明</el-button><p>{{ d.patch.changes.length }} 个修改字段 · {{ d.draft.reason }}</p><p v-if="d.draft.result">{{ d.draft.result.message }}</p><div v-for="c in d.draft.result?.conflicts.filter(c=>l.scope.fields.includes(c.field))" :key="c.field"><p>{{ c.label }}：原值 {{ display(c.before) }} → 当前 {{ display(c.current) }}；我的修改 {{ display(c.attempted) }}</p><el-button size="small" @click="l.drafts.resolve(d.key,c.field,false)">采用当前值</el-button><el-button size="small" @click="l.drafts.resolve(d.key,c.field,true)">确认保留我的修改</el-button></div></section><template #footer><el-button @click="l.reviewVisible=false">返回</el-button><el-button :disabled="!l.dirtyCells" :loading="l.saving" type="primary" @click="l.save">保存已核对修改</el-button></template></el-drawer>
+    <el-dialog v-model="l.editorVisible" :title="`展开${l.editorField && l.editable(l.editorField)?'编辑':'查看'} · ${l.editorField?.label || ''}`" width="min(1000px,94vw)"><el-input v-model="l.editorText" type="textarea" :autosize="{minRows:8,maxRows:18}" :maxlength="l.editorField?.maxLength || undefined" :readonly="!l.editorField || !l.editable(l.editorField)" :aria-label="l.editorField?.label" /><template #footer><el-button @click="l.editorVisible=false">关闭</el-button><el-button v-if="l.editorField && l.editable(l.editorField)" type="primary" @click="l.stageEditor">暂存修改</el-button></template></el-dialog>
+    <el-drawer v-model="l.historyVisible" title="修改历史" size="min(900px,95vw)"><p>{{ l.historyItem?.styleName }} / {{ l.historyItem?.compatibleModels }}</p><el-table :data="l.historyRows" v-loading="l.historyLoading"><el-table-column label="字段" width="140"><template #default="{row}">{{ l.label(row.fieldName) }}</template></el-table-column><el-table-column label="原值 → 新值"><template #default="{row}">{{ display(row.before) }} → {{ display(row.after) }}<small>{{ row.reason }}</small></template></el-table-column><el-table-column prop="actorName" label="填写人" width="100" /><el-table-column prop="changedAt" label="时间" width="180" /></el-table><el-pagination v-model:current-page="l.historyPage" :total="l.historyTotal" :page-size="20" layout="prev,pager,next" @current-change="l.loadHistory" /></el-drawer>
+    <el-drawer v-model="l.referencesVisible" title="关联项目、文件与物流" size="min(800px,95vw)"><h4>已有项目</h4><div v-for="p in l.references?.item.projects" :key="p.projectId" class="reference-row"><span>{{ p.productCode }} / {{ p.color || '未标颜色' }}</span><el-button link @click="router.push({path:'/projects',query:{productId:p.projectId}})">工作台 / 附件</el-button></div><h4>历史物流（只读）</h4><p>不会把流程确认时间当作实际发模，也不自动同步交付日期。</p><div v-for="e in l.references?.expressRecords" :key="`${e.projectId}:${e.trackingNo}`" class="reference-row">{{ e.trackingNo }} · {{ e.shippedAt || '未填发模时间' }} · {{ e.latestStatusText }}<el-button link @click="router.push({path:'/projects',query:{productId:e.projectId}})">原记录</el-button></div></el-drawer>
+    <slot name="dialogs" :ledger="l" />
+    <CollaborationImportDialog v-if="l.options" v-model="importVisible" :kind="kind" :options="l.options" :brands="l.brands" @imported="l.workspace.changed();l.load()" />
+  </main>
+</template>
+<style scoped>
+.archive-ledger{display:flex;flex-direction:column;gap:6px;height:100%;min-height:0;overflow:hidden}.is-expanded{position:fixed;inset:0;z-index:1800;height:100dvh;padding:8px;background:#f0f4f8}
+header,.tools,.filters,.save-dock{display:flex;align-items:center;gap:6px;flex-wrap:wrap}header{flex:none;min-height:28px}h2{font-size:16px;line-height:24px;margin:0}.tools{margin-left:auto}
+.archive-panel{flex:1;min-height:0;min-width:0;container-type:inline-size;display:flex;flex-direction:column;gap:6px;padding:8px;background:white;border:1px solid #e2e8f0;border-radius:4px}.filters{flex:none}.search{max-width:360px;min-width:200px;flex:1}.filters .el-select{width:140px}.record-count{margin-left:auto;color:#728095}.el-pagination{flex:none;justify-content:flex-end;margin:0}
+.identity-link{display:block;width:100%;border:0;background:none;padding:0;text-align:left;overflow-wrap:anywhere;white-space:normal;color:#3674c1;cursor:pointer;font:inherit}.save-dock{flex:none;padding:4px 8px;min-height:36px;background:#edf4ff;border:1px solid #cfdffd;border-radius:4px}.draft-row{border-bottom:1px solid #e2e8f0;padding:10px 0}.reference-row{padding:8px 0;border-bottom:1px solid #e2e8f0}small{display:block;color:#728095}.archive-table :deep(th.el-table__cell){background:#f1f5fa}.archive-table :deep(.plan-cell:has(.brand-value)){height:auto;min-height:28px}
+</style>

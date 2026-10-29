@@ -1,0 +1,79 @@
+import {mount,flushPromises,type VueWrapper} from '@vue/test-utils'
+import {createPinia,setActivePinia} from 'pinia'
+import {createRouter,createMemoryHistory} from 'vue-router'
+import ElementPlus,{ElCheckbox,ElPagination} from 'element-plus'
+import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
+import {useUserStore} from '@/stores/user'
+import Entry from '../SampleManagementEntry.vue'
+const api=vi.hoisted(()=>({page:vi.fn(),detail:vi.fn()}));vi.mock('@/api/modules/sampleManagement',()=>({sampleIdentities:api.page,sampleIdentity:api.detail}))
+const exporting=vi.hoisted(()=>({build:vi.fn(),save:vi.fn()}))
+vi.mock('@/utils/sampleLabelExport',()=>({buildSampleLabelWorkbook:exporting.build}))
+vi.mock('@/utils/file',async importOriginal=>({...await importOriginal<typeof import('@/utils/file')>(),saveBlob:exporting.save}))
+vi.mock('../../PartnerFiles.vue',()=>({default:{name:'PartnerFiles',props:['kind','id','files','canWrite','canWriteMoney','modelValue'],template:'<div class="aggregate-files"><span v-for="file in files">{{file.name}} · {{file.version}}</span></div>'}}))
+vi.mock('../../PartnerWorkspace.vue',()=>({default:{template:'<div class="legacy-sample-workspace">原实收／批次／流转组件</div>'}}))
+vi.mock('../SampleShipments.vue',()=>({default:{props:['domain'],template:'<div>原样品寄样物流入口</div>'}}))
+vi.mock('../SampleBatchActionDialog.vue',()=>({default:{name:'SampleBatchActionDialog',props:['action','samples'],template:'<div>批量实际办理</div>'}}))
+vi.mock('../SampleColorCorrectionDialog.vue',()=>({default:{name:'SampleColorCorrectionDialog',props:['sample'],template:'<div>颜色更正办理</div>'}}))
+vi.mock('../SampleLabelPrint.vue',()=>({default:{name:'SampleLabelPrint',props:['modelValue','samples'],template:'<div v-if="modelValue" class="test-print">打印预览</div>'}}))
+const balances={onhand:5,available:5,borrowed:0,retained:0,damaged:0,inTransit:0,positions:[{name:'工程现场',onhand:5,available:5,retained:0,damaged:0}]}
+const identity=()=>({id:71,code:'SY-000071',sampleIdentityId:71,sampleCode:'SY-000071',name:'透明壳',specName:'OPPO A40 黑色',domain:'partner',version:1,sourceType:'catalog',files:[{id:401,name:'实际样品照片.png',type:'image/png',version:'V2',size:1}],balances,positions:balances.positions,batches:[{id:91,code:'SP-000091',version:1,receivedQty:3,balances:{...balances,onhand:3,available:3}},{id:92,code:'SP-000092',version:1,receivedQty:2,balances:{...balances,onhand:2,available:2}}]})
+let wrapper:VueWrapper
+beforeEach(()=>{vi.clearAllMocks();exporting.build.mockReset().mockResolvedValue(new Blob(['xlsx']));api.page.mockReset();setActivePinia(createPinia());const user=useUserStore();user.token='u1';user.profile={userId:1,userName:'工程师',canMaintainEngineeringData:true} as never;user.permissions=['partner:view','samples:write'];api.page.mockResolvedValue({content:[identity()],page:1,size:50,totalElements:1,totalPages:1});api.detail.mockResolvedValue(identity())})
+afterEach(()=>{wrapper?.unmount();document.body.innerHTML=''})
+async function start(path='/partner-samples'){const router=createRouter({history:createMemoryHistory(),routes:['/samples','/partner-samples','/model-samples','/research-samples'].map(path=>({path,component:Entry,meta:{partnerKind:'samples',sampleDomain:path==='/model-samples'?'model':path==='/partner-samples'?'partner':path==='/research-samples'?'research':undefined}})).concat([{path:'/partner-selections',component:{template:'<div/>'} as never,meta:{} as never}])});await router.push(path);wrapper=mount({template:'<router-view/>'},{global:{plugins:[router,ElementPlus],stubs:{Teleport:true}},attachTo:document.body});await flushPromises();return router}
+const exportButton=()=>wrapper.findAll('button').find(button=>button.text().startsWith('批量导出标签'))!
+describe('stable same-type sample entry',()=>{
+ it('opens research receipt in its own original project workflow without sending engineers to cooperative selections',async()=>{const router=await start('/research-samples');expect(wrapper.get('h1').text()).toBe('新品研发样品管理');expect(wrapper.findAll('button').some(b=>b.text()==='从选品目录登记收样')).toBe(false);await wrapper.findAll('button').find(b=>b.text()==='登记研发收样')!.trigger('click');await flushPromises();expect(router.currentRoute.value.path).toBe('/research-samples');expect(router.currentRoute.value.query.new).toBe('1');expect(wrapper.find('.legacy-sample-workspace').exists()).toBe(true)})
+ it('keeps model receipt focused on product and phone while preserving the shared batch ledger',async()=>{const router=await start('/model-samples');expect(wrapper.get('h1').text()).toBe('型号研发样品管理');expect(wrapper.findAll('button').some(b=>b.text()==='从选品目录登记收样')).toBe(false);await wrapper.findAll('button').find(b=>b.text()==='登记型号收样')!.trigger('click');await flushPromises();expect(router.currentRoute.value.path).toBe('/model-samples');expect(router.currentRoute.value.query.new).toBe('1');expect(wrapper.find('.legacy-sample-workspace').exists()).toBe(true)})
+ it('shows one type and its cumulative five physical pieces after two receipts instead of making two public sample codes',async()=>{await start();expect(wrapper.findAll('.identity-row:not(.identity-head)')).toHaveLength(1);expect(wrapper.text()).toContain('SY-000071');expect(wrapper.text()).toContain('在库 5');expect(wrapper.text()).not.toContain('SP-000091');expect(api.page).toHaveBeenCalledWith(expect.objectContaining({domain:'partner',size:50}))})
+ it('keeps the original SP detail, new receipt and original ledger links on the existing component',async()=>{for(const path of ['/samples?id=91','/model-samples?new=1','/partner-samples?view=batches','/samples?projectId=7','/research-samples?projectId=7','/samples?customerId=9&customerContext=9','/model-samples?modelProductId=51']){await start(path);expect(wrapper.find('.legacy-sample-workspace').exists()).toBe(true);expect(api.page).not.toHaveBeenCalled();wrapper.unmount();vi.clearAllMocks()}})
+ it('prints selected existing type codes rather than generating per-piece identities or changing stock',async()=>{await start();wrapper.getComponent(ElCheckbox).vm.$emit('change',true);await flushPromises();await wrapper.findAll('button').find(b=>b.text().startsWith('批量打印标签'))!.trigger('click');expect(wrapper.getComponent({name:'SampleLabelPrint'}).props('samples')).toEqual([expect.objectContaining({sampleIdentityId:71,sampleCode:'SY-000071'})]);expect(api.detail).not.toHaveBeenCalled()})
+ it('opens original batches for borrowing and preserves the same sample identity',async()=>{const router=await start('/partner-samples?identityId=71');await wrapper.findAll('button').find(b=>b.text()==='借出')!.trigger('click');await flushPromises();expect(wrapper.text()).toContain('选择本次办理的原收样批次');await wrapper.findAll('button').find(b=>b.text()==='办理本批')!.trigger('click');await flushPromises();expect(router.currentRoute.value.query.id).toBe('91');expect(router.currentRoute.value.query.action).toBe('loan');expect(wrapper.find('.legacy-sample-workspace').exists()).toBe(true)})
+ it('does not expose physical write actions to a reader',async()=>{useUserStore().permissions=['partner:view'];await start('/partner-samples?identityId=71');expect(wrapper.findAll('button').map(b=>b.text())).not.toContain('借出');expect(wrapper.text()).toContain('打印／补打二维码标签')})
+ it('discards a pending old-account inventory projection after logout',async()=>{let finish!:(v:unknown)=>void;api.page.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}));await start();useUserStore().token='';await flushPromises();finish({content:[identity()],totalElements:1});await flushPromises();expect(wrapper.text()).not.toContain('SY-000071')})
+ it('shows authorized aggregate photos and file versions directly while directing uploads to a real original receipt batch',async()=>{const router=await start('/partner-samples?identityId=71');const files=wrapper.getComponent({name:'PartnerFiles'});expect(files.props()).toMatchObject({kind:'sample-identities',canWrite:false,canWriteMoney:false,files:[expect.objectContaining({id:401,version:'V2'})]});expect(wrapper.text()).toContain('实际样品照片.png · V2');await wrapper.findAll('button').find(b=>b.text()==='上传到原收样批次')!.trigger('click');await flushPromises();expect(wrapper.text()).toContain('选择图片附件归属');await wrapper.findAll('button').find(b=>b.text()==='进入本批附件')!.trigger('click');await flushPromises();expect(router.currentRoute.value.query.id).toBe('91');expect(router.currentRoute.value.query.action).toBeUndefined()})
+
+ it('selects every visible row, shows partial selection and can clear the entire page',async()=>{api.page.mockResolvedValue({content:[identity(),{...identity(),id:72,sampleIdentityId:72,sampleCode:'SY-000072'}],page:1,size:50,totalElements:2,totalPages:1});await start();const all=()=>wrapper.findAllComponents(ElCheckbox).find(c=>c.attributes('aria-label')==='全选本页样品')!;all().vm.$emit('change',true);await flushPromises();expect(wrapper.text()).toContain('清空已选 2 项');const row=wrapper.findAllComponents(ElCheckbox).find(c=>c.attributes('aria-label')==='选择SY-000071')!;row.vm.$emit('change',false);await flushPromises();expect(all().props('indeterminate')).toBe(true);all().vm.$emit('change',false);await flushPromises();expect(wrapper.findAll('button').find(b=>b.text().startsWith('批量打印标签'))!.attributes('disabled')).toBeDefined()})
+ it('carries all selected real identities into a single Mexico shipment rather than just one selected row',async()=>{api.page.mockResolvedValue({content:[identity(),{...identity(),id:72,sampleIdentityId:72,sampleCode:'SY-000072'}],totalElements:2});const router=await start();wrapper.getComponent(ElCheckbox).vm.$emit('change',true);await flushPromises();await wrapper.findAll('button').find(b=>b.text()==='批量发往墨西哥')!.trigger('click');await flushPromises();expect(router.currentRoute.value.query).toMatchObject({view:'shipments',newShipment:'mexico_outbound',sampleIdentityIds:'71,72'})})
+ it('starts bulk loan or return with the same selected identities and exposes the colour correction on a catalogue type',async()=>{await start();wrapper.getComponent(ElCheckbox).vm.$emit('change',true);await flushPromises();await wrapper.findAll('button').find(b=>b.text()==='批量借出')!.trigger('click');expect(wrapper.getComponent({name:'SampleBatchActionDialog'}).props()).toMatchObject({action:'loan',samples:[expect.objectContaining({sampleIdentityId:71})]});wrapper.unmount();const router=await start('/partner-samples?identityId=71');await wrapper.findAll('button').find(b=>b.text()==='更正颜色')!.trigger('click');expect(wrapper.getComponent({name:'SampleColorCorrectionDialog'}).props('sample').sampleIdentityId).toBe(71);expect(router.currentRoute.value.query.identityId).toBe('71')})
+ it('exports only selected existing sample labels and keeps the print action available',async()=>{
+  await start();expect(exportButton().attributes('disabled')).toBeDefined()
+  wrapper.getComponent(ElCheckbox).vm.$emit('change',true);await flushPromises();await exportButton().trigger('click');await flushPromises()
+  expect(exporting.build).toHaveBeenCalledWith([expect.objectContaining({sampleIdentityId:71,sampleCode:'SY-000071',name:'透明壳',specName:'OPPO A40 黑色'})],window.location.origin)
+  expect(exporting.save).toHaveBeenCalledWith(expect.any(Blob),expect.stringMatching(/^样品标签-\d{8}\.xlsx$/))
+  expect(wrapper.findAll('button').some(button=>button.text().startsWith('批量打印标签'))).toBe(true);expect(api.detail).not.toHaveBeenCalled()
+ })
+ it('retains selections across pages and exports each selected real identity once',async()=>{
+  const second={...identity(),id:72,sampleIdentityId:72,sampleCode:'SY-000072',name:'护盾手机壳'}
+  api.page.mockResolvedValueOnce({content:[identity()],page:1,size:50,totalElements:51,totalPages:2}).mockResolvedValueOnce({content:[second],page:2,size:50,totalElements:51,totalPages:2})
+  await start();wrapper.getComponent(ElCheckbox).vm.$emit('change',true);await flushPromises()
+  wrapper.getComponent(ElPagination).vm.$emit('update:currentPage',2);wrapper.getComponent(ElPagination).vm.$emit('current-change',2);await flushPromises()
+  wrapper.getComponent(ElCheckbox).vm.$emit('change',true);await flushPromises();await exportButton().trigger('click');await flushPromises()
+  expect(exporting.build.mock.calls[0]![0].map((r:{sampleIdentityId:number})=>r.sampleIdentityId)).toEqual([71,72]);expect(exporting.save).toHaveBeenCalledTimes(1)
+ })
+ it('shows export failure and retries without losing checked samples',async()=>{
+  exporting.build.mockRejectedValueOnce(new Error('文件生成失败'));await start();wrapper.getComponent(ElCheckbox).vm.$emit('change',true);await flushPromises();await exportButton().trigger('click');await flushPromises()
+  expect(wrapper.text()).toContain('文件生成失败');expect(wrapper.getComponent(ElCheckbox).props('modelValue')).toBe(true);expect(exporting.save).not.toHaveBeenCalled()
+  await wrapper.findAll('button').find(button=>button.text()==='重试导出')!.trigger('click');await flushPromises();expect(exporting.build).toHaveBeenCalledTimes(2);expect(exporting.save).toHaveBeenCalledTimes(1)
+ })
+ it('prevents repeated export clicks while generating one snapshot',async()=>{
+  let finish!:(blob:Blob)=>void;exporting.build.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}))
+  await start();wrapper.getComponent(ElCheckbox).vm.$emit('change',true);await flushPromises();await exportButton().trigger('click');await flushPromises()
+  expect(exportButton().attributes('disabled')).toBeDefined();(exportButton().element as HTMLButtonElement).click();await flushPromises();expect(exporting.build).toHaveBeenCalledTimes(1)
+  finish(new Blob(['xlsx']));await flushPromises();expect(exporting.save).toHaveBeenCalledTimes(1);expect(exportButton().attributes('disabled')).toBeUndefined()
+ })
+ it('does not download a pending old-account export after logout',async()=>{
+  let finish!:(blob:Blob)=>void;exporting.build.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}));await start();wrapper.getComponent(ElCheckbox).vm.$emit('change',true);await flushPromises();await exportButton().trigger('click');await flushPromises();useUserStore().token='';finish(new Blob(['old']));await flushPromises();expect(exporting.save).not.toHaveBeenCalled();expect(wrapper.text()).not.toContain('SY-000071')
+ })
+ it('discards a pending export if the user changes or the page is closed',async()=>{
+  for(const action of ['actor','unmount']){
+   let finish!:(blob:Blob)=>void;exporting.build.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}));await start();wrapper.getComponent(ElCheckbox).vm.$emit('change',true);await flushPromises();await exportButton().trigger('click');await flushPromises()
+   if(action==='actor')useUserStore().profile={userId:2,userName:'另一工程师'} as never;else wrapper.unmount()
+   finish(new Blob(['old']));await flushPromises();expect(exporting.save).not.toHaveBeenCalled();if(action==='actor')wrapper.unmount()
+  }
+ })
+ it('lets authorized readers export the same labels they can already view and print',async()=>{
+  useUserStore().permissions=['partner:view'];await start();wrapper.getComponent(ElCheckbox).vm.$emit('change',true);await flushPromises();await exportButton().trigger('click');await flushPromises();expect(exporting.save).toHaveBeenCalledTimes(1)
+ })
+
+})
