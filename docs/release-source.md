@@ -1,3 +1,21 @@
+# Attachment preview and original download — 2026-10-30
+
+Frontend release `20261030-office-preview-3c282bcce52b-r1`.
+
+- Use the existing attachment metadata API before requesting preview bytes. Unsupported Office files show a clear original-download action; image, PDF and text preview routes remain available.
+- The supplier-original download explicitly uses the existing download endpoint. A failed download remains retryable; permission errors do not bypass authorization.
+- Reuse the authorized blob queue, attachment ownership and download service. No new renderer, dependency or attachment store is introduced.
+
+Validation: 52 affected frontend cases, type check and complete frontend build. Local real-browser checks covered both original-download entries, byte equality, image/gallery switching and a 900px viewport with sidebar expanded. PDF/text component route tests pass; native PDF/text rendering is not claimed by the headless suite.
+
+Seven source files change: implementation +34/-6 lines, tests +80/-6 lines. Ten new test definitions execute eleven cases; 41 prior cases remain. The generic `fileBlob` preview default remains for existing preview callers. An operations-page Office fallback identified only by source review remains outside this verified fix.
+
+Frozen source: `4531a124da72a5ebf584a59daaaab3b2d9c04f3c728455d250295aaac874db52` (1,371 inputs).
+Frontend index SHA-256: `3c282bcce52bce97fd789646aa1ec5b1bbdd4d49ded5dab01d6e516bba371e35`.
+Backend remains `2a6ab7be2557870a5003b4f21ed22a273ec711fda48f81e8e15932bde44f0608`; all 111 migration resources and 95 dependencies remain unchanged. The release changes only the existing web image, retains old static resources, imports no business data and creates no backups. Credentials, supplier originals, media and local QA records are excluded from public source.
+
+---
+
 # Phone-code workflow release — 2026-10-30
 
 Release `20261030-phone-one-save-2a6ab7be2557-r1`.

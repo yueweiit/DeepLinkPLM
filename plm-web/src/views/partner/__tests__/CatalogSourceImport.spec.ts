@@ -28,7 +28,21 @@ describe('supplier source entry reuses the existing import workflow', () => {
     api.catalogSourceDetail.mockResolvedValue({...source,files:[file]});api.fileBlob.mockRejectedValueOnce(new Error('网络暂时中断')).mockResolvedValue(blob)
     await start();await click('继续上传／导入');await click('真实完整原件.xlsx · V1')
     const visible=wrapper.get('.existing-file-workflow');expect(visible.get('.source-download-error').text()).toContain('原件下载失败');expect(visible.get('.source-download-error').text()).toContain(file.name);expect(visible.get('.source-download-error').text()).toContain('网络暂时中断');expect(api.saveBlob).not.toHaveBeenCalled()
-    await visible.get('[aria-label="重试下载真实完整原件.xlsx"]').trigger('click');await flushPromises();expect(api.fileBlob.mock.calls).toEqual([[901],[901]]);expect(api.saveBlob).toHaveBeenCalledWith(blob,file.name);expect(wrapper.find('.source-download-error').exists()).toBe(false);expect(visible.text()).toContain(file.name)
+    await visible.get('[aria-label="重试下载真实完整原件.xlsx"]').trigger('click');await flushPromises();expect(api.fileBlob.mock.calls).toEqual([[901,false],[901,false]]);expect(api.saveBlob).toHaveBeenCalledWith(blob,file.name);expect(wrapper.find('.source-download-error').exists()).toBe(false);expect(visible.text()).toContain(file.name)
+  })
+  it('downloads an authorised readonly XLSX original without using the unsupported preview route or changing business data',async()=>{
+    const file={id:901,name:'只读来源原件.xlsx',version:'V1',type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:272099},blob=new Blob(['original workbook'],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})
+    api.catalogSources.mockResolvedValue(page([{...source,canImport:false,readOnly:true}]));api.catalogSourceDetail.mockResolvedValue({...source,canImport:false,readOnly:true,files:[file]})
+    api.fileBlob.mockImplementation(async(_id:number,preview=true)=>{if(preview)throw new Error('XLSX不支持在线预览');return blob})
+    await start({canWrite:false});await click('查看历史导入');await click('只读来源原件.xlsx · V1')
+    expect(api.fileBlob).toHaveBeenCalledWith(901,false);expect(api.saveBlob).toHaveBeenCalledWith(blob,file.name);expect(wrapper.find('.source-download-error').exists()).toBe(false)
+    expect(api.createCatalogSource).not.toHaveBeenCalled();expect(api.changeCatalogSourcePurpose).not.toHaveBeenCalled();expect(wrapper.getComponent({name:'SelectionFileTasks'}).props('canWrite')).toBe(false)
+  })
+  it('does not save a late original download after its source workspace closes',async()=>{
+    let resolve!:(blob:Blob)=>void;const file={id:901,name:'来源原件.xlsx',version:'V1',type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:100}
+    api.catalogSourceDetail.mockResolvedValue({...source,files:[file]});api.fileBlob.mockReturnValueOnce(new Promise<Blob>(yes=>{resolve=yes}))
+    await start();await click('继续上传／导入');await click('来源原件.xlsx · V1');expect(api.fileBlob).toHaveBeenCalledWith(901,false)
+    await wrapper.setProps({modelValue:false});resolve(new Blob(['original workbook']));await flushPromises();expect(api.saveBlob).not.toHaveBeenCalled();expect(wrapper.find('.source-download-error').exists()).toBe(false)
   })
   it('offers every authorised existing supplier, including those hidden from the nonempty directory, without creating one', async () => {
     await start({ supplierCode: '' }); expect(wrapper.getComponent(ElSelect).findAllComponents({ name: 'ElOption' }).map(option => option.props('label'))).toEqual(['已有供应商', '尚无款式的供应商'])

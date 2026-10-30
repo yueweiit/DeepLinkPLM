@@ -1,12 +1,15 @@
 import {flushPromises,mount,type VueWrapper} from '@vue/test-utils'
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
 import {defineComponent} from 'vue'
+import {createPinia,setActivePinia} from 'pinia'
+import {useUserStore} from '@/stores/user'
 import PartnerPhoto from '../PartnerPhoto.vue'
 import PartnerFilePreview from '../PartnerFilePreview.vue'
 import SelectionImportPhoto from '../selection/SelectionImportPhoto.vue'
 import {authorizedBlobs} from '@/utils/authorizedBlobQueue'
-const api=vi.hoisted(()=>({fileBlob:vi.fn(),selectionImportImage:vi.fn(),catalogImportImage:vi.fn()}))
-vi.mock('@/api/modules/partner',()=>({fileBlob:api.fileBlob}))
+const api=vi.hoisted(()=>({fileBlob:vi.fn(),saveBlob:vi.fn(),metadata:vi.fn(),selectionImportImage:vi.fn(),catalogImportImage:vi.fn()}))
+vi.mock('@/api/modules/partner',()=>({fileBlob:api.fileBlob,saveBlob:api.saveBlob}))
+vi.mock('@/api/modules/attachment',()=>({getAttachmentPreviewMetadata:api.metadata}))
 vi.mock('@/api/modules/partnerSelections',()=>({selectionImportImage:api.selectionImportImage,catalogSourceFileClient:{selectionImportImage:api.catalogImportImage}}))
 const photo=()=>new Blob(['image'],{type:'image/jpeg'})
 function deferred(){let resolve!:(blob:Blob)=>void;const promise=new Promise<Blob>(yes=>{resolve=yes});return {promise,resolve}}
@@ -14,7 +17,7 @@ const wrappers:VueWrapper[]=[]
 const originalCreate=Object.getOwnPropertyDescriptor(URL,'createObjectURL'),originalRevoke=Object.getOwnPropertyDescriptor(URL,'revokeObjectURL')
 let sequence=0
 const create=vi.fn(()=>`blob:photo-${++sequence}`),revoke=vi.fn()
-beforeEach(()=>{authorizedBlobs.clear();vi.clearAllMocks();localStorage.clear();sequence=0;Object.defineProperty(URL,'createObjectURL',{configurable:true,value:create});Object.defineProperty(URL,'revokeObjectURL',{configurable:true,value:revoke});api.fileBlob.mockResolvedValue(photo());api.selectionImportImage.mockResolvedValue(photo())})
+beforeEach(()=>{authorizedBlobs.clear();vi.clearAllMocks();localStorage.clear();setActivePinia(createPinia());useUserStore().token='qa-preview';localStorage.setItem('plm_token','qa-preview');api.metadata.mockReset().mockImplementation((attachmentId:number)=>Promise.resolve({attachmentId,previewable:true,previewType:'image',previewStatus:'ready'}));sequence=0;Object.defineProperty(URL,'createObjectURL',{configurable:true,value:create});Object.defineProperty(URL,'revokeObjectURL',{configurable:true,value:revoke});api.fileBlob.mockResolvedValue(photo());api.selectionImportImage.mockResolvedValue(photo())})
 afterEach(async()=>{for(const wrapper of wrappers.splice(0))if(wrapper.exists())wrapper.unmount();authorizedBlobs.clear();await flushPromises();if(originalCreate)Object.defineProperty(URL,'createObjectURL',originalCreate);if(originalRevoke)Object.defineProperty(URL,'revokeObjectURL',originalRevoke)})
 function startPhoto(id=7,allowRetry=true){const wrapper=mount(PartnerPhoto,{props:{id,allowRetry}});wrappers.push(wrapper);return wrapper}
 

@@ -97,7 +97,7 @@ async function download(file: PartnerFile) {
   if(downloading.value)return
   const serial=generation,sourceId=source.value?.id
   downloading.value=true;downloadError.value='';failedDownload.value=undefined
-  try{const blob=await fileBlob(file.id);if(serial===generation&&sourceId===source.value?.id&&props.modelValue)saveBlob(blob,file.name)}
+  try{const blob=await fileBlob(file.id,false);if(serial===generation&&sourceId===source.value?.id&&props.modelValue)saveBlob(blob,file.name)}
   catch(cause){if(serial===generation&&sourceId===source.value?.id&&props.modelValue){downloadError.value=partnerError(cause);failedDownload.value=file}}
   finally{downloading.value=false}
 }

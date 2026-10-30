@@ -149,8 +149,8 @@ export async function getAttachmentDetail(attachmentId: number): Promise<Attachm
 }
 
 /** GET /api/v1/attachments/{attachmentId}/preview/metadata */
-export async function getAttachmentPreviewMetadata(attachmentId: number): Promise<AttachmentPreviewVO> {
-  const response = await request.get(`/attachments/${attachmentId}/preview/metadata`)
+export async function getAttachmentPreviewMetadata(attachmentId: number, options: { signal?: AbortSignal } = {}): Promise<AttachmentPreviewVO> {
+  const response = await request.get(`/attachments/${attachmentId}/preview/metadata`, options)
   return unwrapResponse<AttachmentPreviewVO>(response)
 }
 
