@@ -11,6 +11,7 @@ public class CodeItemVO {
     private String codeType;
     private String codeValue;
     private String codeName;
+    private String factoryName;
     private String codeNameZh;
     private String status;
     private String productionStatus;

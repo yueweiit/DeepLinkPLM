@@ -37,7 +37,7 @@ public class PhoneModelReferenceRepository {
         """;
     private static final String PHONE = """
         select m.id,m.id as "phoneModelId",m.brand_id as "brandId",b.name as "brandName",b.status as "brandStatus",b.aliases as "brandAliases",
-          %s as "searchTexts",m.model_name as "modelName",coalesce(to_jsonb(m)->>'mold_plan_status','planned') as "moldPlanStatus",
+          b.prefixes::text as "brandPrefixes",%s as "searchTexts",m.model_name as "modelName",coalesce(to_jsonb(m)->>'mold_plan_status','planned') as "moldPlanStatus",
           to_jsonb(m)->>'mold_plan_reason' as "moldPlanReason",(to_jsonb(m)->>'mold_plan_updated_at')::timestamptz as "moldPlanUpdatedAt",
           to_jsonb(m)->>'mold_plan_updated_by' as "moldPlanUpdatedBy",m.aliases,m.code_item_id as "codeItemId",c.code_value as "phoneModelCode",
           c.code_value as "codeValue",c.code_name as "originalCodeName",c.status as "codeStatus",
@@ -62,6 +62,7 @@ public class PhoneModelReferenceRepository {
         var args = new ArrayList<Object>(); String where = filters(query,"m",args);
         if (query.getBrandId()!=null) { where += " and m.brand_id=?"; args.add(query.getBrandId()); }
         if (query.getCodeItemId()!=null) { where += " and m.code_item_id=?"; args.add(query.getCodeItemId()); }
+        if (query.isUnassignedCode()) where += " and m.code_item_id is null";
         if (text(query.getKeyword())) {
             if(query.isSelectionSearch()) {
                 // Selection search is a read projection; fuzzy tokens never establish identity or fit.
@@ -118,7 +119,7 @@ public class PhoneModelReferenceRepository {
             var row=new LinkedHashMap<String,Object>();var metadata=rs.getMetaData();
             for(int i=1;i<=metadata.getColumnCount();i++) {
                 Object value=rs.getObject(i);
-                if(metadata.getColumnLabel(i).equals("prefixes"))try {value=new com.fasterxml.jackson.databind.ObjectMapper().readValue(value.toString(),List.class);}catch(Exception e){throw new SQLException("品牌系列规则解析失败",e);}
+                if(Set.of("prefixes","brandPrefixes").contains(metadata.getColumnLabel(i)))try {value=new com.fasterxml.jackson.databind.ObjectMapper().readValue(value.toString(),List.class);}catch(Exception e){throw new SQLException("品牌系列规则解析失败",e);}
                 if(value instanceof Array array) { value=Arrays.asList((String[])array.getArray());array.free(); }
                 row.put(metadata.getColumnLabel(i),value);
             }
@@ -126,7 +127,10 @@ public class PhoneModelReferenceRepository {
                 row.put("productionStatus",com.yuewei.plm.module.productionmetadata.ProductionStatus.display(Objects.toString(row.remove("groupProductionStatus"),null)));
                 row.put("codeLinkStatus",row.get("codeItemId")==null?"unassigned":Objects.equals(row.get("codeDeletedFlag"),1)?"missing":!"enabled".equals(row.get("codeStatus"))?"disabled":"linked");
                 String brand=Objects.toString(row.get("brandName"),""),model=Objects.toString(row.get("modelName"),"");
-                row.put("displayName",model.toLowerCase(Locale.ROOT).startsWith(brand.toLowerCase(Locale.ROOT)+" ")?model:brand+" "+model);
+                var aliases=(List<String>)row.get("brandAliases");
+                var prefixes=((List<Map<String,String>>)row.remove("brandPrefixes")).stream().map(p->new PhoneDisplayNames.Prefix(p.get("prefix"),p.get("replacement"))).toList();
+                row.put("displayName",PhoneDisplayNames.fullName(model,brand,aliases,prefixes));
+                row.put("factoryName",PhoneDisplayNames.factoryName(Objects.toString(row.get("originalCodeName"),model),brand,aliases,prefixes));
             }
             return row;
         },args);

@@ -148,9 +148,20 @@ public class PartnerCatalogService {
     @Transactional(readOnly=true)
     public Map<String,Object> styleIdentities(Map<String,String> query){
         view();String supplier=required(query.get("supplierCode"),"供应商");var profile=profiles.requireSupplier(supplier);
-        String from=" from plm_partner_catalog_style s join lateral (select coalesce(q.data->>'name',a.data->>'name','') as name from plm_partner_catalog_style_source x join plm_partner_record r on r.record_id=x.record_id left join plm_partner_quote_line q on x.source_kind='quote' and q.record_id=x.record_id and q.line_id=x.row_id left join plm_partner_selection_row a on x.source_kind='selection' and a.record_id=x.record_id and a.row_id=x.row_id where x.style_id=s.style_id and r.deleted_flag=0 and ("+store.access.visibleSqlClause("partner","r.record_id")+") order by x.created_at desc,x.record_id desc limit 1) source on true where s.supplier_code=?";
+        String from="""
+            from plm_partner_catalog_style s join lateral (
+              select coalesce(q.data->'catalogCurrent'->>'name',a.data->'catalogCurrent'->>'name',q.data->>'name',a.data->>'name','') as name
+              from plm_partner_catalog_style_source x join plm_partner_record r on r.record_id=x.record_id
+              left join plm_partner_quote_line q on x.source_kind='quote' and q.record_id=x.record_id and q.line_id=x.row_id
+              left join plm_partner_selection_row a on x.source_kind='selection' and a.record_id=x.record_id and a.row_id=x.row_id
+              where x.style_id=s.style_id and r.deleted_flag=0 and (%s)
+              order by case when exists(select 1 from (%s) current_source where current_source.source_kind=x.source_kind
+                  and current_source.record_id=x.record_id and current_source.row_id=x.row_id::text and current_source.supplier_code=s.supplier_code) then 0 else 1 end,
+                coalesce(q.updated_at,a.updated_at,r.updated_at,x.created_at) desc,x.created_at desc,x.record_id desc,x.row_id desc limit 1
+            ) source on true where s.supplier_code=?
+            """.formatted(store.access.visibleSqlClause("partner","r.record_id"),new PartnerCatalogStyles(store).sourceSql(false));
         var args=new ArrayList<Object>(List.of(supplier));String keyword=text(query.get("keyword"));if(!keyword.isEmpty()){from+=" and (s.code ilike ? or source.name ilike ?)";args.add("%"+keyword+"%");args.add("%"+keyword+"%");}long page=page(query),size=size(query),total=store.jdbc.queryForObject("select count(*)"+from,Long.class,args.toArray());args.add(size);args.add(offset(page,size));
-        var rows=store.jdbc.queryForList("select s.style_id as id,s.code,source.name"+from+" order by s.style_id desc limit ? offset ?",args.toArray());for(var row:rows){row.put("supplierCode",supplier);row.put("supplierName",profile.get("supplierName"));String shortCode=text(profile.get("shortCode"));row.put("label",shortCode.isEmpty()?row.get("code"):shortCode+"-"+row.get("code"));}return pageResult(rows,total,page,size);
+        var rows=store.jdbc.queryForList("select s.style_id as id,s.code,source.name "+from+" order by s.style_id desc limit ? offset ?",args.toArray());for(var row:rows){row.put("supplierCode",supplier);row.put("supplierName",profile.get("supplierName"));String shortCode=text(profile.get("shortCode"));row.put("label",shortCode.isEmpty()?row.get("code"):shortCode+"-"+row.get("code"));}return pageResult(rows,total,page,size);
     }
     @Transactional(readOnly=true)
     public Map<String,Object> identityPreview(Map<String,Object> input){permissions.engineer();return identityPlan(input,false);}

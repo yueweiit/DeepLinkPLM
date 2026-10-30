@@ -66,6 +66,7 @@ public class CodeItemService {
     public CodeItemVO create(CodeItemSaveDTO dto) {
         lifecycle.maintenance();
         String type = normalizeType(dto.getCodeType());
+        if(dto.getPhoneRegistration()!=null&&!"phone_model".equals(type))throw validation("手机关联仅用于新建手机编码");
         String value = required(dto.getCodeValue(), "编码值");
         String name = required(dto.getCodeName(), "编码名称");
         if("phone_model".equals(type)&&phoneReferences!=null)phoneReferences.lockCodeSelectionMaintenance();
@@ -84,6 +85,7 @@ public class CodeItemService {
         fillCreate(item);
         try { repository.insert(item); }
         catch (DuplicateKeyException exception) { throw duplicate(type); }
+        if(dto.getPhoneRegistration()!=null)phoneReferences.registerNewCodePhone(item.getCodeItemId(),name,dto.getPhoneRegistration(),currentRequest());
         syncPhone(item);
         lifecycle.saved(item.getCodeItemId(),null,toVO(item),"新增基础编码");
         return toVO(item);
@@ -92,6 +94,7 @@ public class CodeItemService {
     @Transactional
     public CodeItemVO update(Long id, CodeItemSaveDTO dto) {
         lifecycle.maintenance();
+        if(dto.getPhoneRegistration()!=null)throw validation("已有型号关联请在手机资料中维护，不能重新分配原编码");
         jdbc.queryForList("select code_item_id from plm_code_item where code_item_id=? for update",id);
         CodeItem item = requireItem(id);
         var before=toVO(item);
@@ -196,9 +199,11 @@ public class CodeItemService {
     }
     private void syncPhone(CodeItem item) {
         if(phoneReferences==null||!"phone_model".equals(item.getCodeType()))return;
+        phoneReferences.syncCodeSelectionAfterMaintenance(item.getCodeItemId(),currentRequest());
+    }
+    private jakarta.servlet.http.HttpServletRequest currentRequest() {
         var attributes=org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
-        var request=attributes instanceof org.springframework.web.context.request.ServletRequestAttributes servlet?servlet.getRequest():null;
-        phoneReferences.syncCodeSelectionAfterMaintenance(item.getCodeItemId(),request);
+        return attributes instanceof org.springframework.web.context.request.ServletRequestAttributes servlet?servlet.getRequest():null;
     }
 
     private String optional(String value) {

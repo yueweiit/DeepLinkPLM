@@ -1,3 +1,22 @@
+# Phone-code workflow release — 2026-10-30
+
+Release `20261030-phone-one-save-2a6ab7be2557-r1`.
+
+- Register a phone code, brand and new/existing member in one transaction. Reuse existing member IDs, required audit and code rules; keep leading zeros and explicit factory names.
+- Prefer a unique single-model identity among exact supplier-model candidates. Preserve explicit historical IDs and unresolved ambiguity.
+- Show current, authorized supplier-catalog style names before frozen selection names; reads do not rewrite history.
+- Reuse the phone selector; show business conflict messages inline and fold technical source notes.
+
+Validation: 147 affected backend cases (62 real local PostgreSQL cases), 75 frontend cases, type check and complete builds. Production browser acceptance is documented separately after normal user login; no production test records are created.
+
+Private source manifest: `ab227419088bde9274363e4113f7e22ffee5ebf87ee8921d57a31de22162529a` (1,371 build inputs).
+Backend SHA-256: `2a6ab7be2557870a5003b4f21ed22a273ec711fda48f81e8e15932bde44f0608`.
+Frontend index SHA-256: `d9eb6301079124a473e39ad8812433b6c5c678c8263e605d0d269e8760385858`.
+
+All 111 migration resources and 95 runtime dependencies remain byte-identical to the prior deployed program. This release imports no business data, adds no schema changes, changes no runtime settings and creates no backups. Existing files, identities and relationships are preserved. The public repository retains sanitized configuration and existing private-resource restoration documentation; credentials, supplier originals, media, database exports and production-only fixtures are excluded.
+
+---
+
 # Public source release
 
 This repository contains the application source for release `20261030-sales-model-age-628cfb315589-r1` (30 October 2026, Asia/Shanghai). The program was activated at 18:05:01 Asia/Shanghai and passed normal authenticated production browser checks.

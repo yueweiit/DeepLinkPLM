@@ -22,6 +22,12 @@ const chosen=()=>w!.get('.selected-heading').text()
 const confirm=()=>button(w!.findAllComponents(ElButton).find(v=>v.text().startsWith('完成选择'))!.text())
 
 describe('PhoneModelMultiSelect',()=>{
+  it('queries only pending identities when assigning a code without broadening normal business pickers',async()=>{
+    await start({unassignedCode:true,brandId:1,multiple:false});await open()
+    expect(api.getPhoneModels).toHaveBeenLastCalledWith({page:1,size:50,keyword:'',selectionSearch:true,brandId:1,unassignedCode:true})
+    await w!.setProps({unassignedCode:false});await button('取消');await open()
+    expect(api.getPhoneModels).toHaveBeenLastCalledWith({page:1,size:50,keyword:'',selectionSearch:true,brandId:1})
+  })
   it('starts as one compact trigger, hydrates only the preview and collapses additional saved IDs',async()=>{
     await start({modelValue:[a.phoneModelId,b.phoneModelId,c.phoneModelId]})
     expect(w!.find('.phone-model-panel').exists()).toBe(false);expect(w!.findAll('.phone-model-trigger .el-tag')).toHaveLength(2)

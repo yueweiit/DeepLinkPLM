@@ -18,11 +18,21 @@ public class PhoneCodeMetadataRepository {
         if(ids.isEmpty())return;
         String marks=String.join(",",Collections.nCopies(ids.size(),"?"));
         Map<Long,List<Map<String,Object>>> brands=new HashMap<>();
-        jdbc.query("select e.code_item_id,jsonb_agg(jsonb_build_object('brandId',b.id,'name',b.name,'status',b.status,'memberConfirmed',exists(select 1 from plm_phone_model_member m where m.code_item_id=e.code_item_id and m.brand_id=b.id)) order by b.name,b.id)::text data from plm_phone_code_brand_effective e join plm_phone_brand b on b.id=e.brand_id where e.code_item_id in ("+marks+") group by e.code_item_id",rs->{
+        jdbc.query("select e.code_item_id,jsonb_agg(jsonb_build_object('brandId',b.id,'name',b.name,'status',b.status,'aliases',b.aliases,'prefixes',b.prefixes,'memberConfirmed',exists(select 1 from plm_phone_model_member m where m.code_item_id=e.code_item_id and m.brand_id=b.id)) order by b.name,b.id)::text data from plm_phone_code_brand_effective e join plm_phone_brand b on b.id=e.brand_id where e.code_item_id in ("+marks+") group by e.code_item_id",rs->{
             try{brands.put(rs.getLong("code_item_id"),json.readValue(rs.getString("data"),new TypeReference<>(){}));}
             catch(Exception failure){throw new IllegalStateException("编码组品牌解析失败",failure);}
         },ids.toArray());
-        for(var c:codes)if("phone_model".equals(c.getCodeType()))c.setBrands(brands.getOrDefault(c.getCodeItemId(),List.of()));
+        for(var c:codes)if("phone_model".equals(c.getCodeType())) {
+            var links=brands.getOrDefault(c.getCodeItemId(),List.of());
+            c.setFactoryName(c.getCodeName());
+            if(links.size()==1) {
+                var b=links.get(0);
+                c.setFactoryName(com.yuewei.plm.module.moldreference.PhoneDisplayNames.factoryName(c.getCodeName(),b.get("name").toString(),
+                    json.convertValue(b.get("aliases"),new TypeReference<List<String>>(){}),
+                    json.convertValue(b.get("prefixes"),new TypeReference<List<com.yuewei.plm.module.moldreference.PhoneDisplayNames.Prefix>>(){})));
+            }
+            c.setBrands(links.stream().map(b->{var link=new LinkedHashMap<>(b);link.remove("aliases");link.remove("prefixes");return (Map<String,Object>)link;}).toList());
+        }
     }
     public List<Long> brandIds(long code,boolean membersOnly) {
         return jdbc.queryForList("select distinct brand_id from "+(membersOnly?"plm_phone_model_member":"plm_phone_code_brand_effective")+" where code_item_id=? order by brand_id",Long.class,code);

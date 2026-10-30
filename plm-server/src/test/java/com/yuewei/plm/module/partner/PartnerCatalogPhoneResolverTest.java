@@ -61,6 +61,26 @@ class PartnerCatalogPhoneResolverTest {
         assertTrue(row.get("phoneMatchIssues").toString().contains("多个独立资料"));
     }
 
+    @Test void exactSupplierModelPrefersItsSingleModelCodeWithoutChangingExplicitHistoricChoices() {
+        var group=phone(1,"Samsung Galaxy S25 Plus 5G","1087",20L);
+        group.put("originalCodeName","SM Galaxy S24 Plus/S25 Plus 5G");phones.add(group);
+        var single=phone(2,"Samsung Galaxy S25 Plus 5G","1110",20L);
+        single.put("originalCodeName","SM Galaxy S25 Plus 5G");phones.add(single);
+        assertEquals(List.of(2L),ids(resolve("Samsung Galaxy S25 Plus 5G")));
+        assertEquals(List.of(1L),ids(resolver.resolveAll(List.of(values("phoneModelIds",List.of(1L),"modelText","Samsung Galaxy S25 Plus 5G"))).get(0)));
+        assertEquals("1087",group.get("phoneModelCode"));assertEquals("1110",single.get("phoneModelCode"));
+    }
+
+    @Test void singleModelPreferenceDoesNotChooseBetweenMultipleSinglesAndKeepsAUniqueGroupFallback() {
+        var group=phone(1,"Samsung Galaxy S25 Plus 5G","1087",20L);
+        group.put("originalCodeName","SM Galaxy S24 Plus/S25 Plus 5G");phones.add(group);
+        assertEquals(List.of(1L),ids(resolve("Samsung Galaxy S25 Plus 5G")));
+        phones.add(phone(2,"Samsung Galaxy S25 Plus 5G","1110",20L));
+        phones.add(phone(3,"Samsung Galaxy S25 Plus 5G","1111",20L));
+        var row=resolve("Samsung Galaxy S25 Plus 5G");
+        assertEquals(List.of(),ids(row));assertTrue(row.get("phoneMatchIssues").toString().contains("多个独立资料"));
+    }
+
     @Test void explicitHistoricIdentitiesRemainAuthoritativeAndDisabledOnesAreNotReplaced() {
         var disabled=phone(1,"iPhone 11","0185",10L); disabled.put("status","disabled"); phones.add(disabled);
         phones.add(phone(2,"iPhone 18 Pro Max","1297",10L));
@@ -119,6 +139,17 @@ class PartnerCatalogPhoneResolverTest {
         assertFalse(maps(row.get("phones")).get(0).containsKey("sourceSnapshot"));
         assertEquals("private source",phone.get("sourceSnapshot"));
         verify(references).matchingBrands(); verify(references).matchingPhones(); verifyNoMoreInteractions(references);
+    }
+
+    @Test void supplierProjectionUsesTheFullNameAndKeepsFactoryAndMemberOriginalsSeparate() {
+        var phone=phone(1,"SM A57","1210",20L);
+        phone.put("displayName","Samsung Galaxy A57");phone.put("factoryName","SM A57");phones.add(phone);
+        var row=resolver.resolveAll(List.of(values("phoneModelIds",List.of(1L),"modelText","A57"))).get(0);
+        var projected=maps(row.get("phones")).get(0);
+        assertEquals("Samsung Galaxy A57",projected.get("modelName"));
+        assertEquals("SM A57",projected.get("originalModelName"));assertEquals("SM A57",projected.get("factoryName"));
+        assertEquals("1210",projected.get("phoneModelCode"));assertEquals(1L,projected.get("phoneModelId"));
+        assertEquals("SM A57",phone.get("modelName"));assertEquals("A57",row.get("modelText"));
     }
 
     @Test void explicitNegativeRangesNeverBecomePositiveMemberships() {

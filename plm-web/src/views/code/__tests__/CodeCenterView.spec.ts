@@ -44,6 +44,14 @@ describe('CodeCenterView',()=>{
  })
  it('does not show write or import buttons to a reader',async()=>{api.getCollaborationOptions.mockResolvedValue({writableGroups:[]});const v=await start();expect(v.find('[data-test="create-code-item"]').exists()).toBe(false);expect(v.find('[data-test="import-code-items"]').exists()).toBe(false);expect(v.text()).toContain('详情');expect(v.text()).not.toContain('删除');v.unmount()})
  it('keeps query errors visible with retry instead of showing an empty success',async()=>{api.getCodeItems.mockRejectedValueOnce(new Error('查询失败，重试'));const v=await start();expect(v.text()).toContain('查询失败，重试');expect(v.text()).toContain('重试');v.unmount()})
+ it('shows the business conflict reason inline and keeps the same form open for correction',async()=>{
+  const v=await start(),panel=v.getComponent(CodeMaintenancePanel);panel.vm.open();await flushPromises()
+  api.createCodeItem.mockRejectedValue(Object.assign(new Error('Request failed with status code 409'),{isAxiosError:true,response:{status:409,data:{message:'编码已存在'}}}))
+  panel.getComponent(CodeItemDialog).vm.$emit('save',{codeType:'color',codeValue:'02',codeName:'Negro',sortOrder:2});await flushPromises()
+  expect(panel.getComponent(CodeItemDialog).props()).toMatchObject({modelValue:true,error:'编码已存在'})
+  expect(panel.emitted('changed')).toBeUndefined();expect(v.text()).not.toContain('Request failed with status code')
+  v.unmount()
+ })
  it('ignores an earlier login response after identity changes while a code save is pending',async()=>{const v=await start();const panel=v.getComponent(CodeMaintenancePanel);panel.vm.open();await flushPromises();let finish!:(value:typeof row)=>void;api.createCodeItem.mockReturnValue(new Promise(resolve=>{finish=resolve}));panel.getComponent(CodeItemDialog).vm.$emit('save',{codeType:'color',codeValue:'03',codeName:'临时颜色',sortOrder:0});await flushPromises();useUserStore().token='another-login';await flushPromises();finish({...row,codeItemId:3});await flushPromises();expect(panel.emitted('changed')).toBeUndefined();expect(panel.getComponent(CodeItemDialog).props('modelValue')).toBe(false);v.unmount()})
 
 })

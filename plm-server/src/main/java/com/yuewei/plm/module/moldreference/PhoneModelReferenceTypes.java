@@ -14,6 +14,7 @@ public final class PhoneModelReferenceTypes {
         @Min(1) @Max(100) private int size = 50;
         @Size(max=128) private String keyword;
         private boolean selectionSearch;
+        private boolean unassignedCode;
         private String status;
         private String productionStatus;
         @Positive private Long brandId;
@@ -28,6 +29,8 @@ public final class PhoneModelReferenceTypes {
     public record CreatePhone(@NotNull @Positive Long brandId, @NotBlank @Size(max=256) String modelName,
                               @Size(max=30) List<@NotBlank @Size(max=256) String> aliases,
                               @Positive Long codeItemId) {}
+    public record NewCodePhone(@NotNull @Positive Long brandId, @Positive Long phoneModelId,
+                               @Size(max=256) String modelName) {}
     public record CodeSelectionLink(@NotNull @Positive Long codeItemId,@NotBlank String codeValue,@NotBlank String codeName) {}
     public record CodeSelectionBatch(@NotEmpty @Size(max=1000) List<@jakarta.validation.Valid CodeSelectionLink> items,
                                      @NotBlank @Size(max=1000) String reason) {}

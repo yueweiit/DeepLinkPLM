@@ -48,6 +48,7 @@ export interface PhoneModelMultiSelectProps {
   members?:CompatiblePhone[]
   disabled?:boolean
   brandId?:number
+  unassignedCode?:boolean
   multiple?:boolean
   allowedIds?:number[]
   placeholder?:string

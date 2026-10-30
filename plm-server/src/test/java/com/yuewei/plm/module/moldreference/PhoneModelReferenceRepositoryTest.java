@@ -116,4 +116,29 @@ class PhoneModelReferenceRepositoryTest {
         verify(jdbc).queryForObject(contains("and false"),eq(Long.class),eq(new Object[]{}));
     }
 
+    @Test void currentPhoneNamesAreProjectedWithoutRenamingTheMemberOrRegisteredFactoryValue() throws Exception {
+        var values=new LinkedHashMap<String,Object>();
+        values.put("id",1333L);values.put("phoneModelId",1333L);values.put("brandName","HONOR");
+        values.put("brandAliases",new String[]{"HR","Honor"});values.put("brandPrefixes","[]");
+        values.put("modelName","HR 600 LITE 5G");values.put("originalCodeName","HR 600 LITE 5G");
+        values.put("codeItemId",1322L);values.put("phoneModelCode","1298");values.put("codeDeletedFlag",0);
+        values.put("codeStatus","enabled");values.put("groupProductionStatus","unknown");
+        var rs=mock(java.sql.ResultSet.class);var metadata=mock(java.sql.ResultSetMetaData.class);
+        when(rs.getMetaData()).thenReturn(metadata);when(metadata.getColumnCount()).thenReturn(values.size());
+        int column=0;for(var entry:values.entrySet()) {
+            ++column;when(metadata.getColumnLabel(column)).thenReturn(entry.getKey());
+            if(entry.getValue() instanceof String[] aliases) {
+                var array=mock(java.sql.Array.class);when(array.getArray()).thenReturn(aliases);when(rs.getObject(column)).thenReturn(array);
+            } else when(rs.getObject(column)).thenReturn(entry.getValue());
+        }
+        when(jdbc.query(anyString(),any(RowMapper.class),any(Object[].class)))
+            .thenAnswer(call->List.of(((RowMapper<?>)call.getArgument(1)).mapRow(rs,0)));
+        sourcePresent(false);
+        assertThat(repository.phone(1333L,false)).containsEntry("modelName","HR 600 LITE 5G")
+            .containsEntry("displayName","HONOR 600 LITE 5G").containsEntry("factoryName","HR 600 LITE 5G")
+            .containsEntry("originalCodeName","HR 600 LITE 5G").containsEntry("phoneModelCode","1298")
+            .containsEntry("codeItemId",1322L).containsEntry("phoneModelId",1333L).doesNotContainKey("brandPrefixes");
+        verify(jdbc,never()).update(anyString(),any(Object[].class));
+    }
+
 }

@@ -5,6 +5,7 @@ export interface CodeItem {
   codeType: string
   codeValue: string
   codeName: string
+  factoryName?: string
   codeNameZh?: string
   status: 'enabled' | 'disabled'
   productionStatus?:import('@/types/production').ProductionStatus
@@ -26,6 +27,7 @@ export interface CodeItemQuery {
 }
 
 export interface CodeItemPayload {
+  phoneRegistration?:{brandId:number;phoneModelId?:number;modelName?:string}
   version?:number
   reason?:string
   codeType: string

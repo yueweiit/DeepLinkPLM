@@ -5,3 +5,6 @@ export function phoneMemberName(phone:Pick<CompatiblePhone,'brandName'|'modelNam
   const model=phone.modelName.trim(),brand=phone.brandName.trim(),head=model.toLowerCase(),prefix=brand.toLowerCase()
   return head===prefix||[' ','-',':','/'].some(separator=>head.startsWith(prefix+separator))?model:`${brand} ${model}`.trim()
 }
+export function phoneFactoryName(phone:Pick<CompatiblePhone,'factoryName'|'originalCodeName'|'modelName'>){
+  return phone.factoryName || phone.originalCodeName || phone.modelName
+}

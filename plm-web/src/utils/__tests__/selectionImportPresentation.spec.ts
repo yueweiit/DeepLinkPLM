@@ -6,6 +6,14 @@ const row = (values: SelectionStagedRow['values'], original?: SelectionStagedRow
   ({ rowId: 'hidden-row', rowNumber: 2, sourceSheet: '熊大选品', action: 'update', values, original, messages: [], version: 1 })
 
 describe('selection import business presentation', () => {
+  it('collapses source evidence even below the length threshold without hiding short business notes or changing their values', () => {
+    const technical='原始来源：报价.xlsx；SHA256 '+ 'a'.repeat(64)
+    const values={notes:technical,features:'磁吸',unitPrice:'12.00'}
+    expect(selectionImportPreviewFacts(values).find(f=>f.key==='notes')).toEqual({key:'notes',label:'备注',text:technical,expand:true})
+    expect(values.notes).toBe(technical)
+    expect(selectionImportPreviewFacts({notes:'每色先寄两件'})[0]).toMatchObject({text:'每色先寄两件',expand:false})
+  })
+
   it('does not expose unknown status keys or task identities', () => {
     expect(selectionFileStateLabel('private_failure_state')).toBe('准备中')
     expect(selectionImportActionLabel('unknown_action')).toBe('待检查')

@@ -36,7 +36,7 @@ public class PartnerCatalogPhoneResolver {
     private static final Pattern SEPARATORS = Pattern.compile("[/\\\\;；|,，、\\n\\r]+");
     private static final Set<String> APPLE_SUFFIXES = Set.of("", "pro", "promax", "max", "plus", "mini", "air", "e");
     private static final List<String> PHONE_FIELDS = List.of("id", "phoneModelId", "brandId", "brandName",
-        "modelName", "displayName", "codeItemId", "phoneModelCode", "status", "brandStatus", "codeStatus",
+        "modelName", "displayName", "factoryName", "codeItemId", "phoneModelCode", "status", "brandStatus", "codeStatus",
         "codeLinkStatus", "productionStatus");
 
     /** Only a genuinely absent supplier declaration may use the existing phone library.
@@ -223,13 +223,25 @@ public class PartnerCatalogPhoneResolver {
                 for (var brand : candidates) found.addAll(exact.getOrDefault(number(brand.get("brandId")), Map.of())
                     .getOrDefault(PhoneIdentityMatcher.identityKey(prepared, brand), Set.of()));
                 if (excludeMini) found.removeIf(id -> isMini(byId.get(id)));
-                if (found.size() == 1) ids.add(found.iterator().next());
-                else if (found.isEmpty()) issues.add("未匹配现有手机型号：" + token);
+                var preferred=preferSingleModelCodes(found);
+                if (preferred.size() == 1) ids.add(preferred.iterator().next());
+                else if (preferred.isEmpty()) issues.add("未匹配现有手机型号：" + token);
                 else issues.add("型号存在多个独立资料，请核对：" + token);
             }
             for (String exclusion : exclusions) excludeAppleMembers(exclusion, ids);
             if (ids.isEmpty() && !exclusions.isEmpty() && issues.isEmpty())
                 issues.add("原文仅明确列出不供／排除型号，未作为正向适用型号");
+        }
+
+        private Set<Long> preferSingleModelCodes(Set<Long> exactIds) {
+            if(exactIds.size()<2)return exactIds;
+            var singles=new LinkedHashSet<Long>();
+            for(long id:exactIds) {
+                var phone=byId.get(id);
+                String registeredName=Objects.toString(phone.get("originalCodeName"),text(phone.get("modelName")));
+                if(PhoneIdentityMatcher.isSingleModel(registeredName))singles.add(id);
+            }
+            return singles.isEmpty()?exactIds:singles;
         }
 
         private String extractExclusions(String source, Pattern pattern, List<String> exclusions) {
@@ -308,6 +320,8 @@ public class PartnerCatalogPhoneResolver {
             for (String field : PHONE_FIELDS) if (phone.containsKey(field)) result.put(field, phone.get(field));
             result.putIfAbsent("id", phone.get("phoneModelId"));
             result.putIfAbsent("displayName", display(phone));
+            result.put("originalModelName",phone.get("modelName"));
+            result.put("modelName",result.get("displayName"));
             return result;
         }
         private static final Comparator<Map<String, Object>> PHONE_ORDER = Comparator

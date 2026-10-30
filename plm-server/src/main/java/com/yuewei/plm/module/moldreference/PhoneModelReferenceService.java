@@ -112,6 +112,21 @@ public class PhoneModelReferenceService {
         catch(DuplicateKeyException duplicate) { throw conflict("该品牌下手机型号名称已存在"); }
         var row=repository.phone(id,false);log(actor,"phone",id,"CREATE",null,row,null,request);return row;
     }
+    /** Joins code creation; the existing member writer owns identity checks and mandatory audit. */
+    @Transactional public void registerNewCodePhone(long codeId,String factoryName,NewCodePhone details,HttpServletRequest request) {
+        write();jdbc.execute("select pg_advisory_xact_lock(66817399)");validateBrand(details.brandId());
+        if(details.phoneModelId()==null) {
+            createPhone(new CreatePhone(details.brandId(),details.modelName(),List.of(factoryName),codeId),request);
+            return;
+        }
+        var member=require(repository.phone(details.phoneModelId(),true),"手机型号");
+        if(!Objects.equals(number(member.get("brandId")),details.brandId())||!"enabled".equals(member.get("status"))||number(member.get("deletedFlag"))!=0)
+            throw conflict("所选型号或品牌已变化，请重新选择启用的待分配型号");
+        if(member.get("codeItemId")!=null)throw conflict("所选型号已有编码，请刷新后核对，不会创建重复型号");
+        var result=patchPhone(details.phoneModelId(),new Patch(Map.of("codeItemId",json.valueToTree(codeId)),
+            Map.of("codeItemId",json.getNodeFactory().nullNode()),"新增手机编码并关联原有型号"),request);
+        if(!"saved".equals(result.get("status")))throw conflict("所选型号已变化，请重新选择");
+    }
     /** Register the original code group, never split it or infer physical molds/fit from its name. */
     @Transactional public List<Map<String,Object>> linkCodeSelection(CodeSelectionBatch batch,HttpServletRequest request) {
         write();

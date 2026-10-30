@@ -25,7 +25,7 @@ import static org.mockito.Mockito.*;
 import static com.yuewei.plm.module.moldreference.PhoneModelReferenceTypes.*;
 
 /** Local-only opt-in. DDL, identities and every business fixture are rolled back together. */
-@EnabledIfEnvironmentVariable(named="PLM_COLLAB_TEST_DB_URL",matches="jdbc:postgresql://127\\.0\\.0\\.1:(15432/plm_data_management|15483/plm_foundation_crud_it)\\?currentSchema=plm")
+@EnabledIfEnvironmentVariable(named="PLM_COLLAB_TEST_DB_URL",matches="jdbc:postgresql://127\\.0\\.0\\.1:(15432/plm_data_management|15483/plm_foundation_crud_it|15504/plm_history_restoration_qa)\\?currentSchema=plm")
 class PhoneModelReferenceLocalIntegrationTest {
     JdbcTemplate jdbc;DataSourceTransactionManager tx;TransactionStatus scope;
     final ObjectMapper json=new ObjectMapper().findAndRegisterModules().disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
@@ -47,6 +47,10 @@ class PhoneModelReferenceLocalIntegrationTest {
     long id(Map<String,Object> row) {return ((Number)row.get("id")).longValue();}
     long brand() {return id(service.createBrand(new CreateBrand("品牌-"+UUID.randomUUID()),null));}
     long phone(long brand,Long code) {return id(service.createPhone(new CreatePhone(brand,"Model-"+UUID.randomUUID(),List.of(),code),null));}
+    long appleBrand() {
+        var existing=jdbc.queryForList("select id from plm_phone_brand where lower(name)='apple'",Long.class);
+        return existing.isEmpty()?id(service.createBrand(new CreateBrand("Apple"),null)):existing.get(0);
+    }
     long code(String type) {
         String value=jdbc.queryForObject("select lpad(v::text,4,'0') from generate_series(0,9999) v where not exists(select 1 from plm_code_item c where c.code_type=? and c.code_value=lpad(v::text,4,'0')) order by v limit 1",String.class,type);
         return jdbc.queryForObject("insert into plm_code_item(code_type,code_value,code_name,status,sort_order,deleted_flag) values(?,?,?,'enabled',0,0) returning code_item_id",Long.class,type,value,"Reference-"+UUID.randomUUID());
@@ -70,7 +74,7 @@ class PhoneModelReferenceLocalIntegrationTest {
     }
     @Test void selectorGenerationCannotMatchAnotherGenerationByCodeYearOrBrandSeriesAlias() {
         String marker="Search"+UUID.randomUUID().toString().replace("-","").replaceAll("[0-9]","q");
-        long apple=jdbc.queryForObject("select id from plm_phone_brand where lower(name)='apple'",Long.class);var original=service.brand(apple);
+        long apple=appleBrand();var original=service.brand(apple);
         service.patchBrand(apple,patch("aliases",original.get("aliases"),List.of("IP","iPhone")),null);
         service.patchBrand(apple,patch("prefixes",original.get("prefixes"),List.of(new Prefix("IP","iPhone"),new Prefix("iPhone","iPhone"),new Prefix("iPad","iPad"))),null);
         long combined=id(service.createPhone(new CreatePhone(apple,"iPhone 13/14/15 "+marker,List.of(),null),null));
@@ -241,7 +245,55 @@ class PhoneModelReferenceLocalIntegrationTest {
         var config=new com.baomidou.mybatisplus.core.MybatisConfiguration();config.addMapper(com.yuewei.plm.module.code.repository.CodeItemRepository.class);config.addMapper(com.yuewei.plm.repository.ProductRepository.class);config.addMapper(com.yuewei.plm.module.operationlog.repository.OperationLogRepository.class);factory.setConfiguration(config);
         var interceptor=new com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor();interceptor.addInnerInterceptor(new com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor(com.baomidou.mybatisplus.annotation.DbType.POSTGRE_SQL));factory.setPlugins(interceptor);
         factory.afterPropertiesSet();productionSqlSession=new org.mybatis.spring.SqlSessionTemplate(factory.getObject());var result=new com.yuewei.plm.module.code.service.CodeItemService(productionSqlSession.getMapper(com.yuewei.plm.module.code.repository.CodeItemRepository.class));
-        org.springframework.test.util.ReflectionTestUtils.setField(result,"lifecycle",new com.yuewei.plm.module.code.service.CodeLifecycleService(jdbc,json,new PilotAccessService(jdbc,json),audit));org.springframework.test.util.ReflectionTestUtils.setField(result,"jdbc",jdbc);org.springframework.test.util.ReflectionTestUtils.setField(result,"phoneMetadata",new com.yuewei.plm.module.productionmetadata.PhoneCodeMetadataRepository(jdbc,json));return result;
+        org.springframework.test.util.ReflectionTestUtils.setField(result,"lifecycle",new com.yuewei.plm.module.code.service.CodeLifecycleService(jdbc,json,new PilotAccessService(jdbc,json),audit));org.springframework.test.util.ReflectionTestUtils.setField(result,"jdbc",jdbc);org.springframework.test.util.ReflectionTestUtils.setField(result,"phoneMetadata",new com.yuewei.plm.module.productionmetadata.PhoneCodeMetadataRepository(jdbc,json));org.springframework.test.util.ReflectionTestUtils.setField(result,"phoneReferences",service);return result;
+    }
+    com.yuewei.plm.module.code.dto.CodeItemSaveDTO registration(long brand,Long phone,String fullName,String factoryName) {
+        var dto=new com.yuewei.plm.module.code.dto.CodeItemSaveDTO();dto.setCodeType("phone_model");
+        dto.setCodeValue(jdbc.queryForObject("select lpad(v::text,4,'0') from generate_series(0,9999) v where not exists(select 1 from plm_code_item c where c.code_type='phone_model' and c.code_value=lpad(v::text,4,'0')) order by v limit 1",String.class));
+        dto.setCodeName(factoryName);dto.setSortOrder(0);dto.setPhoneRegistration(new NewCodePhone(brand,phone,fullName));return dto;
+    }
+    @Test void oneSaveAssignsNewCodeToExistingIdentityAndDerivesBrandWithoutRenamingOrCreatingMolds() throws Exception {
+        long b=brand(),p=phone(b,null);var before=service.phone(p);long members=jdbc.queryForObject("select count(*)from plm_phone_model_member",Long.class),molds=jdbc.queryForObject("select count(*)from plm_collaboration_mold_set",Long.class);
+        var dto=registration(b,p,null,"XH QA-LITE "+UUID.randomUUID());var codes=codeQueries();var saved=codes.create(dto);
+        assertThat(saved.getCodeValue()).hasSize(4).startsWith("0");
+        assertThat(service.phone(p)).containsEntry("phoneModelId",p).containsEntry("codeItemId",saved.getCodeItemId()).containsEntry("modelName",before.get("modelName")).containsEntry("aliases",before.get("aliases"));
+        var q=new com.yuewei.plm.module.code.dto.CodeItemQueryDTO();q.setCodeType("phone_model");q.setBrandId(b);
+        assertThat(codes.page(q).getContent()).singleElement().satisfies(r->assertThat(r.getCodeItemId()).isEqualTo(saved.getCodeItemId()));
+        assertThat(jdbc.queryForObject("select count(*)from plm_phone_model_member",Long.class)).isEqualTo(members);
+        assertThat(jdbc.queryForObject("select count(*)from plm_collaboration_mold_set",Long.class)).isEqualTo(molds);
+    }
+    @Test void oneSaveCreatesExplicitFullNameWithSeparateFactoryShortNameAndPreservesProductionDefault() throws Exception {
+        long b=brand();String full="Full handset "+UUID.randomUUID(),factory="FH QA "+UUID.randomUUID();
+        var saved=codeQueries().create(registration(b,null,full,factory));var q=new Query();q.setCodeItemId(saved.getCodeItemId());
+        assertThat(service.phones(q).getContent()).singleElement().satisfies(r->assertThat(r).containsEntry("modelName",full).containsEntry("originalCodeName",factory).containsEntry("brandId",b).containsEntry("productionStatus","unknown"));
+    }
+    @Test void alreadyAssignedMemberCannotLeaveAnotherCodeBehindOrChangeItsIdentity() throws Exception {
+        long b=brand(),originalCode=code("phone_model"),p=phone(b,originalCode);var dto=registration(b,p,null,"Stale request "+UUID.randomUUID());var codes=codeQueries();
+        assertThatThrownBy(()->nested(()->codes.create(dto))).hasMessageContaining("已有编码");
+        assertThat(jdbc.queryForObject("select count(*)from plm_code_item where code_type='phone_model'and code_value=?",Long.class,dto.getCodeValue())).isZero();
+        assertThat(service.phone(p)).containsEntry("codeItemId",originalCode);
+    }
+    @Test void memberAuditFailureRollsBackCodeAndAssignmentTogether() throws Exception {
+        long b=brand(),p=phone(b,null);var dto=registration(b,p,null,"Audit rollback "+UUID.randomUUID());var codes=codeQueries();
+        doThrow(new IllegalStateException("required audit unavailable")).when(audit).logRequired(any(OperationLogCreateCommand.class),any(CurrentUser.class));
+        assertThatThrownBy(()->nested(()->codes.create(dto))).hasMessageContaining("required audit unavailable");
+        assertThat(service.phone(p)).containsEntry("codeItemId",null);
+        assertThat(jdbc.queryForObject("select count(*)from plm_code_item where code_type='phone_model'and code_value=?",Long.class,dto.getCodeValue())).isZero();
+    }
+    @Test void assignmentPickerFiltersUnassignedAtTheDatabaseWithoutChangingOrdinaryReaders() {
+        long b=brand(),pending=phone(b,null),assigned=phone(b,code("phone_model"));var q=new Query();q.setBrandId(b);q.setUnassignedCode(true);
+        assertThat(service.phones(q).getContent()).extracting(r->r.get("phoneModelId")).containsExactly(pending);
+        q.setUnassignedCode(false);assertThat(service.phones(q).getContent()).extracting(r->r.get("phoneModelId")).containsExactlyInAnyOrder(pending,assigned);
+    }
+    @Test void codeGroupUsesTheSharedFactorySpellingWithoutChangingTheRegisteredName() throws Exception {
+        long b=appleBrand();var original=service.brand(b);
+        service.patchBrand(b,patch("prefixes",original.get("prefixes"),List.of(new Prefix("IP","iPhone"))),null);
+        long c=code("phone_model");jdbc.update("update plm_code_item set code_name='Apple iPhone QA Lite 5G' where code_item_id=?",c);phone(b,c);
+        var q=new com.yuewei.plm.module.code.dto.CodeItemQueryDTO();q.setCodeType("phone_model");q.setBrandId(b);
+        var row=codeQueries().page(q).getContent().stream().filter(r->r.getCodeItemId()==c).findFirst().orElseThrow();
+        assertThat(row.getFactoryName()).isEqualTo("IP QA Lite 5G");assertThat(row.getCodeName()).isEqualTo("Apple iPhone QA Lite 5G");
+        assertThat(row.getBrands()).noneSatisfy(r->assertThat(r).containsKey("prefixes"));
+        assertThat(jdbc.queryForObject("select code_name from plm_code_item where code_item_id=?",String.class,c)).isEqualTo("Apple iPhone QA Lite 5G");
     }
     PhoneIdentityIssuesService identityIssues() throws Exception {
         var codes=codeQueries();audit=spy(new com.yuewei.plm.module.operationlog.service.impl.OperationLogServiceImpl(productionSqlSession.getMapper(com.yuewei.plm.module.operationlog.repository.OperationLogRepository.class)));
@@ -517,7 +569,7 @@ class PhoneModelReferenceLocalIntegrationTest {
         assertThat(service.patchBrand(id(first),patch("aliases",List.of(alias),List.of("Renamed-"+alias)),null)).containsEntry("status","saved");
     }
     @Test void explicitPhoneSelectionAcceptsConfirmedLeadingSeriesAliasWithoutDroppingVariants() {
-        var apple=jdbc.queryForList("select id from plm_phone_brand where lower(name)='apple'").get(0);long b=((Number)apple.get("id")).longValue();var current=service.brand(b);
+        long b=appleBrand();var current=service.brand(b);
         service.patchBrand(b,patch("aliases",current.get("aliases"),List.of("IP","iPhone")),null);
         long c=code("phone_model");var p=service.createPhone(new CreatePhone(b,"iPhone IT 18 Pro 5G",List.of(),c),null);
         assertThat(service.requireSelectedPhone(id(p),c,null,"IP IT 18 Pro 5G").get("phoneModelId")).isEqualTo(id(p));

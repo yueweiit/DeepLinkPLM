@@ -259,6 +259,37 @@ class PartnerCatalogServiceTest {
             catalog=new PartnerCatalogService(store,permissions,suppliers,selections,materials,phones,operations);
         }
 
+        @Test void stylePickerPrefersCurrentDirectoryNameOverANewerFrozenSelectionWithoutWritingHistory(){
+            renameFixture();jdbc.execute("alter table plm_partner_catalog_style_source add column created_at timestamptz default now()");
+            String original=jdbc.queryForObject("select row_id::text from plm_partner_selection_row where record_id=20",String.class);
+            jdbc.update("update plm_partner_record set data='{\"catalogSource\":true}' where record_id=20");
+            jdbc.update("update plm_partner_selection_row set data=data||'{\"name\":\"凡影大孔手机壳\",\"catalogCurrent\":{\"name\":\"凡影精孔手机壳\"}}'::jsonb,updated_at='2026-01-01' where record_id=20");
+            jdbc.update("insert into plm_partner_record(record_id,kind,code,name,version,supplier_code,data) values(21,'selection','SL-21','Frozen',1,'SELECTION','{\"purpose\":\"my_selection\"}')");
+            String frozen=selection(21,"SELECTION",false);jdbc.update("update plm_partner_selection_row set data=data||'{\"name\":\"凡影大孔手机壳\",\"confirmationSnapshot\":{\"name\":\"凡影大孔手机壳\"}}'::jsonb where record_id=21");
+            jdbc.update("insert into plm_partner_catalog_style values(13,'CP-000013','SELECTION')");
+            jdbc.update("insert into plm_partner_catalog_style_source values('selection',20,?::uuid,13,'{}','2026-01-01'),('selection',21,?::uuid,13,'{}','2026-10-01')",original,frozen);
+            var before=jdbc.queryForList("select record_id,row_id,data::text from plm_partner_selection_row order by record_id,row_id");
+            var result=catalog.styleIdentities(Map.of("supplierCode","SELECTION","keyword","精孔"));
+            assertEquals(1L,result.get("totalElements"));assertEquals("凡影精孔手机壳",maps(result.get("content")).get(0).get("name"));
+            assertEquals(0L,catalog.styleIdentities(Map.of("supplierCode","SELECTION","keyword","大孔")).get("totalElements"));
+            assertEquals(before,jdbc.queryForList("select record_id,row_id,data::text from plm_partner_selection_row order by record_id,row_id"));
+        }
+
+        @Test void stylePickerUsesActualDirectoryRowUpdateTimeKeepsLegacyFallbackAndHonorsVisibility(){
+            renameFixture();jdbc.execute("alter table plm_partner_catalog_style_source add column created_at timestamptz default now()");
+            String first=jdbc.queryForObject("select row_id::text from plm_partner_selection_row where record_id=20",String.class),latest=selection(20,"SELECTION",false);
+            jdbc.update("update plm_partner_record set data='{\"catalogSource\":true}' where record_id=20");
+            jdbc.update("update plm_partner_selection_row set data=data||jsonb_build_object('name',case when row_id=?::uuid then '旧款名' else '当前款名' end),updated_at=case when row_id=?::uuid then '2026-01-01'::timestamptz else '2026-02-01'::timestamptz end where record_id=20",first,first);
+            jdbc.update("insert into plm_partner_catalog_style values(13,'CP-000013','SELECTION'),(14,'CP-000014','SELECTION')");
+            jdbc.update("insert into plm_partner_catalog_style_source values('selection',20,?::uuid,13,'{}','2026-10-01'),('selection',20,?::uuid,13,'{}','2026-01-01')",first,latest);
+            String hidden=jdbc.queryForObject("select row_id::text from plm_partner_selection_row where record_id=50",String.class);jdbc.update("update plm_partner_selection_row set data=data||'{\"name\":\"隐藏款名\"}'::jsonb,updated_at='2026-12-01' where record_id=50");
+            jdbc.update("insert into plm_partner_catalog_style_source values('selection',50,?::uuid,13,'{}','2026-12-01')",hidden);
+            jdbc.update("insert into plm_partner_record(record_id,kind,code,name,version,supplier_code,data) values(21,'selection','SL-21','Frozen',1,'SELECTION','{\"purpose\":\"my_selection\"}')");
+            String frozen=selection(21,"SELECTION",false);jdbc.update("update plm_partner_selection_row set data=data||'{\"name\":\"历史选样款\"}'::jsonb where record_id=21");jdbc.update("insert into plm_partner_catalog_style_source values('selection',21,?::uuid,14,'{}','2026-11-01')",frozen);
+            var rows=maps(catalog.styleIdentities(Map.of("supplierCode","SELECTION")).get("content"));
+            assertEquals(List.of("历史选样款","当前款名"),rows.stream().map(r->r.get("name")).toList());assertTrue(rows.stream().noneMatch(r->"隐藏款名".equals(r.get("name"))));
+        }
+
         @Test void nameCorrectionUpdatesLegacyAndQuoteSourcesWithoutChangingCodesImagesQuotesOrFrozenSnapshots(){
             renameFixture();
             for(String kind:List.of("selection","quote")){

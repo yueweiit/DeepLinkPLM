@@ -35,7 +35,7 @@ function previewFacts(value:Record<string,unknown>,keys:readonly (readonly [stri
     const source=value[key]
     if(typeof source!=='string'&&typeof source!=='number')return []
     const text=String(source)
-    return text?[{key,label,text,expand:text.length>120||text.split('\n').length>3}]:[]
+    return text?[{key,label,text,expand:text.length>120||text.split('\n').length>3||key==='notes'&&/(?:SHA-?256|原始来源|来源原件|校验值)/i.test(text)}]:[]
   })
 }
 /** Source fields are already filtered by the staged-row API; never inspect hidden workbook JSON here. */

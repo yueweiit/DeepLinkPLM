@@ -5,12 +5,14 @@ import ElementPlus,{ElButton,ElInput,ElMessageBox,ElOption,ElSelect,ElTabs} from
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
 const api=vi.hoisted(()=>({getPhoneBrands:vi.fn(),getPhoneSelectionBrands:vi.fn().mockResolvedValue([{id:1,brandId:1,name:"Apple",status:"enabled"}]),getPhoneModels:vi.fn(),getPhoneModelOptions:vi.fn(),getPhoneModelCoverage:vi.fn(),createPhoneBrand:vi.fn(),savePhoneBrand:vi.fn(),createPhoneModel:vi.fn(),savePhoneModel:vi.fn(),inspectPhoneReference:vi.fn(),phoneReferenceAction:vi.fn()}))
 const review=vi.hoisted(()=>vi.fn())
+const codes=vi.hoisted(()=>({createCodeItem:vi.fn(),updateCodeItem:vi.fn(),inspectCodeItem:vi.fn(),codeItemAction:vi.fn()}))
 vi.mock('@/api/modules/phoneReference',()=>api)
 vi.mock('../components/PhoneCodeGroups.vue',()=>({default:{template:'<p>型号编码组</p>'}}))
 vi.mock('../components/PhoneModelIntake.vue',()=>({default:{props:['visible','editable','keyword'],emits:['changed'],template:'<section data-test="phone-intake">待补手机型号工作区</section>'}}))
-vi.mock('@/api/modules/code',()=>({getCodeItems:vi.fn().mockResolvedValue({content:[]}),getPhoneModelReview:review}))
+vi.mock('@/api/modules/code',()=>({...codes,getCodeItems:vi.fn().mockResolvedValue({content:[]}),getPhoneModelReview:review}))
 import PhoneReferenceManager from '../components/PhoneReferenceManager.vue'
 import PhoneModelIntake from '../components/PhoneModelIntake.vue'
+import CodeItemDialog from '@/views/code/components/CodeItemDialog.vue'
 import SharedCompatiblePhoneSelector from '../components/SharedCompatiblePhoneSelector.vue'
 import {useUserStore} from '@/stores/user'
 import {useCollaborationWorkspace} from '@/stores/collaborationWorkspace'
@@ -21,6 +23,17 @@ afterEach(()=>{w?.unmount();w=undefined;document.body.innerHTML='';vi.restoreAll
 async function start(editable=true,router?:Router){w=mount(PhoneReferenceManager,{props:{modelValue:false,editable},global:{plugins:[ElementPlus,...(router?[router]:[])]}});await w.setProps({modelValue:true});await flushPromises();w.getComponent(ElTabs).vm.$emit('update:modelValue','phones');await flushPromises();return w}
 async function click(text:string){await w!.findAllComponents(ElButton).find(b=>b.text()===text)!.trigger('click');await flushPromises()}
 describe('embedded phone reference maintenance',()=>{
+  it('assigns a code directly to a pending member through one save and refreshes the same reference list',async()=>{
+    const pending={...phone,phoneModelId:2,id:2,codeItemId:null,phoneModelCode:null,codeLinkStatus:'unassigned'}
+    api.getPhoneModels.mockResolvedValue({content:[phone,pending],totalElements:2});codes.createCodeItem.mockResolvedValue({codeItemId:1201,codeType:'phone_model',codeValue:'0001',codeName:'IP17P'})
+    const v=await start();expect(v.findAllComponents(ElButton).filter(b=>b.text()==='分配编码')).toHaveLength(1)
+    await click('分配编码');const dialog=v.getComponent(CodeItemDialog);expect(dialog.props('phone')).toMatchObject({phoneModelId:2,brandId:1})
+    const payload={codeType:'phone_model',codeValue:'0001',codeName:'IP17P',sortOrder:0,phoneRegistration:{brandId:1,phoneModelId:2}}
+    dialog.vm.$emit('save',payload);await flushPromises()
+    expect(codes.createCodeItem).toHaveBeenCalledExactlyOnceWith(payload);expect(api.createPhoneModel).not.toHaveBeenCalled();expect(api.savePhoneModel).not.toHaveBeenCalled()
+    expect(v.emitted('changed')).toHaveLength(1);expect(api.getPhoneModels).toHaveBeenCalledTimes(2)
+    await v.setProps({editable:false});await flushPromises();expect(v.findAllComponents(ElButton).some(b=>b.text()==='分配编码')).toBe(false)
+  })
   it('adds intake inside the existing reference entry without replacing identity review or querying the whole phone list',async()=>{w=mount(PhoneReferenceManager,{props:{modelValue:true,inline:true,editable:true,initialTab:'intake',keyword:'待核对原文'},global:{plugins:[ElementPlus]}});await flushPromises();expect(w.getComponent(PhoneModelIntake).props()).toEqual({visible:true,editable:true,keyword:'待核对原文'});expect(api.getPhoneModels).not.toHaveBeenCalled();expect(w.text()).toContain('资料问题／集中处理');expect(w.text()).toContain('历史关系核对');w.getComponent(PhoneModelIntake).vm.$emit('changed');expect(w.emitted('changed')).toHaveLength(1)})
   it('reuses the same member editor inline and resolves a stable ID beyond the paged search without allocating a code',async()=>{
     api.getPhoneModelOptions.mockResolvedValue([{...phone,phoneModelId:599,modelName:'iPhone 19 Pro',phoneModelCode:'0001'}])

@@ -61,7 +61,7 @@ export function usePhoneModelSelection(props:PhoneModelMultiSelectProps,disabled
     finally {if(ticket===memberEpoch)membersLoading.value=false}
   }
   function query(brand=brandId.value,currentPage=page.value,size=PAGE_SIZE):ReferenceQuery {
-    return {page:currentPage,size,keyword:selectionSearchTerm(search.value),selectionSearch:true,...brand?{brandId:brand}:{}}
+    return {page:currentPage,size,keyword:selectionSearchTerm(search.value),selectionSearch:true,...brand?{brandId:brand}:{},...(props.unassignedCode?{unassignedCode:true}:{})}
   }
   async function loadPage(next=page.value) {
     clearTimeout(timer);const ticket=++queryEpoch,auth=user.token

@@ -26,4 +26,6 @@ public class CodeItemSaveDTO {
     @NotNull
     @Min(0)
     private Integer sortOrder;
+    @jakarta.validation.Valid
+    private com.yuewei.plm.module.moldreference.PhoneModelReferenceTypes.NewCodePhone phoneRegistration;
 }
