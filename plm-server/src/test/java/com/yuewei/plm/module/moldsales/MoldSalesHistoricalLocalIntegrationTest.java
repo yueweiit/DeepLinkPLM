@@ -54,6 +54,16 @@ class MoldSalesHistoricalLocalIntegrationTest extends MoldSalesLocalFixture {
         var matrix=service.matrix(1,50,"","all",null,List.of(48L),"sales");assertThat(amount(matrix.get("totalSalesQuantity"))).isEqualByComparingTo("165");assertThat(rows(matrix.get("content"))).filteredOn(r->r.get("phoneCodes").toString().contains("0058")).singleElement().satisfies(r->assertThat(amount(r.get("totalSalesQuantity"))).isEqualByComparingTo("125"));
         assertThat(originalArchive()).isEqualTo(before);assertThat(jdbc.queryForObject("select count(*)from plm_collaboration_item where product_line_id=48",Long.class)).isZero();assertThat(jdbc.queryForObject("select count(*)from plm_collaboration_mold_set",Long.class)).isEqualTo(2L);assertThat(jdbc.queryForObject("select status from plm_product where product_id=48",String.class)).isEqualTo("archived");verifyNoInteractions(audit);
     }
+    @Test void sourceDetailPaginatesOnlyItsExactSealedRowsAndKeepsTheExistingGroupCost(){
+        var listed=rows(service.page(1,50,"","all",48L,null,"sales",null,null).get("content")).stream().filter(g->g.get("sourceGroupKey").equals("history:RU:0058")).findFirst().orElseThrow();
+        var first=service.sourceDetail("history:RU:0058",1,1,"sales");var second=service.sourceDetail("history:RU:0058",2,1,"sales");
+        assertThat(first).containsEntry("totalElements",2L);assertThat(second).containsEntry("totalElements",2L);assertThat(map(first.get("group")).get("cost")).isEqualTo(listed.get("cost"));assertThat(rows(first.get("orders"))).hasSize(1);assertThat(rows(second.get("orders"))).hasSize(1);assertThat(rows(first.get("orders")).get(0).get("sourceId")).isNotEqualTo(rows(second.get("orders")).get(0).get("sourceId"));
+        assertThat(rows(first.get("orders"))).allSatisfy(r->assertThat(r).containsEntry("orderDate","2024-10-30").containsEntry("businessDate","2024-10-30").containsEntry("phoneCode","0058"));
+        assertThat(map(first.get("status"))).doesNotContainKey("historyReview");assertThat(map(service.status().get("historyReview"))).containsKeys("initialSummary","liveSummary");
+        try{archiveLine(8,"AB","0058","AirBag Pintura羽绒服喷油",7,"Unsealed copy","02");}catch(Exception e){throw new IllegalStateException(e);}jdbc.update("delete from plm_mold_sales_history_line where source_id=?",String.format("%064x",8));
+        var paint=service.sourceDetail("history:AB:airbag-pintura:0058",1,20,"sales");assertThat(paint).containsEntry("totalElements",1L);assertThat(amount(map(paint.get("group")).get("salesQuantity"))).isEqualByComparingTo("60");assertThat(rows(paint.get("orders"))).singleElement().satisfies(r->assertThat(r).containsEntry("quantity",new BigDecimal("60")).containsEntry("originalProductName","AirBag Pintura羽绒服喷油"));
+        verifyNoInteractions(audit);
+    }
     @Test void splitsAbByExactOriginalProductAndAttributesTransparentSalesToRealBaWithoutChangingColorOrCode(){
         var all=service.page(1,100,"","all",null,null,"sales",null,null);var groups=rows(all.get("content"));assertThat(amount(all.get("totalSalesQuantity"))).isEqualByComparingTo("375");
         var ab=groups.stream().filter(g->g.get("productLineId")==null).toList();assertThat(ab).hasSize(2);assertThat(ab).extracting(g->g.get("productKey")).containsExactlyInAnyOrder("history:AB:airbag-pintura","history:AB:airbag-liso");

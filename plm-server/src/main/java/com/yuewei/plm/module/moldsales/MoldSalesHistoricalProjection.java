@@ -14,7 +14,26 @@ import org.springframework.jdbc.core.JdbcTemplate;
 final class MoldSalesHistoricalProjection {
     static final Set<String> CLASSIFICATIONS=Set.of("coded_history","purchased","named_history","pending","historical_reference");
     static final String ORIGINAL_PRODUCT="coalesce(f.source_data->'raw'->>'product','')";
-    static final String PHYSICAL_FACT="not (source_kind='eccount' and style_code='AB' and exists(select 1 from plm_mold_sales_history_line hx where hx.source_id=substring(plm_mold_sales_fact.source_id,9)))";
+    static final String PHYSICAL_FACT="not (source_kind='eccount' and style_code='AB' and exists(select 1 from plm_mold_sales_history_line hx where hx.source_id="+sealedSourceId("plm_mold_sales_fact")+"))";
+    // Archive facts always carry eccount: plus the original 64-character ID. Keep the indexed
+    // char(64) column uncast, and reject unexpected lengths instead of truncating an identity.
+    private static String sealedSourceId(String alias){return "(case when length("+alias+".source_id)=72 then substring("+alias+".source_id,9)::char(64) end)";}
+    record SourceScope(Set<List<String>> pairs){
+        static SourceScope history(String key){
+            var parts=key.split(":");require(parts.length>=3&&parts[0].equals("history")&&parts[1].matches("[A-Z]{2}")&&parts[parts.length-1].matches("[0-9]{4}"),"历史销量组不存在或未获授权");
+            return new SourceScope(Set.of(List.of(parts[1],parts[parts.length-1])));
+        }
+        static SourceScope physical(Map<String,Object> group){
+            var pairs=new LinkedHashSet<List<String>>();for(String phone:strings(group.get("phoneCodes"))){pairs.add(List.of(text(group.get("styleCode")),phone));if("BA".equals(group.get("styleCode")))pairs.add(List.of("AB",phone));}return new SourceScope(pairs);
+        }
+        SourceScope includingSkuAliases(Collection<Map<String,Object>> skus){
+            var expanded=new LinkedHashSet<>(pairs);var parser=new ProductBusinessCodeGenerator();for(var sku:skus){String code=text(sku.get("code"));if(!code.matches(ProductBusinessCodeGenerator.PRODUCT_STATE_CODE_REGEX))continue;var parts=parser.parseProductStateCode(code);if(pairs.contains(List.of(text(sku.get("styleCode")),parts.phoneModelCode())))expanded.add(List.of(parts.productSpecificCode(),parts.phoneModelCode()));}return new SourceScope(expanded);
+        }
+        String sql(String alias,List<Object> args){
+            if(pairs.isEmpty())return "false";for(var pair:pairs)args.addAll(pair);String prefix=alias.isBlank()?"":alias+".";
+            return "("+prefix+"style_code,"+prefix+"phone_code) in ("+String.join(",",Collections.nCopies(pairs.size(),"(?,?)"))+")";
+        }
+    }
     private record Category(String slug,String name,String targetStyle) {}
     private record Bucket(String style,String phone,String itemCode,String source,String originalProduct,boolean sealed,String originalClassification,JsonNode evidence,String displayPhoneCode,String displayName,String mappingReason,BigDecimal quantity,long lines,List<String> names) {}
     private record Attribution(String classification,String productKey,Long productId,String productName,String targetStyle,String reason) {}
@@ -33,6 +52,9 @@ final class MoldSalesHistoricalProjection {
     private final Set<String> ignored;
 
     MoldSalesHistoricalProjection(JdbcTemplate jdbc,ObjectMapper json,PilotAccessService access,List<Map<String,Object>> existing,Set<String> profiles,Set<String> ignored){
+        this(jdbc,json,access,existing,profiles,ignored,null);
+    }
+    MoldSalesHistoricalProjection(JdbcTemplate jdbc,ObjectMapper json,PilotAccessService access,List<Map<String,Object>> existing,Set<String> profiles,Set<String> ignored,SourceScope requested){
         this.jdbc=jdbc;this.json=json;this.eligible=MoldSalesRules.factEligibleSql(profiles);this.administrator=access.actor().allPermissions();this.ignored=ignored;
         for(var group:existing){var aliases=new HashSet<String>();if(group.get("salesAliases") instanceof Collection<?> values)for(var value:values)if(value instanceof JsonNode alias)aliases.add(alias.path("phoneCode").asText());var originalCodes=new HashSet<String>();if(group.get("productionRecords") instanceof Collection<?> records)for(var record:records)if(record instanceof Map<?,?> item)originalCodes.add(text(item.get("phoneCode")));
             for(String code:strings(group.get("phoneCodes"))){String key=group.get("styleCode")+":"+code;physical.put(key,group);if(!aliases.contains(code)||originalCodes.contains(code))physicalIdentity.put(key,group);}
@@ -40,7 +62,7 @@ final class MoldSalesHistoricalProjection {
         var candidates=jdbc.queryForList("select p.product_id as \"productLineId\",p.product_specific_code as \"styleCode\",p.product_name as \"productName\" from plm_product p where p.deleted_flag=0 and p.product_type='product_line' and "+access.visibleSqlClause("product","p.product_id"));
         var counts=new HashMap<String,Integer>();for(var p:candidates)counts.merge(text(p.get("styleCode")),1,Integer::sum);for(var p:candidates)if(counts.get(text(p.get("styleCode")))==1)roots.put(text(p.get("styleCode")),p);
         if(!administrator&&roots.isEmpty()&&physical.isEmpty())return;
-        loadCatalogue();
+        loadCatalogue();if(requested!=null)requested=requested.includingSkuAliases(selfSkus.values());
         var scopeArgs=new ArrayList<Object>();var scopes=new ArrayList<String>();
         if(administrator)scopes.add("true");else{
             if(!roots.isEmpty()){scopes.add("f.style_code in ("+String.join(",",Collections.nCopies(roots.size(),"?"))+")");scopeArgs.addAll(roots.keySet());}
@@ -51,8 +73,8 @@ final class MoldSalesHistoricalProjection {
                 if(!roots.containsKey("BA")){transparent+=" and f.phone_code in ("+String.join(",",Collections.nCopies(visibleBaPhones.size(),"?"))+")";scopeArgs.addAll(visibleBaPhones);}scopes.add(transparent+")");
             }
         }
-        String scope="("+String.join(" or ",scopes)+")";
-        String sql="select f.style_code as style,f.phone_code as phone,f.item_code as code,f.source_kind as source,"+ORIGINAL_PRODUCT+" as product,(h.source_id is not null) as sealed,coalesce(g.classification,'') as classification,coalesce(g.evidence,'{}'::jsonb)::text as evidence,coalesce(h.display_phone_code,'') as \"displayPhoneCode\",coalesce(h.display_name,'') as \"displayName\",coalesce(h.mapping_reason,'') as \"mappingReason\",sum(f.quantity) as quantity,count(*) as lines,array_to_json(array_agg(distinct coalesce(f.source_data->>'name','')))::text as names from (select * from plm_mold_sales_fact where "+eligible+") f left join plm_mold_sales_history_line h on f.source_kind='eccount' and h.source_id=substring(f.source_id,9) left join plm_mold_sales_history_group g on g.batch_id=h.batch_id and g.style_code=h.style_code and g.phone_code=h.phone_code where "+scope+" group by f.style_code,f.phone_code,f.item_code,f.source_kind,"+ORIGINAL_PRODUCT+",h.source_id is not null,g.classification,g.evidence,h.display_phone_code,h.display_name,h.mapping_reason";
+        String scope="("+String.join(" or ",scopes)+")";if(requested!=null)scope+=" and "+requested.sql("f",scopeArgs);
+        String sql="select f.style_code as style,f.phone_code as phone,f.item_code as code,f.source_kind as source,"+ORIGINAL_PRODUCT+" as product,(h.source_id is not null) as sealed,coalesce(g.classification,'') as classification,coalesce(g.evidence,'{}'::jsonb)::text as evidence,coalesce(h.display_phone_code,'') as \"displayPhoneCode\",coalesce(h.display_name,'') as \"displayName\",coalesce(h.mapping_reason,'') as \"mappingReason\",sum(f.quantity) as quantity,count(*) as lines,array_to_json(array_agg(distinct coalesce(f.source_data->>'name','')))::text as names from (select * from plm_mold_sales_fact where "+eligible+") f left join plm_mold_sales_history_line h on f.source_kind='eccount' and h.source_id="+sealedSourceId("f")+" left join plm_mold_sales_history_group g on g.batch_id=h.batch_id and g.style_code=h.style_code and g.phone_code=h.phone_code where "+scope+" group by f.style_code,f.phone_code,f.item_code,f.source_kind,"+ORIGINAL_PRODUCT+",h.source_id is not null,g.classification,g.evidence,h.display_phone_code,h.display_name,h.mapping_reason";
         var rows=scopeArgs.isEmpty()?jdbc.queryForList(sql):jdbc.queryForList(sql,scopeArgs.toArray());
         for(var row:rows){
             var bucket=new Bucket(text(row.get("style")),text(row.get("phone")),text(row.get("code")),text(row.get("source")),text(row.get("product")),Boolean.TRUE.equals(row.get("sealed")),text(row.get("classification")),node(row.get("evidence")),text(row.get("displayPhoneCode")),text(row.get("displayName")),text(row.get("mappingReason")),amount(row.get("quantity")),number(row.get("lines")),texts(node(row.get("names"))));
@@ -146,12 +168,16 @@ final class MoldSalesHistoricalProjection {
     Map<String,Object> orders(String key,int page,int size){
         require(page>0&&size>0&&size<=100,"分页参数无效");var buckets=selections.get(key);require(buckets!=null&&!buckets.isEmpty(),"历史销量组不存在或未获授权");var args=new ArrayList<Object>();String where=selectionSql(buckets,args);var total=jdbc.queryForObject("select count(*) from plm_mold_sales_fact f where "+eligible+" and ("+where+")",Long.class,args.toArray());args.add(size);args.add((long)(page-1)*size);
         String fields="f.source_id as \"sourceId\",f.order_id as \"orderId\",f.order_no as \"orderNo\",f.order_status as \"orderStatus\",f.item_code as \"itemCode\",f.phone_code as \"phoneCode\",f.quantity,f.unit,'eligible' as eligibility,coalesce(f.source_data->>'name','') as name,coalesce(f.source_data->>'name','') as \"originalName\","+ORIGINAL_PRODUCT+" as \"originalProductName\",f.source_data->>'spec' as specification,f.business_date::text as \"orderDate\",f.business_date::text as \"businessDate\",f.source_kind as source,f.company,f.source_file as \"sourceFile\",f.source_sheet as \"sourceSheet\",f.source_row as \"sourceRow\",hh.display_phone_code as \"displayPhoneCode\",hh.display_name as \"displayName\",hh.mapping_reason as \"mappingReason\"";
-        var rows=jdbc.queryForList("select "+fields+" from (select * from plm_mold_sales_fact where "+eligible+") f left join plm_mold_sales_history_line hh on f.source_kind='eccount' and hh.source_id=substring(f.source_id,9) where ("+where+") order by f.business_date desc,f.source_id limit ? offset ?",args.toArray());var result=new LinkedHashMap<String,Object>();result.put("orders",rows);result.put("totalElements",total);result.put("page",page);result.put("size",size);return result;
+        var rows=jdbc.queryForList("select "+fields+" from (select * from plm_mold_sales_fact where "+eligible+") f left join plm_mold_sales_history_line hh on f.source_kind='eccount' and hh.source_id="+sealedSourceId("f")+" where ("+where+") order by f.business_date desc,f.source_id limit ? offset ?",args.toArray());var result=new LinkedHashMap<String,Object>();result.put("orders",rows);result.put("totalElements",total);result.put("page",page);result.put("size",size);return result;
     }
     String attributedSql(String key,List<Object> args){var buckets=extras.get(key);return buckets==null?"false":selectionSql(buckets,args);}
     private String selectionSql(List<Bucket> buckets,List<Object> args){
+        // Expose the indexed original style/phone and source predicates before the row-level
+        // name/sealed test. The exact six-part selection still decides ownership and dedupes.
+        var prefixes=new LinkedHashSet<List<Object>>();for(var b:buckets)prefixes.add(List.of(b.style(),b.phone(),b.source()));for(var prefix:prefixes)args.addAll(prefix);
+        String scope="(f.style_code,f.phone_code,f.source_kind) in ("+String.join(",",Collections.nCopies(prefixes.size(),"(?,?,?)"))+")";
         var rows=new ArrayList<String>();var seen=new HashSet<List<Object>>();for(var b:buckets){var tuple=List.<Object>of(b.style(),b.phone(),b.itemCode(),b.source(),b.originalProduct(),b.sealed());if(!seen.add(tuple))continue;rows.add("(?,?,?,?,?,?)");args.addAll(tuple);}
-        return "(f.style_code,f.phone_code,f.item_code,f.source_kind,"+ORIGINAL_PRODUCT+",exists(select 1 from plm_mold_sales_history_line sh where f.source_kind='eccount' and sh.source_id=substring(f.source_id,9))) in ("+String.join(",",rows)+")";
+        return scope+" and (f.style_code,f.phone_code,f.item_code,f.source_kind,"+ORIGINAL_PRODUCT+",exists(select 1 from plm_mold_sales_history_line sh where f.source_kind='eccount' and sh.source_id="+sealedSourceId("f")+")) in ("+String.join(",",rows)+")";
     }
     private static final Map<String,Category> CATEGORIES=Map.ofEntries(
         Map.entry("airbag pintura羽绒服喷油",new Category("airbag-pintura","羽绒服喷油",null)),Map.entry("airbag pintura",new Category("airbag-pintura","羽绒服喷油",null)),

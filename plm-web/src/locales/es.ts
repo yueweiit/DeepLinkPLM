@@ -49,6 +49,8 @@ export default {
   '选择其他型号': 'Elegir otro modelo',
   '选择要继续申请的手机型号': 'Elegir el modelo para la solicitud',
   '重试读取审批详情': 'Reintentar cargar los detalles de la solicitud',
+  '明细读取超时，请重试': 'La carga de los detalles agotó el tiempo de espera; inténtelo de nuevo',
+  '明细读取失败，请重试': 'No se pudieron cargar los detalles; inténtelo de nuevo',
   '审批详情读取失败，请重试': 'No se pudieron cargar los detalles de la solicitud; inténtelo de nuevo',
   '该申请不属于当前新品，请重新选择': 'La solicitud no pertenece a este proyecto; elija otra',
   '申请详情已变化，请重新打开后操作': 'Los detalles cambiaron; vuelva a abrir la solicitud',
