@@ -87,7 +87,7 @@ class MoldSalesArchiveLocalIntegrationTest extends MoldSalesLocalFixture {
         imported(List.of(line(1,"Lemos","2024-01-01","NFA4030005801","50","Pieza")));assertThat(amount(first("sales","all").get("salesQuantity"))).isEqualByComparingTo("170");assertThat(((Collection<?>)first("sales","all").get("phoneCodes")).contains("0058")).isTrue();assertThat(service.unmatched("sales")).isEmpty();
     }
     @Test void unmappedExactCodesRemainVisibleAndRestrictedUsersGetNoGlobalCountsOrCosts()throws Exception{
-        imported(List.of(line(1,"Lemos","2024-01-01","NFA4030999901","50","Pieza"),line(2,"YW","2024-01-01","NFA4030005701","40","Pieza")));assertThat(service.unmatched("sales")).singleElement().satisfies(r->{assertThat(r).containsEntry("phoneCode","9999");assertThat(amount(r.get("quantity"))).isEqualByComparingTo("50");});
+        imported(List.of(line(1,"Lemos","2024-01-01","NFA4030999901","50","Pieza"),line(2,"YW","2024-01-01","NFA4030005701","40","Pieza")));assertThat(service.unmatched("sales")).isEmpty();assertThat(records(service.historyReviewPage(1,30,"9999","historical_reference").get("content"))).singleElement().satisfies(r->{assertThat(r).containsEntry("phoneCode","9999");assertThat(amount(r.get("quantity"))).isEqualByComparingTo("50");});
         when(access.actor()).thenReturn(new CurrentUser(2L,"scoped","Scoped",false));financeRead=false;var page=service.page(1,50,"","all",null,null,"sales");assertThat(page).doesNotContainKeys("unassignedQuantity","ignoredQuantity");assertThat(page.toString()).doesNotContain("totalCost","manufacturingCost");assertThat(((Map<?,?>)((Map<?,?>)page.get("status")).get("archive")).keySet().stream().map(Object::toString).toList()).containsExactlyInAnyOrder("imported","importedAt");
     }
 }

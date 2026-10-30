@@ -75,10 +75,13 @@ public final class MoldSalesRules {
     /** Manual amounts are already the entire group's total, never a per-set or per-model amount. */
     public static Map<String,Object> costs(JsonNode basis,BigDecimal quantity,int sets,Map<String,Object> actual){
         if(basis==null&&actual==null)return null;
-        var out=new LinkedHashMap<String,Object>();out.put("basis",basis);out.put("costSets",sets);
+        var out=new LinkedHashMap<String,Object>();var unknown=new LinkedHashSet<String>();if(basis!=null)for(var field:basis.path("unknownFields"))unknown.add(field.asText());
+        var displayed=basis==null?null:basis.deepCopy();if(displayed instanceof com.fasterxml.jackson.databind.node.ObjectNode object)for(String field:unknown)object.putNull(field);
+        out.put("basis",displayed);out.put("costSets",sets);out.put("unknownFields",unknown);
+        if(basis!=null){out.put("sourceKind",basis.path("sourceKind").asText("cost_sheet"));out.put("confirmation",basis.path("confirmation"));out.put("referenceOnly",basis.path("referenceOnly").asBoolean());}
         var budgetTotal=basis==null?null:new BigDecimal(basis.path("landedTotal").asText()).multiply(BigDecimal.valueOf(sets));
         var total=actual==null?budgetTotal:new BigDecimal(actual.get("totalCost").toString());
-        var contribution=basis==null?null:new BigDecimal(basis.path("referenceSellingPrice").asText()).subtract(new BigDecimal(basis.path("referenceUnitProductionCost").asText()));
+        var contribution=basis==null||unknown.contains("referenceSellingPrice")||unknown.contains("referenceUnitProductionCost")?null:new BigDecimal(basis.path("referenceSellingPrice").asText()).subtract(new BigDecimal(basis.path("referenceUnitProductionCost").asText()));
         out.put("source",actual==null?"budget":"actual");out.put("actual",actual);out.put("budgetTotalCost",budgetTotal);
         out.put("currency",actual==null?basis.path("currency").asText():"CNY");out.put("totalCost",total);
         out.put("perUnitCost",quantity!=null&&quantity.signum()>0?total.divide(quantity,4,RoundingMode.HALF_UP):null);

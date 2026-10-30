@@ -4,13 +4,15 @@ import { t as uiText } from '@/locales'
 import {computed,onBeforeUnmount,ref,watch} from 'vue'
 import {useUserStore} from '@/stores/user'
 import * as api from '@/api/modules/moldSales'
+const props=withDefaults(defineProps<{initialClassification?:api.HistoryClassification|'all'}>(),{initialClassification:'all'})
 const model=defineModel<boolean>({default:false}),emit=defineEmits<{changed:[]}>(),user=useUserStore()
 const data=ref<api.HistoryReviewPage>(),sources=ref<api.HistoryReviewSource[]>([]),selected=ref(''),preview=ref<api.HistoryReviewSource>(),details=ref<api.HistoryReviewDetail>()
 const page=ref(1),keyword=ref(''),classification=ref('all'),loading=ref(false),sourceLoading=ref(false),saving=ref(false),error=ref(''),unknown=ref(false),orderPage=ref(1),currentGroup=ref<api.HistoryReviewGroup>()
 const reason=ref('按2026-10-28已确认的三项推荐处理，保留原单原码；旧码只做型号对照，未核实不合并模具成本')
 let epoch=0,sourceEpoch=0,detailEpoch=0,timer:ReturnType<typeof setTimeout>|undefined,poll:ReturnType<typeof setTimeout>|undefined,disposed=false
 const chosen=computed(()=>sources.value.find(s=>s.sha256===selected.value)),summary=computed(()=>data.value?.summary||preview.value?.summary||chosen.value?.summary)
-const labels:Record<api.HistoryClassification,string>={coded_history:'按原编码整理',purchased:'外购销量',pending:'历史待补'}
+const classifications=['coded_history','named_history','purchased','pending','historical_reference'] as const
+const labels:Record<api.HistoryClassification,string>={coded_history:'按原编码整理',named_history:'按原品名整理',purchased:'外购销量',pending:'当前待补',historical_reference:'历史待考'}
 const qty=(n:number|string|undefined|null)=>n==null?'—':new Intl.NumberFormat('zh-CN').format(Number(n))
 const canApply=computed(()=>!!preview.value&&!preview.value.applied&&!data.value?.applied&&!loading.value&&!sourceLoading.value&&!saving.value&&!unknown.value&&!!reason.value.trim())
 function failure(e:unknown){return e instanceof Error?e.message:'读取失败，请重试'}
@@ -48,7 +50,7 @@ async function apply(){
 async function reconcile(){const auth=user.token;try{await refresh();if(auth!==user.token||!model.value)return;if(data.value?.applied){unknown.value=false;emit('changed');return}const job=await api.getMoldSalesJob();if(auth!==user.token||!model.value)return;if(job.status==='running'&&job.kind==='historyReview'&&job.sourceHash){saving.value=true;void checkResult(job.sourceHash)}else if(job.status!=='running')unknown.value=false}catch(e){if(auth===user.token)error.value=failure(e)}}
 async function orders(group=currentGroup.value){
  if(!group)return;currentGroup.value=group;const id=++detailEpoch,auth=user.token;loading.value=true;error.value=''
- try{const value=await api.getHistoryReviewOrders({styleCode:group.styleCode,phoneCode:group.phoneCode,page:orderPage.value,size:20});if(id===detailEpoch&&auth===user.token&&model.value)details.value=value}
+ try{const value=await api.getHistoryReviewOrders({styleCode:group.styleCode,phoneCode:group.phoneCode,...(group.sourceGroupKey?{sourceGroupKey:group.sourceGroupKey}:{}),page:orderPage.value,size:20});if(id===detailEpoch&&auth===user.token&&model.value)details.value=value}
  catch(e){if(id===detailEpoch&&auth===user.token)error.value=failure(e)}finally{if(id===detailEpoch)loading.value=false}
 }
 function showOrders(group:api.HistoryReviewGroup){orderPage.value=1;void orders(group)}
@@ -58,7 +60,7 @@ watch(classification,()=>{if(page.value!==1)page.value=1;else if(model.value&&!d
 watch(page,()=>{if(model.value&&!details.value)void load()})
 watch(keyword,()=>{clearTimeout(timer);timer=setTimeout(resetPage,300)})
 watch(selected,()=>{preview.value=undefined})
-watch(model,open=>{++epoch;++sourceEpoch;++detailEpoch;clearTimeout(poll);clearTimeout(timer);if(open){page.value=1;classification.value='all';keyword.value='';details.value=undefined;void refresh()}else{saving.value=false;preview.value=undefined;loading.value=false;sourceLoading.value=false}},{immediate:true})
+watch(model,open=>{++epoch;++sourceEpoch;++detailEpoch;clearTimeout(poll);clearTimeout(timer);if(open){page.value=1;classification.value=props.initialClassification;keyword.value='';details.value=undefined;void refresh()}else{saving.value=false;preview.value=undefined;loading.value=false;sourceLoading.value=false}},{immediate:true})
 watch(()=>user.token,()=>{++epoch;++sourceEpoch;++detailEpoch;clearTimeout(poll);clearTimeout(timer);data.value=undefined;sources.value=[];preview.value=undefined;details.value=undefined;model.value=false;saving.value=false;unknown.value=false;error.value=''})
 onBeforeUnmount(()=>{disposed=true;++epoch;++sourceEpoch;++detailEpoch;clearTimeout(poll);clearTimeout(timer)})
 </script>
@@ -67,29 +69,30 @@ onBeforeUnmount(()=>{disposed=true;++epoch;++sourceEpoch;++detailEpoch;clearTime
   <div class="review-toolbar"><el-button v-if="details" size="small" @click="back">{{ uiText("返回分类列表") }}</el-button><span class="review-scope">{{ uiText("原始订单和编码保留；型号对照不合并实物模具或成本。") }}</span><el-button size="small" :disabled="saving" @click="reconcile">{{ uiText("刷新处理状态") }}</el-button></div>
   <el-alert v-if="error" :title="error" type="error" :closable="false"/>
   <p v-if="saving" class="review-note" role="status">{{ uiText("正在保存已确认方案，请等待结果；原单、累计产量和模具成本保持原依据。") }}</p>
-  <div v-if="summary" class="review-summary"><span v-for="kind in (['coded_history','purchased','pending'] as const)" :key="kind">{{labels[kind]}} <b>{{qty(summary.categories[kind]?.quantity)}}</b>{{ uiText(" 件") }}</span></div>
+  <div v-if="summary" class="review-summary"><template v-for="kind in classifications" :key="kind"><span v-if="summary.categories[kind]">{{uiText(labels[kind])}} <b>{{qty(summary.categories[kind]?.quantity)}}</b>{{ uiText(" 件") }}</span></template></div>
   <section v-if="!data?.applied&&!details" class="review-prepare">
    <template v-if="sources.length"><el-select v-if="sources.length>1" v-model="selected" size="small" :aria-label='uiText("已确认历史处理方案")'><el-option v-for="s in sources" :key="s.sha256" :value="s.sha256" :label="uiText('{value0}组 · {value1}件',{value0:(qty(s.summary.groups)),value1:(qty(s.summary.quantity))})"/></el-select><span v-else>{{ uiText("已准备确认范围：") }}{{qty(chosen?.summary.groups)}}{{ uiText(" 组、") }}{{qty(chosen?.summary.rows)}}{{ uiText(" 条原单") }}</span><el-button size="small" :loading="sourceLoading" :disabled="saving" @click="makePreview">{{ uiText("核对处理范围") }}</el-button><el-button type="primary" size="small" :disabled="!canApply" :loading="saving" @click="apply">{{ uiText("应用已确认方案") }}</el-button></template>
    <span v-else-if="!sourceLoading">{{ uiText("尚未准备历史处理资料，请联系管理员。") }}</span>
    <template v-if="preview"><p class="review-note">{{ uiText("已核对 ") }}{{qty(preview.summary.quantity)}}{{ uiText(" 件。只新增历史分类及型号对照，不生成实物、套数或成本事实。") }}</p><el-input v-model="reason" :aria-label='uiText("处理依据")' maxlength="1000" :disabled="saving"/></template>
   </section>
-  <p v-if="data?.applied&&!details" class="review-note">{{ uiText("已由 ") }}{{data.appliedBy}}{{ uiText(" 保存本批 ") }}{{qty(data.summary?.groups)}}{{ uiText(" 组、") }}{{qty(data.summary?.rows)}}{{ uiText(" 条明细。实际成本和套数未核定的继续待补。") }}</p>
+  <p v-if="data?.applied&&!details" class="review-note">{{ uiText("已由 ") }}{{data.appliedBy}}{{ uiText(" 保存本批 ") }}{{qty((data.initialSummary||data.summary)?.groups)}}{{ uiText(" 组、") }}{{qty((data.initialSummary||data.summary)?.rows)}}{{ uiText(" 条原始明细；下方显示当前归属与缺项。") }}</p>
+  <details v-if="data?.initialSummary&&!details" class="review-evidence"><summary>{{ uiText("原处理批次快照") }}</summary><p>{{ uiText("原批次待补 ") }}{{qty(data.initialSummary.categories.pending.quantity)}}{{ uiText(" 件；保留审计，不作为当前待办。") }}</p></details>
   <template v-if="!details">
-   <div class="review-filters"><el-input v-model="keyword" size="small" clearable :placeholder='uiText("搜索款式、原手机编码、型号或对照编码")' :aria-label='uiText("历史资料搜索")'/><el-select v-model="classification" size="small" :aria-label='uiText("历史分类")'><el-option value="all" :label='uiText("全部历史资料")'/><el-option v-for="kind in (['coded_history','purchased','pending'] as const)" :key="kind" :value="kind" :label="labels[kind]"/></el-select></div>
+   <div class="review-filters"><el-input v-model="keyword" size="small" clearable :placeholder='uiText("搜索款式、原手机编码、型号或对照编码")' :aria-label='uiText("历史资料搜索")'/><el-select v-model="classification" size="small" :aria-label='uiText("历史分类")'><el-option value="all" :label='uiText("全部历史资料")'/><el-option v-for="kind in classifications" :key="kind" :value="kind" :label="uiText(labels[kind])"/></el-select></div>
    <div class="review-list" v-loading="loading" role="table" :aria-label='uiText("历史订单分类列表")'>
     <div class="review-row review-head" role="row"><span>{{ uiText("款式") }}</span><span>{{ uiText("手机型号／原编码") }}</span><span>{{ uiText("订单件数") }}</span><span>{{ uiText("处理结果") }}</span><span>{{ uiText("原单") }}</span></div>
-    <article v-for="r in data?.content" :key="r.styleCode+r.phoneCode" class="review-row" role="row"><span><b>{{r.evidence.styleName}}</b><small>{{r.styleCode}}</small></span><span><b>{{r.evidence.phoneName}}</b><small>{{ uiText("原编码 ") }}{{r.phoneCode}}</small></span><strong class="review-quantity">{{qty(r.quantity)}}</strong><span>{{labels[r.classification]}}<small v-if="r.classification==='purchased'">{{ uiText("不分摊自有模具成本") }}</small><small v-else>{{ uiText("套数、实际成本待补") }}</small><small v-if="r.evidence.sourceMoldCodes?.length">{{r.evidence.sourceMoldCodes.join(' / ')}}</small><small v-if="r.evidence.codeConflict">{{ uiText("原码有差异，保留待核") }}</small></span><el-button size="small" link type="primary" @click="showOrders(r)">{{ uiText("查看原单") }}</el-button></article>
+    <article v-for="r in data?.content" :key="r.sourceGroupKey||r.styleCode+r.phoneCode" class="review-row" role="row"><span><b>{{r.productName||r.evidence.styleName}}</b><small>{{r.styleCode}}</small></span><span><b>{{r.evidence.phoneName}}</b><small>{{ uiText("原编码 ") }}{{r.phoneCode}}</small></span><strong class="review-quantity">{{qty(r.quantity)}}</strong><span>{{uiText(labels[r.classification])}}<small v-if="r.classification==='purchased'">{{ uiText("不分摊自有模具成本") }}</small><small v-else-if="r.classification==='pending'">{{r.resolutionReason||r.evidence.missingEvidence||uiText("归属资料待补")}}</small><small v-else-if="r.classification==='historical_reference'">{{r.resolutionReason||r.evidence.missingEvidence||uiText('原单保留，暂不追溯')}}</small><small v-else-if="r.classification==='named_history'">{{ uiText("按原商品名分类，仅用于销量") }}</small><small v-if="r.evidence.sourceMoldCodes?.length">{{r.evidence.sourceMoldCodes.join(' / ')}}</small><small v-if="r.evidence.codeConflict">{{ uiText("原码有差异，保留待核") }}</small></span><el-button size="small" link type="primary" @click="showOrders(r)">{{ uiText("查看原单") }}</el-button></article>
     <el-empty v-if="!loading&&!data?.content.length" :description="data?.applied?uiText('没有符合条件的历史资料'):uiText('核对并应用已确认方案后，可在此查看原单及型号对照')"/>
    </div>
    <el-pagination v-if="data?.applied" size="small" layout="total,prev,pager,next" :total="data.totalElements" :page-size="30" v-model:current-page="page"/>
   </template>
   <template v-else>
-   <p class="review-note"><b>{{details.group.evidence.styleName}} · {{details.group.evidence.phoneName}}</b>{{ uiText(" · 原编码 ") }}{{currentGroup?.phoneCode}} · {{labels[details.group.classification]}}</p>
+   <p class="review-note"><b>{{details.group.evidence.styleName}} · {{details.group.evidence.phoneName}}</b>{{ uiText(" · 原编码 ") }}{{currentGroup?.phoneCode}} · {{uiText(labels[details.group.classification])}}</p>
    <p v-if="details.group.evidence.recommendation" class="review-note">{{details.group.evidence.recommendation}}</p>
    <details class="review-evidence"><summary>{{ uiText("原单型号与核对依据") }}</summary><p>{{details.group.evidence.originalNamesWithQuantity}}</p><p v-if="details.group.evidence.originalMoldCodes">{{ uiText("原模具编码：") }}{{details.group.evidence.originalMoldCodes}}</p><p>{{details.group.evidence.missingEvidence}}</p></details>
    <div class="review-list order-list" role="table" :aria-label='uiText("历史原单与型号对照")' v-loading="loading">
     <div class="order-row review-head" role="row"><span>{{ uiText("日期／订单") }}</span><span>{{ uiText("原型号／原手机编码") }}</span><span>{{ uiText("型号对照（仅显示）") }}</span><span>{{ uiText("原商品编码／数量") }}</span></div>
-    <article v-for="r in details.orders" :key="r.sourceId" class="order-row" role="row"><span>{{r.orderDate}}<small>{{r.orderNo}} · {{r.company}}</small><details><summary>{{ uiText("原件位置") }}</summary><small>{{r.sourceFile}} · {{r.sourceSheet}}{{ uiText(" · 第 ") }}{{r.sourceRow}}{{ uiText(" 行") }}</small></details></span><span>{{r.originalName}}<small>{{r.phoneCode}}</small></span><span>{{r.displayName||uiText('原名保留')}}<small v-if="r.displayPhoneCode">{{ uiText("参考资料 ") }}{{r.displayPhoneCode}}{{ uiText("（不确认共模）") }}</small><details v-if="r.mappingReason"><summary>{{ uiText("对照依据") }}</summary><small>{{r.mappingReason}}</small></details></span><span>{{r.itemCode}}<strong class="review-quantity">{{qty(r.quantity)}} {{r.unit}}</strong></span></article>
+    <article v-for="r in details.orders" :key="r.sourceId" class="order-row" role="row"><span>{{r.orderDate}}<small>{{r.orderNo}} · {{r.company}}</small><details><summary>{{ uiText("原件位置") }}</summary><small>{{r.sourceFile}} · {{r.sourceSheet}}{{ uiText(" · 第 ") }}{{r.sourceRow}}{{ uiText(" 行") }}</small></details></span><span>{{r.originalName}}<small v-if="r.originalProductName">{{ uiText("原商品：") }}{{r.originalProductName}}</small><small>{{r.phoneCode}}</small></span><span>{{r.displayName||uiText('原名保留')}}<small v-if="r.displayPhoneCode">{{ uiText("参考资料 ") }}{{r.displayPhoneCode}}{{ uiText("（不确认共模）") }}</small><details v-if="r.mappingReason"><summary>{{ uiText("对照依据") }}</summary><small>{{r.mappingReason}}</small></details></span><span>{{r.itemCode}}<strong class="review-quantity">{{qty(r.quantity)}} {{r.unit}}</strong></span></article>
    </div>
    <el-pagination size="small" layout="total,prev,pager,next" :total="details.totalElements" :page-size="20" v-model:current-page="orderPage" @current-change="orders()"/>
   </template>

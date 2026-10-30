@@ -113,15 +113,6 @@ public final class MoldSalesHistoryReviewStore {
         });
     }
     private void writeLines(UUID id,List<JsonNode> rows){jdbc.update("insert into plm_mold_sales_history_line select x.\"sourceId\",?,x.\"styleCode\",x.\"phoneCode\",x.\"displayPhoneCode\",x.\"displayName\",x.\"mappingReason\" from jsonb_to_recordset(?::jsonb) as x(\"sourceId\" text,\"styleCode\" text,\"phoneCode\" text,\"displayPhoneCode\" text,\"displayName\" text,\"mappingReason\" text)",id,encode(rows));}
-    Map<String,Object> page(int page,int size,String keyword,String classification){
-        require(page>0&&size>0&&size<=100&&(classification.equals("all")||KINDS.contains(classification)),"历史资料分页或分类无效");
-        var args=new ArrayList<Object>();String where="true";if(!classification.equals("all")){where+=" and g.classification=?";args.add(classification);}
-        if(keyword!=null&&!keyword.isBlank()){where+=" and (position(lower(?) in lower(g.style_code||' '||g.phone_code||' '||g.evidence::text))>0 or exists(select 1 from plm_mold_sales_history_line l where l.batch_id=g.batch_id and l.style_code=g.style_code and l.phone_code=g.phone_code and position(lower(?) in lower(coalesce(l.display_phone_code,'')||' '||coalesce(l.display_name,'')))>0))";args.add(keyword.strip());args.add(keyword.strip());}
-        long count=jdbc.queryForObject("select count(*) from plm_mold_sales_history_group g where "+where,Long.class,args.toArray());
-        args.add(size);args.add(((long)page-1)*size);
-        var rows=jdbc.queryForList("select g.style_code as \"styleCode\",g.phone_code as \"phoneCode\",g.classification,g.quantity,g.line_count as \"lineCount\",g.evidence::text from plm_mold_sales_history_group g where "+where+" order by g.quantity desc,g.style_code,g.phone_code limit ? offset ?",args.toArray());
-        rows.forEach(r->r.put("evidence",node(r.get("evidence"))));var result=new LinkedHashMap<>(metadata());result.put("content",rows);result.put("page",page);result.put("size",size);result.put("totalElements",count);result.put("totalPages",(count+size-1)/size);return result;
-    }
     Map<String,Object> detail(String style,String phone,int page,int size){
         require(style!=null&&style.matches("[A-Z]{2}")&&phone!=null&&phone.matches("[0-9]{4}")&&page>0&&size>0&&size<=100,"历史订单分组或分页无效");
         var group=jdbc.queryForList("select classification,quantity,line_count as \"lineCount\",evidence::text from plm_mold_sales_history_group where style_code=? and phone_code=?",style,phone);require(group.size()==1,"历史分组不存在");group.get(0).put("evidence",node(group.get(0).get("evidence")));
