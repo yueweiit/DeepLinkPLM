@@ -396,4 +396,14 @@ describe('catalog compact responsive layout contract',()=>{
 
   it('offers one checked-style selection entry above the list and keeps row and detail views free of duplicate add actions',async()=>{const router=await start('/partner-products?supplierCode=TEST-SUP');expect(wrapper.findAll('button').filter(button=>button.text()==='选择样品')).toHaveLength(1);expect(wrapper.text()).not.toContain('加入选品');expect(wrapper.get('.catalog-style-actions').findAll('button').map(button=>button.text())).toEqual(['详情','编辑','删除']);expect(wrapper.findAll('button').find(button=>button.text()==='选择样品')!.attributes('disabled')).toBeDefined();await click('详情');expect(wrapper.find('.detail-scroll').exists()).toBe(true);expect(wrapper.text()).not.toContain('加入选品');expect(wrapper.findAll('button').filter(button=>button.text()==='选择样品')).toHaveLength(0);expect(wrapper.get('.test-files').text()).toContain('本款原图.png');expect(wrapper.get('.supplier-style-detail').text()).toContain('iPhone 11');await click('返回款式列表');expect(router.currentRoute.value.query.supplierCode).toBe('TEST-SUP');await chooseCatalogStyle();expect(wrapper.findAll('.selection-model-row')).toHaveLength(1);expect(api.addCatalogSelection).not.toHaveBeenCalled();expect(api.previewCatalogSelection).not.toHaveBeenCalled()})
 
+  it('keeps full source-position labels in review details and leaves ordinary source numbers intact',async()=>{
+    const labels=['原无序号（Samsung栏111后第1行）','原无序号（Samsung栏111后第2行）','001']
+    const entries=labels.map((supplierIndex,i)=>({supplierIndex,rawBrandGroup:'Samsung',rawModelText:['Z FOLD8','Z FOLD8 WIDE','Galaxy S26'][i],rawStatus:'原图红字',rawNote:i===2?'原备注：有推窗；源文件M23；原图SHA abc123':'',phoneModelIds:[],phones:[]}))
+    const original=row({supplierModelEntries:entries});const before=JSON.stringify(original);api.catalogStyle.mockResolvedValue(original);await start('/partner-products?supplierCode=TEST-SUP&sourceKind=selection&recordId=17&rowId=stable-row')
+    const records=wrapper.findAll('.supplier-model-entry');expect(records.map(record=>record.get('small').text())).toEqual(['原表 — · Samsung','原表 — · Samsung','原表 001 · Samsung'])
+    expect(records.map(record=>record.get('strong').text())).toEqual(['Z FOLD8','Z FOLD8 WIDE','Galaxy S26'])
+    for(let i=0;i<2;i++){const notes=records[i].get('.model-review-notes');expect((notes.element as HTMLDetailsElement).open).toBe(false);(notes.element as HTMLDetailsElement).open=true;await notes.trigger('toggle');expect(notes.get('p').text()).toBe(labels[i])}
+    const originalNote=records[2].get('.model-review-notes');expect((originalNote.element as HTMLDetailsElement).open).toBe(false);expect(originalNote.get('p').text()).toBe(entries[2].rawNote);expect(JSON.stringify(original)).toBe(before);expect(api.updateCatalogStyle).not.toHaveBeenCalled()
+  })
+
 })

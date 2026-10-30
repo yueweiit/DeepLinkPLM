@@ -26,7 +26,7 @@ import static com.yuewei.plm.module.partner.PartnerValues.*;
 import static com.yuewei.plm.module.partner.PartnerSelectionService.scopeIds;
 
 /** Real PostgreSQL transactions, restricted to a disposable schema in a fixed loopback QA database. */
-@EnabledIfEnvironmentVariable(named="PLM_SELECTION_TEST_URL",matches="(?:jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/plm_selection_range_qa|jdbc:postgresql://127\\.0\\.0\\.1:15504/catalog_nonempty_filter_tests|jdbc:postgresql://127\\.0\\.0\\.1:15483/plm_foundation_crud_it\\?currentSchema=plm)")
+@EnabledIfEnvironmentVariable(named="PLM_SELECTION_TEST_URL",matches="(?:jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/plm_selection_range_qa|jdbc:postgresql://127\\.0\\.0\\.1:15504/catalog_nonempty_filter_tests|jdbc:postgresql://127\\.0\\.0\\.1:15483/plm_foundation_crud_it\\?currentSchema=plm|jdbc:postgresql://127\\.0\\.0\\.1:15504/plm_source_index_qa_20261031_6b7oial9)")
 class PartnerSelectionLocalIntegrationTest {
  private JdbcTemplate jdbc,admin;private TransactionTemplate tx;private String schema;
  private PartnerSelectionService selections;private PartnerProductService products;private PartnerSampleService samples;

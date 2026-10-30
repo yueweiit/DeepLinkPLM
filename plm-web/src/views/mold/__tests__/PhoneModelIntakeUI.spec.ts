@@ -45,4 +45,21 @@ describe('phone intake compact work queue', () => {
   it('labels a replayed collection as the prior successful result after a timeout, not a second addition',async()=>{api.savePhoneIntakeSource.mockRejectedValueOnce(new Error('请求超时')).mockResolvedValueOnce({items:[candidate],addedSourceCount:71,replayed:true});await start();await collect();wrapper!.findAllComponents(ElCheckbox).find(value=>value.text().includes('仅收集待补项'))!.vm.$emit('update:modelValue',true);await flushPromises();await click('确认收集待补项');const first=api.savePhoneIntakeSource.mock.calls[0][0];expect(wrapper!.emitted('changed')).toBeUndefined();await click('确认收集待补项');expect(api.savePhoneIntakeSource.mock.calls[1][0]).toEqual(first);expect(viewText()).toContain('已核实上次收集结果：71 条来源已收集');expect(viewText()).toContain('未重复新增');expect(viewText()).not.toContain('新增 71 条来源');expect(wrapper!.emitted('changed')).toHaveLength(1);expect(reference.createPhoneModel).not.toHaveBeenCalled()})
   it('does not treat canceled collection as a write and keeps an explicitly retained draft open', async () => { await start(); await click('收集待补项'); wrapper!.getComponent(PhoneIntakeSourcePicker).vm.$emit('selected', structuredClone(input)); await flushPromises(); vi.spyOn(ElMessageBox, 'confirm').mockRejectedValue('cancel'); await click('取消'); expect(viewText()).toContain('预览收集结果'); expect(api.savePhoneIntakeSource).not.toHaveBeenCalled(); expect(api.savePhoneIntakeResolution).not.toHaveBeenCalled() })
   it.each([false, true])('keeps browsing read-only when authoritative maintenance permission is absent (editable=%s)', async editable => { api.getPhoneIntake.mockResolvedValue(page(false)); await start(editable); expect(viewText()).toContain('真实型号 5G'); expect(wrapper!.findAllComponents(ElButton).some(value => value.text() === '收集待补项')).toBe(false); await click('查看来源'); expect(wrapper!.findComponent(PhoneModelMultiSelect).exists()).toBe(false); expect(viewText()).toContain('当前账号只读'); expect(api.savePhoneIntakeResolution).not.toHaveBeenCalled() })
+  it('keeps full unnumbered positions in source review details instead of expanding the source title',async()=>{
+    const labels=['原无序号（Samsung栏111后第1行）','原无序号（Samsung栏111后第2行）','001']
+    const sources=labels.map((supplierIndex,i)=>({...source,id:i+1,supplierIndex,rawModelText:['Z FOLD8','Z FOLD8 WIDE','Galaxy S26'][i]}));api.getPhoneIntakeDetail.mockResolvedValue({...candidate,sources})
+    await start();await open();const records=new DOMWrapper(document.body).findAll('.intake-sources article')
+    expect(records[0].get('strong').text()).toContain('原序号 —');expect(records[0].get('strong').text()).not.toContain(labels[0]);expect(records[2].get('strong').text()).toContain('原序号 001')
+    for(let i=0;i<2;i++){const notes=records[i].get('.intake-source-location');expect((notes.element as HTMLDetailsElement).open).toBe(false);(notes.element as HTMLDetailsElement).open=true;await notes.trigger('toggle');expect(notes.get('p').text()).toBe(labels[i]);expect(records[i].text()).toContain(sources[i].rawModelText)}
+    expect(api.savePhoneIntakeResolution).not.toHaveBeenCalled()
+  })
+  it('keeps import-heading positions compact without changing the source selectors sent to preview',async()=>{
+    const labels=['原无序号（Samsung栏111后第1行）','原无序号（Samsung栏111后第2行）','001']
+    const entries=labels.map((supplierIndex,i)=>({...input.entries[0],supplierIndex,rawBrandGroup:'Samsung',rawModelText:['Z FOLD8','Z FOLD8 WIDE','Galaxy S26'][i]}));const incoming={...input,entries}
+    api.previewPhoneIntakeSource.mockImplementation(async data=>({canSave:true,previewToken:'display-only',entries:data.entries.map((entry:unknown)=>({...entry as object,source,action:'new'})),summary:{entryCount:3,newCount:3,appendCount:0,reusedCount:0},messages:[]}))
+    await start();await click('收集待补项');wrapper!.getComponent(PhoneIntakeSourcePicker).vm.$emit('selected',structuredClone(incoming));await flushPromises()
+    const headings=new DOMWrapper(document.body).findAll('.intake-import-index');expect(headings.map(heading=>heading.get('strong').text())).toEqual(['原序号 —','原序号 —','原序号 001']);expect(headings.slice(0,2).map(heading=>heading.get('details p').text())).toEqual(labels.slice(0,2))
+    await click('预览收集结果');expect(api.previewPhoneIntakeSource).toHaveBeenCalledWith(incoming);expect(api.savePhoneIntakeSource).not.toHaveBeenCalled()
+  })
+
 })

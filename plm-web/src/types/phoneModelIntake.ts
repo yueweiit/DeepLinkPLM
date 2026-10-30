@@ -8,6 +8,8 @@ export type PhoneIntakeReviewReason = 'name' | 'variant' | 'shared_group' | 'inc
 export type PhoneIntakeAction = 'create' | 'link' | 'defer' | 'reopen' | 'revise'
 export interface PhoneIntakeEntryInput {
   supplierIndex: string | number
+  rawBrandGroup?: string
+  rawModelText?: string
   componentText: string
   brandId?: number
   classification: PhoneIntakeClassification

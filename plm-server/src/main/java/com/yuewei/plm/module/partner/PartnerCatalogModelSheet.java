@@ -4,21 +4,24 @@ import java.util.*;
 import static com.yuewei.plm.module.partner.PartnerValues.*;
 
 /** Supplier model-table evidence belongs to one source style, never to the phone master or a stock balance. */
-final class PartnerCatalogModelSheet {
+public final class PartnerCatalogModelSheet {
     private PartnerCatalogModelSheet() {}
     private static final List<String> RAW_FIELDS = List.of("rawBrandGroup", "rawModelText", "rawStatus", "rawNote", "matchText", "matchNote");
     private static final Set<String> INPUT_FIELDS = Set.of("supplierIndex", "rawBrandGroup", "rawModelText", "rawStatus", "rawNote", "matchText", "matchNote", "phoneModelIds");
 
-    static List<Map<String,Object>> resolve(Object input, PartnerCatalogPhoneResolver.ResolutionScope scope) {
+    static List<Map<String,Object>> resolve(Object input, PartnerCatalogPhoneResolver.ResolutionScope scope, List<Map<String,Object>> previous) {
         require(input instanceof List<?> && !((List<?>)input).isEmpty(), "请填写本款型号表，不能用空白清除既有依据");
         var result = new ArrayList<Map<String,Object>>();
-        var seen = new HashSet<Long>();
+        var existing = new HashMap<List<String>,Map<String,Object>>();
+        for (var entry : previous) existing.put(entryIdentity(entry), entry);
+        var seen = new HashSet<List<String>>();
         for (Object raw : (List<?>)input) {
             require(raw instanceof Map<?,?>, "型号表每条必须是明确的记录");
             var entry = map(raw);
             require(INPUT_FIELDS.containsAll(entry.keySet()), "型号表包含非型号字段，请保留原行报价等资料");
-            long index = number(entry.get("supplierIndex"));
-            require(index > 0 && seen.add(index), "供方序号须为不重复的正整数");
+            Object index = entry.get("supplierIndex");
+            require(index instanceof String || index instanceof Number, "请保留供方原序号，缺号时填写明确来源位置");
+            require(!required(index, "供方原序号或来源位置").isEmpty() && Objects.toString(index).length() <= 256, "供方原序号或来源位置过长");
             var clean = new LinkedHashMap<String,Object>();
             clean.put("supplierIndex", index);
             for (String field : RAW_FIELDS) {
@@ -27,6 +30,19 @@ final class PartnerCatalogModelSheet {
                 clean.put(field, value);
             }
             required(clean.get("rawModelText"), "供方原型号");
+            require(seen.add(entryIdentity(clean)), "同一原序号、品牌分组与原型号存在重复条目，请核对原表位置");
+            if (entry.containsKey("phoneModelIds")) {
+                require(entry.get("phoneModelIds") instanceof List<?>, "手机型号身份须为列表");
+                var old = existing.get(entryIdentity(clean));
+                if (old != null && new HashSet<>(PartnerSelectionService.scopeIds(entry.get("phoneModelIds"))).equals(new HashSet<>(PartnerSelectionService.scopeIds(old.get("phoneModelIds"))))
+                    && Objects.toString(clean.get("matchText"), "").equals(Objects.toString(old.get("matchText"), ""))
+                    && Objects.toString(clean.get("matchNote"), "").equals(Objects.toString(old.get("matchNote"), ""))) {
+                    // Unchanged frozen associations must not become a new manual choice when the phone dictionary grows.
+                    var retained = new LinkedHashMap<>(old); retained.putAll(clean);
+                    result.add(project(List.of(retained), scope).get(0));
+                    continue;
+                }
+            }
             String original = text(clean.get("rawModelText")), match = text(clean.get("matchText"));
             if (!match.isEmpty() && !match.equals(original)) required(clean.get("matchNote"), "匹配用名称的核对依据");
             // A normalized name is an explicit, explained input. It never changes the supplier original.
@@ -39,7 +55,6 @@ final class PartnerCatalogModelSheet {
             clean.put("automaticIssues", resolved.getOrDefault("phoneMatchIssues", List.of()));
             boolean manual = false;
             if (entry.containsKey("phoneModelIds")) {
-                require(entry.get("phoneModelIds") instanceof List<?>, "手机型号身份须为列表");
                 var chosen = PartnerSelectionService.scopeIds(entry.get("phoneModelIds"));
                 if (!new HashSet<>(chosen).equals(new HashSet<>(ids))) {
                     required(clean.get("matchNote"), "人工关联现有手机型号的核对依据");
@@ -61,6 +76,12 @@ final class PartnerCatalogModelSheet {
             result.add(clean);
         }
         return result;
+    }
+
+    /** The supplier may restart or repeat numbering; the original brand and model locate the row. */
+    public static List<String> entryIdentity(Map<String,Object> entry) {
+        return List.of(Objects.toString(entry.get("supplierIndex"), ""),
+            Objects.toString(entry.get("rawBrandGroup"), ""), Objects.toString(entry.get("rawModelText"), ""));
     }
 
     /** A read refreshes display/status for frozen IDs, but never rematches unresolved text against a newer dictionary. */

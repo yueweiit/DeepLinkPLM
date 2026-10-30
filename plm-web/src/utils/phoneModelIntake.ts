@@ -33,13 +33,14 @@ export function parsePhoneIntakeSource(contents: string): PhoneIntakeSourceInput
   if (!Array.isArray(root.entries) || !root.entries.length) throw new Error('文件中没有待补条目')
   const entries: PhoneIntakeEntryInput[] = root.entries.map((value, index) => {
     const row = object(value), prefix = `第 ${index + 1} 行：`
-    const supplierIndex = typeof row.supplierIndex === 'number' ? row.supplierIndex : text(row.supplierIndex)
-    if (!String(supplierIndex) || !text(row.componentText)) throw new Error(`${prefix}请填写原序号和待核对型号片段`)
+    const supplierIndex = typeof row.supplierIndex === 'number' ? row.supplierIndex : typeof row.supplierIndex === 'string' ? row.supplierIndex : ''
+    if (!String(supplierIndex).trim() || !text(row.componentText)) throw new Error(`${prefix}请填写原序号和待核对型号片段`)
+    if (['rawBrandGroup', 'rawModelText'].some(field => row[field] !== undefined && typeof row[field] !== 'string')) throw new Error(`${prefix}原条目定位须保留原文`)
     if (row.classification !== 'missing' && row.classification !== 'review') throw new Error(`${prefix}请区分确实缺档或需要核对`)
     const reviewReason = typeof row.reviewReason === 'string' && row.reviewReason in phoneIntakeReviewReasons ? row.reviewReason as PhoneIntakeEntryInput['reviewReason'] : undefined
     if (row.classification === 'review' && !reviewReason) throw new Error(`${prefix}请选择具体核对类型`)
     if (!text(row.reason)) throw new Error(`${prefix}请补充核对依据`)
-    return { supplierIndex, componentText: text(row.componentText), classification: row.classification, ...(reviewReason ? { reviewReason } : {}), ...(row.brandId === undefined || row.brandId === null || row.brandId === '' ? {} : { brandId: positive(row.brandId, `${prefix}品牌`) }), reason: text(row.reason) }
+    return { supplierIndex, ...(row.rawBrandGroup === undefined ? {} : { rawBrandGroup: row.rawBrandGroup as string }), ...(row.rawModelText === undefined ? {} : { rawModelText: row.rawModelText as string }), componentText: text(row.componentText), classification: row.classification, ...(reviewReason ? { reviewReason } : {}), ...(row.brandId === undefined || row.brandId === null || row.brandId === '' ? {} : { brandId: positive(row.brandId, `${prefix}品牌`) }), reason: text(row.reason) }
   })
   return { supplierCode: text(identity.supplierCode), sourceKind: identity.sourceKind, recordId: positive(identity.recordId, '来源记录'), rowId: text(identity.rowId), rowVersion: version(identity.rowVersion, '款式版本'), recordVersion: version(identity.recordVersion, '来源版本'), entries }
 }

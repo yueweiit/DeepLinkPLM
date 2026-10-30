@@ -18,6 +18,15 @@ export function parseCatalogModelSheet(text: string): CatalogModelEntryInput[] {
   })
 }
 
+export function catalogModelIndexDisplay(index: string | number): { label: string; sourceLocation: string } {
+  const original = String(index)
+  return /^原无序号（.+）$/s.test(original) ? { label: '—', sourceLocation: original } : { label: original, sourceLocation: '' }
+}
+
+export function catalogModelEntryKey(entry: Pick<CatalogModelEntryInput, 'supplierIndex' | 'rawBrandGroup' | 'rawModelText'>): string {
+  return JSON.stringify([String(entry.supplierIndex), entry.rawBrandGroup, entry.rawModelText])
+}
+
 export function catalogModelEntryInput(entry: CatalogModelEntryInput): CatalogModelEntryInput {
   return { supplierIndex: String(entry.supplierIndex), rawBrandGroup: entry.rawBrandGroup, rawModelText: entry.rawModelText, rawStatus: entry.rawStatus, rawNote: entry.rawNote,
     ...(entry.matchText !== undefined ? { matchText: entry.matchText } : {}), ...(entry.matchNote !== undefined ? { matchNote: entry.matchNote } : {}),
@@ -26,7 +35,7 @@ export function catalogModelEntryInput(entry: CatalogModelEntryInput): CatalogMo
 
 export function modelEntryMatches(entry: CatalogModelEntry, search: string): boolean {
   const query = search.trim().toLocaleLowerCase().replace(/\s+/g, '')
-  return !query || [entry.supplierIndex, entry.rawBrandGroup, entry.rawModelText, entry.rawStatus, entry.rawNote, entry.matchText, ...entry.phones?.flatMap(phone => [phone.modelName, phone.displayName, phone.phoneModelCode, phone.brandName]) || []]
+  return !query || [entry.supplierIndex, entry.rawBrandGroup, entry.rawModelText, entry.rawStatus, entry.matchText, ...entry.phones?.flatMap(phone => [phone.modelName, phone.displayName, phone.phoneModelCode, phone.brandName]) || []]
     .some(value => String(value || '').toLocaleLowerCase().replace(/\s+/g, '').includes(query))
 }
 

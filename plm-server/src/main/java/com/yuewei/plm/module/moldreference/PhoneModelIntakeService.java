@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yuewei.plm.common.exception.BusinessException;
 import com.yuewei.plm.module.operationlog.service.*;
 import com.yuewei.plm.module.partner.PartnerCatalogService;
+import com.yuewei.plm.module.partner.PartnerCatalogModelSheet;
 import com.yuewei.plm.module.pilot.PilotAccessService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
@@ -101,10 +102,15 @@ public class PhoneModelIntakeService {
     private Map<String,Object> sourceSnapshot(Map<String,Object> detail,Map<String,Object> entry,String component){
         var out=new LinkedHashMap<String,Object>();for(String key:List.of("supplierCode","supplierName","sourceKind","recordId","rowId","rowVersion","recordVersion","sourceCode","sourceName"))out.put(key,detail.get(key));
         out.put("styleName",detail.get("name"));
-        out.put("supplierIndex",number(entry.get("supplierIndex")));out.put("componentText",component);for(String key:RAW)out.put(key,Objects.toString(entry.get(key),""));
+        out.put("supplierIndex",entry.get("supplierIndex"));out.put("componentText",component);for(String key:RAW)out.put(key,Objects.toString(entry.get(key),""));
         out.put("modelSheetRefs",maps(detail.get("modelSheetRefs")).stream().map(ref->Map.<String,Object>of("id",number(ref.get("id")))).toList());return out;
     }
-    private String evidence(Map<String,Object> snapshot){var safe=new LinkedHashMap<String,Object>();for(String key:List.of("supplierCode","sourceKind","recordId","rowId","supplierIndex","rawBrandGroup","rawModelText","rawStatus","rawNote","modelSheetRefs"))safe.put(key,snapshot.get(key));return digest(safe);}
+    private String evidence(Map<String,Object> snapshot){
+        var safe=new LinkedHashMap<String,Object>();for(String key:List.of("supplierCode","sourceKind","recordId","rowId","supplierIndex","rawBrandGroup","rawModelText","rawStatus","rawNote","modelSheetRefs"))safe.put(key,snapshot.get(key));
+        // Old snapshots hashed ordinary positive indices as JSON numbers; keep their digest valid after TSV round trips.
+        Long legacy=legacyIndex(safe.get("supplierIndex"));if(legacy!=null)safe.put("supplierIndex",legacy);
+        return digest(safe);
+    }
     private Map<String,Object> classification(Map<String,Object> input){
         String component=bounded(required(input.get("componentText"),"待补型号片段"),256,"待补型号"),kind=text(input.get("classification")),why=text(input.get("reviewReason"));
         require(Set.of("missing","review").contains(kind)&&REASONS.contains(why)&&(!kind.equals("review")||!why.isEmpty()),"请区分真正缺档与名称／版本／共模／原文／编码待核对");
@@ -115,16 +121,15 @@ public class PhoneModelIntakeService {
     @Transactional(readOnly=true) public Map<String,Object> sourcePreview(Map<String,Object> input){write();return sourcePlan(input,true);}
     private Map<String,Object> sourcePlan(Map<String,Object> input,boolean version){
         var detail=sourceDetail(input,version);require(input.get("entries") instanceof List<?> && !((List<?>)input.get("entries")).isEmpty(),"请选择明确的待补或待核对片段，不能提交空清单");
-        var sourceEntries=new HashMap<Long,Map<String,Object>>();for(var entry:maps(detail.get("supplierModelEntries")))sourceEntries.put(number(entry.get("supplierIndex")),entry);
         var rows=new ArrayList<Map<String,Object>>();var seen=new HashSet<String>();var newIdentities=new HashSet<String>();var blockers=new ArrayList<String>();long fresh=0,append=0,reused=0;
         for(Object raw:(List<?>)input.get("entries")){
-            require(raw instanceof Map<?,?>,"待补型号条目格式无效");var item=map(raw);var candidate=classification(item);long index=number(item.get("supplierIndex"));var source=sourceEntries.get(index);require(source!=null,"原型号表不存在该供方序号，请核对原件而不是补造来源");
+            require(raw instanceof Map<?,?>,"待补型号条目格式无效");var item=map(raw);var candidate=classification(item);var source=findEntry(detail,item);Object index=source.get("supplierIndex");
             var snapshot=sourceSnapshot(detail,source,text(candidate.get("componentText")));snapshot.put("intakeReason",candidate.get("reason"));String hash=evidence(snapshot),componentKey=text(candidate.get("identityKey"));
-            require(seen.add(index+":"+componentKey),"同一次提交含重复的来源型号片段");var existing=jdbc.queryForList("select id from plm_phone_model_intake where identity_key=?",candidate.get("identityKey"));String action="new";
+            require(seen.add(digest(Arrays.asList(PartnerCatalogModelSheet.entryIdentity(source),componentKey))),"同一次提交含重复的来源型号片段");var existing=jdbc.queryForList("select id from plm_phone_model_intake where identity_key=?",candidate.get("identityKey"));String action="new";
             if(!existing.isEmpty()){
                 long id=number(existing.get(0).get("id"));
                 if(!candidateVisible(id)||!allSourcesVisible(id)){action="blocked";blockers.add("同一型号已有当前无法完整授权核对的依据，请管理员处理；本次不会公开其身份或来源");}
-                else{candidate.put("candidateId",id);String state=jdbc.queryForObject("select state from plm_phone_model_intake where id=?",String.class,id);candidate.put("existingState",state);long found=jdbc.queryForObject("select count(*) from plm_phone_model_intake_source where intake_id=? and source_kind=? and record_id=? and row_id=?::uuid and supplier_index=? and component_key=? and source_digest=?",Long.class,id,detail.get("sourceKind"),detail.get("recordId"),detail.get("rowId"),index,componentKey,hash);
+                else{candidate.put("candidateId",id);String state=jdbc.queryForObject("select state from plm_phone_model_intake where id=?",String.class,id);candidate.put("existingState",state);long found=jdbc.queryForObject("select count(*) from plm_phone_model_intake_source where intake_id=? and source_kind=? and record_id=? and row_id=?::uuid and coalesce(source_entry_label,supplier_index::text)=? and component_key=? and source_digest=?",Long.class,id,detail.get("sourceKind"),detail.get("recordId"),detail.get("rowId"),Objects.toString(index),componentKey,hash);
                     action=found==0?"append":"unchanged";if(found==0){append++;if("resolved".equals(state))blockers.add("已处理候选追加新来源前，请先明确重新打开，再按正常处理补关联；不能将新来源假定为已完成");}else reused++;}
             }else if(newIdentities.add(text(candidate.get("identityKey"))))fresh++;
             candidate.put("supplierIndex",index);candidate.put("source",snapshot);candidate.put("sourceDigest",hash);candidate.put("componentKey",componentKey);candidate.put("action",action);candidate.put("messages",List.of("人工整理的型号片段；不会生成编码或改写来源原文／状态"));rows.add(candidate);
@@ -139,7 +144,7 @@ public class PhoneModelIntakeService {
         jdbc.queryForList("select record_id from plm_partner_record where record_id=? for update",number(input.get("recordId")));
         var plan=sourcePlan(input,true);require(Boolean.TRUE.equals(plan.get("canSave")),String.join("；",strings(plan.get("messages"))));requirePreview(input,plan);var resultIds=new LinkedHashSet<Long>();var sameBatch=new HashMap<String,Long>();var evidenceChanges=new ArrayList<Map<String,Object>>();long added=0;
         for(var item:maps(plan.get("entries"))){String identity=text(item.get("identityKey"));long id=sameBatch.getOrDefault(identity,number(item.get("candidateId")));if(id==0){id=jdbc.queryForObject("insert into plm_phone_model_intake(identity_key,component_text,brand_id,classification,review_reason,reason,created_by,updated_by) values(?,?,?,?,?,?,?,?) returning id",Long.class,item.get("identityKey"),item.get("componentText"),item.get("brandId"),item.get("classification"),item.get("reviewReason"),item.get("reason"),access.actor().username(),access.actor().username());}sameBatch.put(identity,id);
-            var source=map(item.get("source"));int changed=jdbc.update("insert into plm_phone_model_intake_source(intake_id,supplier_code,source_kind,record_id,row_id,supplier_index,component_key,source_digest,source_snapshot,created_by) values(?,?,?,?,?::uuid,?,?,?,?::jsonb,?) on conflict do nothing",id,source.get("supplierCode"),source.get("sourceKind"),source.get("recordId"),source.get("rowId"),item.get("supplierIndex"),item.get("componentKey"),item.get("sourceDigest"),encode(json,source),access.actor().username());
+            var source=map(item.get("source"));int changed=jdbc.update("insert into plm_phone_model_intake_source(intake_id,supplier_code,source_kind,record_id,row_id,supplier_index,source_entry_label,component_key,source_digest,source_snapshot,created_by) values(?,?,?,?,?::uuid,?,?,?,?,?::jsonb,?) on conflict do nothing",id,source.get("supplierCode"),source.get("sourceKind"),source.get("recordId"),source.get("rowId"),legacyIndex(item.get("supplierIndex")),Objects.toString(item.get("supplierIndex")),item.get("componentKey"),item.get("sourceDigest"),encode(json,source),access.actor().username());
             added+=changed;if(changed>0){jdbc.update("update plm_phone_model_intake set version=version+1,updated_at=now(),updated_by=? where id=?",access.actor().username(),id);evidenceChanges.add(Map.of("candidateId",id,"supplierIndex",item.get("supplierIndex"),"componentKey",item.get("componentKey"),"sourceDigest",item.get("sourceDigest")));}resultIds.add(id);
         }
         var result=new LinkedHashMap<String,Object>();result.put("items",candidateSummaries(resultIds));result.put("addedSourceCount",added);result.put("replayed",false);var sourceIdentity=new LinkedHashMap<String,Object>();for(String key:List.of("supplierCode","sourceKind","recordId","rowId","rowVersion","recordVersion"))sourceIdentity.put(key,input.get(key));record("collect",requestId,input,Map.of(),Map.of("candidateIds",resultIds,"sourceIdentity",sourceIdentity,"evidenceChanges",evidenceChanges,"summary",plan.get("summary")),result,request);return result;
@@ -172,10 +177,10 @@ public class PhoneModelIntakeService {
         if(Set.of("create","link").contains(action)){
             long all=jdbc.queryForObject("select count(*) from plm_phone_model_intake_source where intake_id=?",Long.class,before.get("id"));long visible=number(before.get("sourceCount"));if(all!=visible)blockers.add("部分来源当前无法授权核对，本次不能跳过来源并标记完成");
             // Confirmed newer evidence supersedes its own old snapshot for processing; history remains immutable.
-            var rows=jdbc.queryForList("select distinct on(s.source_kind,s.record_id,s.row_id,s.supplier_index) s.*"+sourceFrom()+"where s.intake_id=? and "+visibleSources()+" order by s.source_kind,s.record_id,s.row_id,s.supplier_index,s.id desc",before.get("id"));var cache=new HashMap<String,Map<String,Object>>();var seen=new HashSet<String>();
+            var rows=jdbc.queryForList("select distinct on(s.source_kind,s.record_id,s.row_id,coalesce(s.source_entry_label,s.supplier_index::text),s.source_snapshot->>'rawBrandGroup',s.source_snapshot->>'rawModelText') s.*"+sourceFrom()+"where s.intake_id=? and "+visibleSources()+" order by s.source_kind,s.record_id,s.row_id,coalesce(s.source_entry_label,s.supplier_index::text),s.source_snapshot->>'rawBrandGroup',s.source_snapshot->>'rawModelText',s.id desc",before.get("id"));var cache=new HashMap<String,Map<String,Object>>();var seen=new HashSet<String>();
             for(var source:rows){var view=publicSource(source,cache);try{
-                require(!Boolean.TRUE.equals(view.get("sourceUnavailable")),"当前来源无法授权读取或款式归属有变，本次不能跳过处理");var current=cache.get(sourceKey(view));require(Boolean.TRUE.equals(current.get("canMaintainModelSheet")),"来源已冻结或没有当前款式维护权限");var entry=findEntry(current,number(view.get("supplierIndex")));require(evidence(sourceSnapshot(current,entry,text(view.get("componentText")))).equals(text(source.get("source_digest"))),"来源原型号、状态、备注或型号表图已有变更，请先重新整理依据");
-                var old=ids(entry.get("phoneModelIds"));var added=selected.stream().filter(phone->!old.contains(phone)).toList();boolean will=action.equals("create")||!added.isEmpty();view.put("currentRowVersion",current.get("rowVersion"));view.put("currentRecordVersion",current.get("recordVersion"));view.put("addedPhoneModelIds",added);view.put("alreadyLinkedPhoneModelIds",selected.stream().filter(old::contains).toList());view.put("requiresNewPhone",action.equals("create"));view.put("willUpdate",will);String key=sourceKey(view)+":"+view.get("supplierIndex");if(will&&seen.add(key))changed++;
+                require(!Boolean.TRUE.equals(view.get("sourceUnavailable")),"当前来源无法授权读取或款式归属有变，本次不能跳过处理");var current=cache.get(sourceKey(view));require(Boolean.TRUE.equals(current.get("canMaintainModelSheet")),"来源已冻结或没有当前款式维护权限");var entry=findEntry(current,view);require(evidence(sourceSnapshot(current,entry,text(view.get("componentText")))).equals(text(source.get("source_digest"))),"来源原型号、状态、备注或型号表图已有变更，请先重新整理依据");
+                var old=ids(entry.get("phoneModelIds"));var added=selected.stream().filter(phone->!old.contains(phone)).toList();boolean will=action.equals("create")||!added.isEmpty();view.put("currentRowVersion",current.get("rowVersion"));view.put("currentRecordVersion",current.get("recordVersion"));view.put("addedPhoneModelIds",added);view.put("alreadyLinkedPhoneModelIds",selected.stream().filter(old::contains).toList());view.put("requiresNewPhone",action.equals("create"));view.put("willUpdate",will);String key=digest(Arrays.asList(sourceKey(view),PartnerCatalogModelSheet.entryIdentity(view)));if(will&&seen.add(key))changed++;
             }catch(BusinessException failure){blockers.add(failure.getMessage());view.put("willUpdate",false);}sourceViews.add(view);}
         }
         var out=new LinkedHashMap<String,Object>();out.put("action",action);out.put("before",before);out.put("after",after);if(proposed!=null)out.put("proposedPhone",proposed);out.put("sources",sourceViews);out.put("summary",Map.of("sourceCount",sourceViews.size(),"changedSourceCount",changed));out.put("blockers",blockers.stream().distinct().toList());out.put("messages",List.of("只补当前明确来源款式的关联；原型号、现货／开模／试模、图片和既有选品快照不变，不分配手机编码。"));out.put("canSave",blockers.isEmpty());out.put("previewToken",digest(out));return out;
@@ -197,12 +202,26 @@ public class PhoneModelIntakeService {
         for(var group:grouped.values()){var first=group.get(0);var current=sourceDetail(first,false);require(number(current.get("rowVersion"))==number(first.get("currentRowVersion"))&&number(current.get("recordVersion"))==number(first.get("currentRecordVersion")),"来源已在预览后变化，整次处理未生效，请重新核对");originals.put(sourceKey(first),current);headerVersions.put(number(current.get("recordId")),number(current.get("recordVersion")));}
         for(var group:grouped.values()){
             var first=group.get(0);var current=originals.get(sourceKey(first));
-            var indexes=new HashSet<Long>();for(var source:group)indexes.add(number(source.get("supplierIndex")));var entries=new ArrayList<Map<String,Object>>();boolean changed=false;
-            for(var entry:maps(current.get("supplierModelEntries"))){var next=new LinkedHashMap<String,Object>();for(String field:MODEL_INPUT)if(entry.containsKey(field))next.put(field,entry.get(field));if(indexes.contains(number(entry.get("supplierIndex")))){var phones=new LinkedHashSet<Long>(ids(entry.get("phoneModelIds")));int before=phones.size();phones.addAll(selected);if(phones.size()!=before){changed=true;next.put("phoneModelIds",new ArrayList<>(phones));next.put("matchNote",bounded((text(entry.get("matchNote"))+"；待补手机资料 #"+intake+" 工程确认："+why).replaceFirst("^；",""),12000,"匹配依据"));}}entries.add(next);}
+            var indexes=new HashSet<List<String>>();for(var source:group)indexes.add(PartnerCatalogModelSheet.entryIdentity(source));var entries=new ArrayList<Map<String,Object>>();boolean changed=false;
+            for(var entry:maps(current.get("supplierModelEntries"))){var next=new LinkedHashMap<String,Object>();for(String field:MODEL_INPUT)if(entry.containsKey(field))next.put(field,entry.get(field));if(indexes.contains(PartnerCatalogModelSheet.entryIdentity(entry))){var phones=new LinkedHashSet<Long>(ids(entry.get("phoneModelIds")));int before=phones.size();phones.addAll(selected);if(phones.size()!=before){changed=true;next.put("phoneModelIds",new ArrayList<>(phones));next.put("matchNote",bounded((text(entry.get("matchNote"))+"；待补手机资料 #"+intake+" 工程确认："+why).replaceFirst("^；",""),12000,"匹配依据"));}}entries.add(next);}
             if(!changed)continue;var command=new LinkedHashMap<String,Object>();for(String field:List.of("supplierCode","sourceKind","recordId","rowId","rowVersion","recordVersion"))command.put(field,current.get(field));command.put("recordVersion",headerVersions.get(number(current.get("recordId"))));command.put("entries",entries);command.put("modelSheetRefs",maps(current.get("modelSheetRefs")).stream().map(ref->Map.of("id",ref.get("id"))).toList());var preview=catalog.modelSheetPreview(command);require(Boolean.TRUE.equals(preview.get("canSave")),"当前来源型号表不能安全补关联");command.put("previewToken",preview.get("previewToken"));command.put("requestId","intake-"+digest(Arrays.asList(request,sourceKey(first))).substring(0,48));var saved=catalog.saveModelSheet(command);headerVersions.put(number(current.get("recordId")),number(map(saved.get("style")).get("recordVersion")));updated++;
         }return updated;
     }
-    private Map<String,Object> findEntry(Map<String,Object> source,long index){return maps(source.get("supplierModelEntries")).stream().filter(entry->number(entry.get("supplierIndex"))==index).findFirst().orElseThrow(()->invalid("当前原型号表已缺少该序号，不能猜补来源"));}
+    private Map<String,Object> findEntry(Map<String,Object> source,Map<String,Object> selector){
+        required(selector.get("supplierIndex"),"供方原序号或来源位置");String index=Objects.toString(selector.get("supplierIndex"));
+        boolean exact=selector.containsKey("rawBrandGroup")||selector.containsKey("rawModelText");
+        require(!exact||selector.containsKey("rawBrandGroup")&&selector.containsKey("rawModelText"),"请同时保留原品牌分组与原型号定位来源");
+        var matches=maps(source.get("supplierModelEntries")).stream().filter(entry->exact
+            ?PartnerCatalogModelSheet.entryIdentity(entry).equals(PartnerCatalogModelSheet.entryIdentity(selector))
+            :Objects.toString(entry.get("supplierIndex"),"").equals(index)).toList();
+        require(matches.size()==1,matches.isEmpty()?"当前原型号表已缺少该原条目，请核对原件而不是补造来源":"原序号对应多条记录，请从供应商本款选择明确的品牌分组与原型号");
+        return matches.get(0);
+    }
+    /** The old bigint is only a lossless compatibility value; textual source labels never receive made-up numbers. */
+    private static Long legacyIndex(Object value){
+        String original=Objects.toString(value,"");if(!original.matches("[1-9][0-9]{0,18}"))return null;
+        try{return Long.valueOf(original);}catch(NumberFormatException notBigint){return null;}
+    }
     private List<String> modelNames(Map<String,Object> phone){var names=new ArrayList<String>();names.add(text(phone.get("modelName")));for(String field:List.of("aliases","matchingAliases"))for(String value:strings(phone.get(field)))if(PhoneIdentityMatcher.isSingleModel(value))names.add(value);return names;}
     private Map<String,Object> valuesForClassification(String component,Long brand,String kind,String review,String reason){var out=new LinkedHashMap<String,Object>();out.put("componentText",component);out.put("brandId",brand);out.put("classification",kind);out.put("reviewReason",review);out.put("reason",reason);return out;}
     private void requirePreview(Map<String,Object> input,Map<String,Object> plan){require(text(plan.get("previewToken")).equals(required(input.get("previewToken"),"请先预览")),"待补项、手机资料或来源已变化，请重新预览");}

@@ -19,7 +19,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /** Only disposable schemas in the existing loopback QA database; never an SSH/production connection. */
-@EnabledIfEnvironmentVariable(named="PLM_SELECTION_TEST_URL",matches="jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/plm_selection_range_qa")
+@EnabledIfEnvironmentVariable(named="PLM_SELECTION_TEST_URL",matches="(?:jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/plm_selection_range_qa|jdbc:postgresql://127\\.0\\.0\\.1:15504/plm_source_index_qa_20261031_6b7oial9)")
 class PhoneModelIntakeLocalIntegrationTest {
     private JdbcTemplate jdbc,admin;private TransactionTemplate tx;private String schema;private ObjectMapper json;
     private PhoneModelReferenceService references;private PhoneModelReferenceRepository repository;private PhoneModelIntakeService intake;private PartnerCatalogService catalog;private PilotAccessService access;private OperationLogService audit;
@@ -46,7 +46,7 @@ class PhoneModelIntakeLocalIntegrationTest {
             insert into plm_supplier_profile(supplier_code,supplier_name) values('QA-SUP','QA供方');
             create table plm_operation_log(log_id bigserial primary key,operator_user_id bigint,operator_user_name text,action text,business_type text,business_id text,result text default 'success',detail_json text,deleted_flag int default 0,created_at timestamptz default now());
             """);
-        try(var connection=ds.getConnection()){for(String migration:List.of("V20261021_1200__partner_selection_rows.sql","V20261021_1210__supplier_ranges.sql","V20261021_1220__partner_file_jobs.sql","V20261022_1700__partner_catalog_style_identity.sql","V20261023_1500__phone_model_intake.sql"))ScriptUtils.executeSqlScript(connection,new ClassPathResource("db/migration/"+migration));}
+        try(var connection=ds.getConnection()){for(String migration:List.of("V20261021_1200__partner_selection_rows.sql","V20261021_1210__supplier_ranges.sql","V20261021_1220__partner_file_jobs.sql","V20261022_1700__partner_catalog_style_identity.sql","V20261023_1500__phone_model_intake.sql","V20261030_1830__supplier_model_source_index.sql"))ScriptUtils.executeSqlScript(connection,new ClassPathResource("db/migration/"+migration));}
         var actor=new CurrentUser(1L,"qa-intake","QA国内工程",false);access=mock(PilotAccessService.class);when(access.actor()).thenReturn(actor);when(access.actorId()).thenReturn(1L);when(access.hasPermission(anyString())).thenReturn(true);when(access.canMaintainEngineeringData()).thenReturn(true);when(access.requireEngineeringMaintenance()).thenReturn(actor);when(access.visibleSqlClause(anyString(),anyString())).thenReturn("true");
         audit=mock(OperationLogService.class);doAnswer(call->writeAudit(call.getArgument(0))).when(audit).logRequired(any(),any());
         repository=mock(PhoneModelReferenceRepository.class);when(repository.allBrands()).thenAnswer(call->brands());when(repository.brand(anyLong(),anyBoolean())).thenAnswer(call->brands().stream().filter(brand->number(brand.get("brandId"))==(long)call.getArgument(0)).findFirst().orElse(null));
@@ -85,6 +85,74 @@ class PhoneModelIntakeLocalIntegrationTest {
         var result=collect(command);long id=candidate(result);assertEquals(1,count("plm_phone_model_intake"));assertEquals(1,count("plm_phone_model_intake_source"));assertEquals("pending",intake.detail(id).get("state"));assertEquals(before,rawRow(row));assertEquals(events,count("plm_partner_event"));assertEquals(phones,count("plm_phone_model_member"));assertEquals(codes,count("plm_code_item"));
         assertEquals(true,tx.execute(status->intake.collect(command,null)).get("replayed"));assertEquals(1,count("plm_phone_model_intake_source"));assertEquals(0L,number(collect(incoming("IP 18 PRO","missing","")).get("addedSourceCount")));assertEquals(1,count("plm_phone_model_intake"));
     }
+    @Test void repeatedSourceNumbersUseExactOriginalBrandAndModelAndBackfillOnlyThatRecord(){
+        var rows=new ArrayList<>(modelInputs(row));
+        rows.add(values("supplierIndex",2L,"rawBrandGroup","Samsung","rawModelText","Galaxy S26","rawStatus","原图红字","rawNote","同号不同品牌"));
+        rows.add(values("supplierIndex",2L,"rawBrandGroup","Apple","rawModelText","IP20PRO","rawStatus","原图黑字","rawNote","同品牌重复号"));saveModels(row,rows);
+        var ambiguous=incoming("iPhone 18 Pro","review","name");assertTrue(assertThrows(RuntimeException.class,()->intake.sourcePreview(ambiguous)).getMessage().contains("多条"));
+        var exact=incoming("Galaxy S26","review","name");var item=maps(exact.get("entries")).get(0);item.put("rawBrandGroup","Samsung");item.put("rawModelText","Galaxy S26");item.put("brandId",2L);
+        long id=candidate(collect(exact));jdbc.update("insert into plm_phone_model_member(id,brand_id,model_name) values(13,2,'Galaxy S26')");var command=resolution(id,"link");command.put("phoneModelIds",List.of(13L));tx.execute(status->intake.resolve(id,previewed(id,command),null));
+        var after=maps(catalog.detail("selection",record,row,"QA-SUP").get("supplierModelEntries"));assertEquals(List.of(13L),ids(after.get(3).get("phoneModelIds")));assertTrue(ids(after.get(1).get("phoneModelIds")).isEmpty());assertTrue(ids(after.get(4).get("phoneModelIds")).isEmpty());
+        assertEquals("Galaxy S26",maps(intake.detail(id).get("sources")).get(0).get("rawModelText"));
+        var changed=new ArrayList<>(modelInputs(row));changed.remove(3);var missing=identity();missing.put("entries",changed);missing.put("modelSheetRefs",List.of(Map.of("id",77L)));assertTrue(assertThrows(RuntimeException.class,()->catalog.modelSheetPreview(missing)).getMessage().contains("缺少"));
+    }
+    @Test void textLocationsAndLeadingZerosSurviveCollectionWithoutInventedLegacyNumbers(){
+        var rows=new ArrayList<>(modelInputs(row));
+        rows.add(values("supplierIndex","001","rawBrandGroup","Samsung","rawModelText","Galaxy S26","rawStatus","红字","rawNote","供方原号001"));
+        rows.add(values("supplierIndex","原无序号（Samsung栏111后第1行）","rawBrandGroup","Samsung","rawModelText","Z FOLD8","rawStatus","红字","rawNote","原图无号；标签仅定位"));
+        rows.add(values("supplierIndex","原无序号（Samsung栏111后第2行）","rawBrandGroup","Samsung","rawModelText","Z FOLD8 WIDE","rawStatus","红字","rawNote","原图无号；标签仅定位"));saveModels(row,rows);
+        var inputs=new ArrayList<Map<String,Object>>();for(var entry:rows.subList(3,6))inputs.add(values("supplierIndex",entry.get("supplierIndex"),"rawBrandGroup",entry.get("rawBrandGroup"),"rawModelText",entry.get("rawModelText"),"componentText",entry.get("rawModelText"),"brandId",2L,"classification","review","reviewReason","name","reason","原图逐格核对"));
+        var command=identity();command.put("entries",inputs);var collected=collect(command);assertEquals(3L,number(collected.get("addedSourceCount")));
+        assertEquals(List.of("001","原无序号（Samsung栏111后第1行）","原无序号（Samsung栏111后第2行）"),jdbc.queryForList("select source_entry_label from plm_phone_model_intake_source order by id",String.class));assertEquals(3L,jdbc.queryForObject("select count(*) from plm_phone_model_intake_source where supplier_index is null",Long.class));
+        assertEquals(0L,number(collect(command).get("addedSourceCount")));assertEquals(3,count("plm_phone_model_intake_source"));
+        long id=number(maps(collected.get("items")).get(1).get("id"));jdbc.update("insert into plm_phone_model_member(id,brand_id,model_name) values(13,2,'Galaxy Z Fold8')");var link=resolution(id,"link");link.put("phoneModelIds",List.of(13L));tx.execute(status->intake.resolve(id,previewed(id,link),null));
+        var after=maps(catalog.detail("selection",record,row,"QA-SUP").get("supplierModelEntries"));assertEquals("001",after.get(3).get("supplierIndex"));assertTrue(ids(after.get(3).get("phoneModelIds")).isEmpty());assertEquals(List.of(13L),ids(after.get(4).get("phoneModelIds")));assertTrue(ids(after.get(5).get("phoneModelIds")).isEmpty());
+    }
+    @Test void twoOriginalRowsSharingANumberAndAnIntakeCandidateBothKeepTheirOwnEvidence(){
+        var rows=new ArrayList<>(modelInputs(row));rows.add(model(17,"IP18PRO","红字","第一原格"));rows.add(model(17,"iPhone 18 Pro","黑字","第二原格"));saveModels(row,rows);
+        var input=identity();input.put("entries",rows.subList(3,5).stream().map(entry->values("supplierIndex",entry.get("supplierIndex"),"rawBrandGroup",entry.get("rawBrandGroup"),"rawModelText",entry.get("rawModelText"),"componentText","iPhone 18 Pro","brandId",1L,"classification","review","reviewReason","name","reason","两原格独立保留")).toList());
+        var collected=collect(input);assertEquals(1,maps(collected.get("items")).size());assertEquals(2L,number(collected.get("addedSourceCount")));long id=candidate(collected);
+        jdbc.update("insert into plm_phone_model_member(id,brand_id,model_name) values(13,1,'iPhone 18 Pro')");var link=resolution(id,"link");link.put("phoneModelIds",List.of(13L));var preview=tx.execute(status->intake.resolutionPreview(id,link));assertEquals(true,preview.get("canSave"),preview.toString());assertEquals(2L,number(map(preview.get("summary")).get("changedSourceCount")));link.put("previewToken",preview.get("previewToken"));tx.execute(status->intake.resolve(id,link,null));
+        var after=maps(catalog.detail("selection",record,row,"QA-SUP").get("supplierModelEntries"));assertTrue(ids(after.get(1).get("phoneModelIds")).isEmpty());assertEquals(List.of(13L),ids(after.get(3).get("phoneModelIds")));assertEquals(List.of(13L),ids(after.get(4).get("phoneModelIds")));assertEquals("第一原格",after.get(3).get("rawNote"));assertEquals("第二原格",after.get(4).get("rawNote"));
+    }
+    @Test void numericSnapshotDigestRemainsValidWhenAnUnchangedOriginalIsRepastedAsText(){
+        long id=candidate(collect(incoming("iPhone 18 Pro","review","name")));String snapshot=jdbc.queryForObject("select source_snapshot::text from plm_phone_model_intake_source where intake_id=?",String.class,id);String hash=jdbc.queryForObject("select source_digest from plm_phone_model_intake_source where intake_id=?",String.class,id);
+        var input=modelInputs(row);for(var entry:input)entry.put("supplierIndex",Objects.toString(entry.get("supplierIndex")));saveModels(row,input);
+        var command=resolution(id,"link");command.put("phoneModelIds",List.of(12L));var preview=tx.execute(status->intake.resolutionPreview(id,command));assertEquals(true,preview.get("canSave"),preview.toString());assertEquals(0L,number(collect(incoming("iPhone 18 Pro","review","name")).get("addedSourceCount")));
+        assertEquals(snapshot,jdbc.queryForObject("select source_snapshot::text from plm_phone_model_intake_source where intake_id=?",String.class,id));assertEquals(hash,jdbc.queryForObject("select source_digest from plm_phone_model_intake_source where intake_id=?",String.class,id));
+    }
+
+    @Test @EnabledIfEnvironmentVariable(named="PLM_SOURCE_INDEX_LEGACY_JAR",matches=".+")
+    void actualPreviousPackageReadsRetainedEvidenceAndItsMixedSourceWriteLimitIsExplicit() throws Exception {
+        String packagePath=System.getenv("PLM_SOURCE_INDEX_LEGACY_JAR");var bytecode=new HashMap<String,byte[]>();
+        try(var file=new java.util.jar.JarFile(packagePath)){for(var item:file.stream().filter(entry->entry.getName().startsWith("BOOT-INF/classes/com/yuewei/plm/module/moldreference/PhoneModelIntakeService")&&entry.getName().endsWith(".class")).toList())bytecode.put(item.getName().substring("BOOT-INF/classes/".length(),item.getName().length()-6).replace('/','.'),file.getInputStream(item).readAllBytes());}
+        assertEquals("2a6ab7be2557870a5003b4f21ed22a273ec711fda48f81e8e15932bde44f0608",HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(java.nio.file.Files.readAllBytes(java.nio.file.Path.of(packagePath)))));
+        class PreviousPackage extends ClassLoader {
+            PreviousPackage(){super(PhoneModelIntakeService.class.getClassLoader());}
+            @Override protected Class<?> loadClass(String name,boolean resolve) throws ClassNotFoundException {
+                if(!bytecode.containsKey(name))return super.loadClass(name,resolve);var type=findLoadedClass(name);if(type==null){var value=bytecode.get(name);type=defineClass(name,value,0,value.length);}if(resolve)resolveClass(type);return type;
+            }
+        }
+        var previous=new PreviousPackage().loadClass("com.yuewei.plm.module.moldreference.PhoneModelIntakeService").getConstructor(JdbcTemplate.class,ObjectMapper.class,PhoneModelReferenceService.class,PhoneModelReferenceRepository.class,PartnerCatalogService.class,PilotAccessService.class,OperationLogService.class).newInstance(jdbc,json,references,repository,catalog,access,audit);
+        long id=candidate(collect(incoming("iPhone 18 Pro","review","name")));
+        assertEquals(1L,number(previousCall(previous,"page",new Class<?>[]{Map.class},Map.of("state","all")).get("totalElements")));assertEquals(id,number(previousCall(previous,"detail",new Class<?>[]{long.class},id).get("id")));
+        assertEquals("unchanged",maps(previousCall(previous,"sourcePreview",new Class<?>[]{Map.class},incoming("iPhone 18 Pro","review","name")).get("entries")).get(0).get("action"));
+        jdbc.update("insert into plm_phone_model_member(id,brand_id,model_name) values(13,1,'iPhone 18 Pro')");var link=resolution(id,"link");link.put("phoneModelIds",List.of(13L));link.put("previewToken",previousCall(previous,"resolutionPreview",new Class<?>[]{long.class,Map.class},id,link).get("previewToken"));
+        tx.execute(status->previousCall(previous,"resolve",new Class<?>[]{long.class,Map.class,jakarta.servlet.http.HttpServletRequest.class},id,link,null));assertEquals(List.of(13L),ids(maps(catalog.detail("selection",record,row,"QA-SUP").get("supplierModelEntries")).get(1).get("phoneModelIds")));
+        var rows=new ArrayList<>(modelInputs(row));rows.add(model(2,"IP20PRO","红字","同号另原型号"));saveModels(row,rows);
+        var ambiguous=previousCall(previous,"sourcePreview",new Class<?>[]{Map.class},incoming("iPhone 18 Pro","review","name"));
+        assertEquals("IP20PRO",map(maps(ambiguous.get("entries")).get(0).get("source")).get("rawModelText"));
+        assertTrue(assertThrows(RuntimeException.class,()->intake.sourcePreview(incoming("iPhone 18 Pro","review","name"))).getMessage().contains("多条"));
+        rows=new ArrayList<>(modelInputs(row));rows.add(values("supplierIndex","001","rawBrandGroup","Samsung","rawModelText","Galaxy S26","rawStatus","红字","rawNote","原号001"));rows.add(values("supplierIndex","原无序号（Samsung栏111后第1行）","rawBrandGroup","Samsung","rawModelText","Z FOLD8","rawStatus","红字","rawNote","来源位置"));saveModels(row,rows);
+        assertEquals(1L,number(previousCall(previous,"page",new Class<?>[]{Map.class},Map.of("state","all")).get("totalElements")));assertEquals(id,number(previousCall(previous,"detail",new Class<?>[]{long.class},id).get("id")));
+        String before=rawRow(row);long evidence=count("plm_phone_model_intake_source");
+        var failure=assertThrows(RuntimeException.class,()->tx.execute(status->previousCall(previous,"sourcePreview",new Class<?>[]{Map.class},incoming("iPhone 18 Pro","review","name"))));assertTrue(failure.getMessage().contains("整数"),failure.toString());assertEquals(before,rawRow(row));assertEquals(evidence,count("plm_phone_model_intake_source"));
+        String directory=System.getenv("PLM_SOURCE_INDEX_QA_EVIDENCE_DIR");if(directory!=null){var proof=values("legacyJarSHA256","2a6ab7be2557870a5003b4f21ed22a273ec711fda48f81e8e15932bde44f0608","legacyIntakeClassLoadedFromOriginalJar",true,"unchangedNumericSourcePreview",true,"unchangedNumericSourceResolution",true,"mixedSourcePageAndDetailReadable",true,"legacyDuplicateNumberPreviewUsesLastRow",true,"newIndexOnlyDuplicatePreviewRejected",true,"mixedSourceLegacyCollectionRejected",failure.getMessage(),"oldEvidenceAndRawSourceAfterRejectedCallUnchanged",true,"limitation","This tests the actual prior Intake class against the real QA database and current catalog dependency; it is not a full previous-server browser or deployment rollback rehearsal.");try{java.nio.file.Files.writeString(java.nio.file.Path.of(directory,"actual-previous-package-compatibility.json"),json.writerWithDefaultPrettyPrinter().writeValueAsString(proof));}catch(java.io.IOException e){throw new IllegalStateException(e);}}
+    }
+    @SuppressWarnings("unchecked") private Map<String,Object> previousCall(Object previous,String method,Class<?>[] signature,Object... values){
+        try{return (Map<String,Object>)previous.getClass().getMethod(method,signature).invoke(previous,values);}catch(java.lang.reflect.InvocationTargetException e){if(e.getCause() instanceof RuntimeException failure)throw failure;throw new IllegalStateException(e.getCause());}catch(ReflectiveOperationException e){throw new IllegalStateException(e);}
+    }
+
     @Test void createReusesRealReferenceCreationWithoutCodeAndBackfillsOnlyTheOriginalStyleInOneTransaction(){
         long id=candidate(collect(incoming("iPhone 18 Pro","missing","")));String other=rawRow(sibling);long codes=count("plm_code_item");var command=resolution(id,"create");var preview=tx.execute(status->intake.resolutionPreview(id,command));assertNull(map(preview.get("proposedPhone")).get("codeItemId"));assertEquals(1,count("plm_phone_model_member"));command.put("previewToken",preview.get("previewToken"));
         var saved=tx.execute(status->intake.resolve(id,command,null));long phone=number(saved.get("createdPhoneModelId"));assertNull(jdbc.queryForObject("select code_item_id from plm_phone_model_member where id=?",Long.class,phone));assertEquals(codes,count("plm_code_item"));assertEquals("resolved",map(saved.get("item")).get("state"));assertEquals(1L,number(saved.get("updatedSourceCount")));

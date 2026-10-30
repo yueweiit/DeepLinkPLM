@@ -457,10 +457,10 @@ public class PartnerCatalogService {
 
     private Map<String,Object> modelSheetPlan(Map<String,Object> input, SourceRowState current, boolean lock) {
         var data=PartnerCatalogStyles.currentData(current.data);
-        var entries = PartnerCatalogModelSheet.resolve(input.get("entries"), phones.newScope());
-        var originalByIndex = new HashMap<Long,String>();
-        for (var entry : entries) originalByIndex.put(number(entry.get("supplierIndex")), Objects.toString(entry.get("rawModelText"), ""));
-        for (var previous : maps(data.get("supplierModelEntries"))) require(Objects.equals(originalByIndex.get(number(previous.get("supplierIndex"))), Objects.toString(previous.get("rawModelText"), "")),
+        var entries = PartnerCatalogModelSheet.resolve(input.get("entries"), phones.newScope(), maps(data.get("supplierModelEntries")));
+        var originalEntries = new HashSet<List<String>>();
+        for (var entry : entries) originalEntries.add(PartnerCatalogModelSheet.entryIdentity(entry));
+        for (var previous : maps(data.get("supplierModelEntries"))) require(originalEntries.contains(PartnerCatalogModelSheet.entryIdentity(previous)),
             "本次缺少或改写已保存的供方原型号条目；请保留全部原记录，不能将漏行当作删除");
         long id = number(current.row.get("recordId"));
         require(input.get("modelSheetRefs") instanceof List<?>, "请明确本款型号表原图引用");

@@ -52,4 +52,28 @@ describe('single-style source model sheet preview and confirmation',()=>{
  it('hides write controls and guards all handlers without the independent maintenance capability even when ordinary selection write is true',async()=>{await start(source({canWrite:true,canMaintainModelSheet:false}));expect(wrapper.find('.el-upload').exists()).toBe(false);expect(wrapper.find('[aria-label="粘贴本款型号表"]').exists()).toBe(false);expect(button('确认仅更新本款')).toBeUndefined();await vm().check();await vm().save();await vm().upload(new File(['image'],'原图.png'));expect(api.previewCatalogModelSheet).not.toHaveBeenCalled();expect(api.saveCatalogModelSheet).not.toHaveBeenCalled();expect(api.uploadCatalogModelSheetFile).not.toHaveBeenCalled()})
  it('uploads only a scoped image and retries a lost response with the same checksum and request without changing source rows until confirmation',async()=>{api.uploadCatalogModelSheetFile.mockRejectedValueOnce(new Error('图片上传响应超时'));await start();const file=new File(['real png'],'原始型号表.png',{type:'image/png'});await vm().upload(file);await flushPromises();expect(wrapper.text()).toContain('图片上传响应超时');expect(api.previewCatalogModelSheet).not.toHaveBeenCalled();expect(api.saveCatalogModelSheet).not.toHaveBeenCalled();expect(button('重试同一原图')).toBeDefined();await vm().upload(file);await flushPromises();expect(api.uploadCatalogModelSheetFile).toHaveBeenCalledTimes(2);const first=api.uploadCatalogModelSheetFile.mock.calls[0][0];expect(first).toMatchObject({supplierCode:'PJ-EXISTING',sourceKind:'selection',recordId:3,rowId:'stable-43rd',rowVersion:7,recordVersion:9,requestId:expect.any(String),sha256:createHash('sha256').update('real png').digest('hex')});expect(api.uploadCatalogModelSheetFile.mock.calls[1][0]).toEqual(first);expect(wrapper.get('.existing-photo-view').text()).toContain('型号表原图.png');await read();await click('预览型号关联');expect(api.previewCatalogModelSheet.mock.calls[0][0].modelSheetRefs).toEqual([{id:81}]);expect(wrapper.get('.model-sheet-delta').text()).toContain('型号表原图 0 → 1');expect(api.saveCatalogModelSheet).not.toHaveBeenCalled()})
  it('rejects a whole quote document and does not pretend that its archive upload is a model-sheet image',async()=>{await start();await vm().upload(new File(['pdf'],'整份报价.pdf'));expect(wrapper.text()).toContain('不要在此上传整份报价文件');expect(api.uploadCatalogModelSheetFile).not.toHaveBeenCalled()})
+ it('does not let another brand with the same original index and model hide an omitted saved entry',async()=>{
+  const entries=['Apple','Samsung'].map(rawBrandGroup=>({supplierIndex:'1',rawBrandGroup,rawModelText:'原A',rawStatus:'试模',rawNote:'',phoneModelIds:[],phones:[],matchMethod:'automatic'}))
+  await start(source({supplierModelEntries:entries}));await read('1\tApple\t原A\t试模\t')
+  expect(wrapper.text()).toContain('缺少已保存的原始条目');expect(wrapper.findAll('.model-sheet-entry')).toHaveLength(2);expect(api.saveCatalogModelSheet).not.toHaveBeenCalled()
+ })
+ it('compares changes to the correct brand when index and model text repeat',async()=>{
+  const entries=['Apple','Samsung'].map(rawBrandGroup=>({supplierIndex:'1',rawBrandGroup,rawModelText:'原A',rawStatus:`${rawBrandGroup}原进度`,rawNote:'',phoneModelIds:[],phones:[],matchMethod:'automatic'}))
+  api.previewCatalogModelSheet.mockImplementation(async data=>{const result=previewFor(data);return {...result,before:{...result.before,supplierModelEntries:entries}}})
+  await start(source({supplierModelEntries:entries}));await read('1\tApple\t原A\tApple新进度\t\n1\tSamsung\t原A\tSamsung新进度\t');await click('预览型号关联')
+  const changes=wrapper.findAll('.model-sheet-delta details article');expect(changes).toHaveLength(2)
+  expect(changes[0].findAll('p')[0].text()).toContain('Apple原进度');expect(changes[1].findAll('p')[0].text()).toContain('Samsung原进度');expect(changes[1].findAll('p')[0].text()).not.toContain('Apple原进度')
+ })
+
+ it('keeps unnumbered location strings in collapsed review notes while prioritizing readable model names',async()=>{
+  const labels=['原无序号（Samsung栏111后第1行）','原无序号（Samsung栏111后第2行）','001']
+  const entries=labels.map((supplierIndex,i)=>({supplierIndex,rawBrandGroup:'Samsung',rawModelText:['Z FOLD8','Z FOLD8 WIDE','Galaxy S26'][i],rawStatus:'红字',rawNote:i===2?'原备注：有推窗；源文件M23；原图SHA abc123':'',phoneModelIds:[],phones:[],matchMethod:'automatic'}))
+  await start(source({supplierModelEntries:entries}));expect(wrapper.findAll('.model-sheet-index').map(index=>index.text())).toEqual(['—','—','001'])
+  expect(wrapper.findAll('.model-sheet-raw strong').map(model=>model.text())).toEqual(['Z FOLD8','Z FOLD8 WIDE','Galaxy S26'])
+  const notes=wrapper.findAll('.model-sheet-source-location');expect(notes).toHaveLength(3)
+  for(let i=0;i<2;i++){expect((notes[i].element as HTMLDetailsElement).open).toBe(false);(notes[i].element as HTMLDetailsElement).open=true;await notes[i].trigger('toggle');expect(notes[i].get('p').text()).toBe(labels[i])}
+  expect((notes[2].element as HTMLDetailsElement).open).toBe(false);expect(notes[2].get('p').text()).toBe(entries[2].rawNote)
+  await click('预览型号关联');expect(api.previewCatalogModelSheet.mock.calls[0][0].entries.map((entry:{supplierIndex:string})=>entry.supplierIndex)).toEqual(labels);expect(api.previewCatalogModelSheet.mock.calls[0][0].entries[2].rawNote).toBe(entries[2].rawNote);expect(api.saveCatalogModelSheet).not.toHaveBeenCalled()
+ })
+
 })
