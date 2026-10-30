@@ -17,13 +17,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class MoldSalesMatrixContractTest {
     @Test void missingProductFilterIsAllButExplicitEmptyMeansNoProducts()throws Exception{
         var service=mock(MoldSalesService.class);var mvc=MockMvcBuilders.standaloneSetup(new MoldSalesController(service)).build();
-        mvc.perform(get("/api/v1/mold-sales/matrix")).andExpect(status().isOk());verify(service).matrix(1,50,"","all",null,null,"sales",null);
-        mvc.perform(get("/api/v1/mold-sales/matrix").param("productLineIds","")).andExpect(status().isOk());verify(service).matrix(1,50,"","all",null,List.of(),"sales",null);
-        mvc.perform(get("/api/v1/mold-sales").param("productLineIds","19252,1").param("brandId","10")).andExpect(status().isOk());verify(service).page(1,50,"","all",null,null,"sales",10L,List.of(19252L,1L),null);
+        mvc.perform(get("/api/v1/mold-sales/matrix")).andExpect(status().isOk());verify(service).matrix(1,50,"","all",null,null,"sales",null,"phoneCodeDesc");
+        mvc.perform(get("/api/v1/mold-sales/matrix").param("productLineIds","")).andExpect(status().isOk());verify(service).matrix(1,50,"","all",null,List.of(),"sales",null,"phoneCodeDesc");
+        mvc.perform(get("/api/v1/mold-sales").param("productLineIds","19252,1").param("brandId","10")).andExpect(status().isOk());verify(service).page(1,50,"","all",null,null,"sales",10L,List.of(19252L,1L),null,"phoneCodeDesc");
     }
     @Test void namespacedHistoricalKeysRemainStringsAndDoNotBecomeItemIds()throws Exception{
         var service=mock(MoldSalesService.class);var mvc=MockMvcBuilders.standaloneSetup(new MoldSalesController(service)).build();
-        mvc.perform(get("/api/v1/mold-sales/matrix").param("productKeys","product:48,history:AB:airbag-pintura")).andExpect(status().isOk());verify(service).matrix(1,50,"","all",null,null,"sales",List.of("product:48","history:AB:airbag-pintura"));
+        mvc.perform(get("/api/v1/mold-sales/matrix").param("productKeys","product:48,history:AB:airbag-pintura")).andExpect(status().isOk());verify(service).matrix(1,50,"","all",null,null,"sales",List.of("product:48","history:AB:airbag-pintura"),"phoneCodeDesc");
         mvc.perform(get("/api/v1/mold-sales/source-groups/history:RU:0052")).andExpect(status().isOk());verify(service).sourceDetail("history:RU:0052",1,20,"sales");
         mvc.perform(get("/api/v1/mold-sales/history-review/orders").param("styleCode","AB").param("phoneCode","0052").param("sourceGroupKey","review:AB:0052:named_history:history-AB-airbag-pintura")).andExpect(status().isOk());verify(service).historyReviewDetail("AB","0052","review:AB:0052:named_history:history-AB-airbag-pintura",1,20);
     }

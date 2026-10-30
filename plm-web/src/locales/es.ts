@@ -162,5 +162,12 @@ export default {
   '3D产品图可后补，不影响本步；可在图片与附件上传3D源文件，或由工程师指定PNG／JPG／PDF效果图并采用具体版本': 'La documentación 3D puede añadirse después sin bloquear este paso. Suba el archivo fuente 3D o un render PNG/JPG/PDF designado por ingeniería y adopte su versión específica.',
   '3D效果图仅支持jpg、jpeg、png、webp、pdf，请将3D源文件另存为图纸': 'Los renders 3D admiten jpg, jpeg, png, webp y pdf. Registre los archivos fuente 3D por separado como planos.',
   '3D效果图不能作为CAD源文件的正式PDF衍生件，请采用同项目的制造图纸PDF': 'Un render 3D no puede ser el PDF formal derivado de un archivo CAD. Seleccione un plano de fabricación PDF del mismo proyecto.',
-  '设计评审请采用具体图纸或工程师指定的3D效果图版本（可为设计草稿）': 'Para la revisión de diseño, adopte una versión específica del plano o del render 3D designado por ingeniería (se admiten borradores).'
+  '设计评审请采用具体图纸或工程师指定的3D效果图版本（可为设计草稿）': 'Para la revisión de diseño, adopte una versión específica del plano o del render 3D designado por ingeniería (se admiten borradores).',
+  '型号编码：新到旧': 'Código de modelo: más reciente primero',
+  '开模日期：新到旧': 'Apertura del molde: más reciente primero',
+  '累计产量：多到少': 'Producción acumulada: mayor primero',
+  '累计订单：多到少': 'Pedidos acumulados: mayor primero',
+  '按首笔有效订单日期补充': 'Fecha basada en el primer pedido válido',
+  '开模日期': 'Apertura del molde',
+  '排序方式': 'Ordenar por',
 } as Record<string, string>

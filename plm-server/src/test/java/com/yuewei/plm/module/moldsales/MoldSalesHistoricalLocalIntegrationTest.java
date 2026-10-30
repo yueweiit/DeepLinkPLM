@@ -98,4 +98,35 @@ class MoldSalesHistoricalLocalIntegrationTest extends MoldSalesLocalFixture {
         var updated=service.importSnapshot(source,cost,actor);assertThat(updated).containsEntry("snapshotId",first.get("snapshotId")).containsEntry("costsChanged",true);assertThat(jdbc.queryForObject("select jsonb_agg(to_jsonb(l))::text from plm_mold_sales_line l",String.class)).isEqualTo(before);assertThat(service.importSnapshot(source,cost,actor)).containsEntry("costsChanged",false);verify(audit,times(1)).logRequired(argThat(c->c.getAction().equals("MOLD_SALES_RECALCULATE")&&c.getDetailJson().contains("previousCosts")),eq(actor));
         String stored=jdbc.queryForObject("select costs::text from plm_mold_sales_snapshot where snapshot_id=?",String.class,first.get("snapshotId"));((ObjectNode)changed.withArray("rows").get(0)).put("moldManufacturing","900").put("landedTotal","1200");Files.writeString(cost,json.writeValueAsString(changed));doThrow(new IllegalStateException("audit unavailable")).when(audit).logRequired(any(),eq(actor));assertThatThrownBy(()->service.importSnapshot(source,cost,actor)).hasMessageContaining("audit unavailable");assertThat(jdbc.queryForObject("select costs::text from plm_mold_sales_snapshot where snapshot_id=?",String.class,first.get("snapshotId"))).isEqualTo(stored);
     }
+
+    @Test void codeAndOpeningDateSortApplyGloballyBeforePagingAndFirstOrderFallbackIsReadOnly(){
+        jdbc.update("update plm_mold_sales_archive_line set business_date='2020-01-01' where source_id=?",String.format("%064x",1));
+        jdbc.update("update plm_mold_sales_archive_line set business_date='2018-01-01' where source_id=?",String.format("%064x",3));
+        jdbc.update("update plm_mold_sales_archive_line set business_date='2010-01-01',eligibility='cancelled' where source_id=?",String.format("%064x",2));
+        String before=originalArchive();
+        var newest=rows(service.page(1,1,"","all",48L,null,"sales",null,null,null,"phoneCodeDesc").get("content")).get(0);
+        assertThat(newest.get("phoneCodes").toString()).contains("0059");assertThat(newest).containsEntry("openedDate","2018-01-01").containsEntry("openedDateSource","first_order");
+        var opened=rows(service.page(1,1,"","all",48L,null,"sales",null,null,null,"openedDateDesc").get("content")).get(0);
+        assertThat(opened.get("phoneCodes").toString()).contains("0058");assertThat(opened).containsEntry("openedDate","2020-01-01");
+        var second=rows(service.page(2,1,"","all",48L,null,"sales",null,null,null,"openedDateDesc").get("content")).get(0);assertThat(second.get("sourceGroupKey")).isEqualTo(newest.get("sourceGroupKey"));
+        var matrix=rows(service.matrix(1,1,"","all",null,List.of(48L),"sales",null,"openedDateDesc").get("content")).get(0);assertThat(matrix).containsEntry("openedDate","2020-01-01");
+        assertThat(originalArchive()).isEqualTo(before);verifyNoInteractions(audit);
+    }
+    @Test void visibleRecordedOpeningDateWinsOverEarlierAttributedHistoricalOrders(){
+        jdbc.update("insert into plm_collaboration_mold_set(mold_set_id,item_id,opened_date)values(900,151,'2026-10-25')");
+        var group=rows(service.page(1,50,"","all",51L,null,"sales",null,null).get("content")).get(0);
+        assertThat(group).containsEntry("openedDate","2026-10-25").containsEntry("openedDateSource","recorded");
+        jdbc.update("update plm_collaboration_mold_set set opened_date=null where mold_set_id=900");
+        group=rows(service.page(1,50,"","all",51L,null,"sales",null,null).get("content")).get(0);
+        assertThat(group).containsEntry("openedDate","2024-10-30").containsEntry("openedDateSource","first_order");
+        assertThat(jdbc.queryForObject("select opened_date from plm_collaboration_mold_set where mold_set_id=900",Object.class)).isNull();verifyNoInteractions(audit);
+    }
+
+    @Test void inaccessibleMoldDatesDoNotOverrideTheVisibleFirstOrderFallback(){
+        jdbc.update("insert into plm_collaboration_mold_set(mold_set_id,item_id,opened_date)values(900,151,'2026-10-25')");
+        when(access.visibleSqlClause(eq("mold"),anyString())).thenAnswer(call->call.getArgument(1,String.class)+"<>900");
+        var group=rows(service.page(1,50,"","all",51L,null,"sales",null,null).get("content")).get(0);
+        assertThat(group).containsEntry("openedDate","2024-10-30").containsEntry("openedDateSource","first_order");
+        assertThat(jdbc.queryForObject("select opened_date::text from plm_collaboration_mold_set where mold_set_id=900",String.class)).isEqualTo("2026-10-25");verifyNoInteractions(audit);
+    }
 }

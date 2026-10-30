@@ -2,7 +2,8 @@ package com.yuewei.plm.module.moldsales;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.math.BigDecimal;
-import java.util.Set;
+import java.util.*;
+import java.time.LocalDate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -66,5 +67,27 @@ class MoldSalesRulesTest {
     }
     @Test void historicalCodeParsingReusesCurrentFinalProfilesWithoutChangingOriginalIdentity(){
         var r=archived();r.put("code","NBD4020005701");assertEquals("not_finished_stage",MoldSalesRules.archiveIdentity(r,Set.of("FA4020")).eligibility());r.put("code","NBA4030005701");assertEquals("eligible",MoldSalesRules.archiveIdentity(r,Set.of()).eligibility());r.put("code","MBA100057");assertEquals("not_finished_code",MoldSalesRules.archiveIdentity(r,Set.of()).eligibility());
+    }
+
+    @Test void ordersByFourDigitCodeBeforeQuantityAndKeepsMissingCodesLast(){
+        var old=new HashMap<String,Object>(Map.of("sourceGroupKey","old","phoneCodes",List.of("0007"),"salesQuantity",900));
+        var shared=new HashMap<String,Object>(Map.of("sourceGroupKey","shared","phoneCodes",List.of("0041","1298"),"salesQuantity",1));
+        var unknown=new HashMap<String,Object>(Map.of("sourceGroupKey","unknown","phoneCodes",List.of(),"salesQuantity",9999));
+        var alias=new HashMap<String,Object>(Map.of("sourceGroupKey","alias","phoneCodes",List.of("9999"),"canonicalPhoneCodes",List.of("1297"),"salesQuantity",2));
+        var rows=new ArrayList<Map<String,Object>>(List.of(old,unknown,alias,shared));
+        MoldSalesRules.sortRows(rows,"phoneCodeDesc",false);
+        assertEquals(List.of(shared,alias,old,unknown),rows);assertEquals(List.of("0007"),old.get("phoneCodes"));
+        MoldSalesRules.sortRows(rows,"quantityDesc",false);assertEquals(unknown,rows.get(0));
+    }
+    @Test void openingDateUsesRecordedDateBeforeFirstOrderAndKeepsUnknownEmpty(){
+        var group=new HashMap<String,Object>();MoldSalesRules.openingDate(group,LocalDate.parse("2026-10-20"),LocalDate.parse("2024-01-01"));
+        assertEquals("2026-10-20",group.get("openedDate"));assertEquals("recorded",group.get("openedDateSource"));
+        MoldSalesRules.openingDate(group,null,LocalDate.parse("2024-01-01"));assertEquals("2024-01-01",group.get("openedDate"));assertEquals("first_order",group.get("openedDateSource"));
+        MoldSalesRules.openingDate(group,null,null);assertNull(group.get("openedDate"));assertNull(group.get("openedDateSource"));
+    }
+    @Test void openingDateSortingHasStableTiesAndDoesNotPromoteUnknownDates(){
+        var a=new HashMap<String,Object>(Map.of("sourceGroupKey","a","openedDate","2026-10-20"));var b=new HashMap<String,Object>(Map.of("sourceGroupKey","b","openedDate","2026-10-20"));var old=new HashMap<String,Object>(Map.of("sourceGroupKey","old","openedDate","2024-01-01"));var empty=new HashMap<String,Object>(Map.of("sourceGroupKey","empty"));
+        var rows=new ArrayList<Map<String,Object>>(List.of(empty,b,old,a));MoldSalesRules.sortRows(rows,"openedDateDesc",false);assertEquals(List.of(a,b,old,empty),rows);
+        MoldSalesRules.mergeOpeningDate(a,Map.of("openedDate","2025-01-01","openedDateSource","first_order"));MoldSalesRules.mergeOpeningDate(a,Map.of("openedDate","2026-05-01","openedDateSource","recorded"));assertEquals("2026-05-01",a.get("openedDate"));
     }
 }

@@ -3,6 +3,7 @@ package com.yuewei.plm.module.moldsales;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.yuewei.plm.common.util.ProductBusinessCodeGenerator;
 import java.math.*;
+import java.time.LocalDate;
 import java.util.*;
 import java.util.regex.Pattern;
 
@@ -13,6 +14,33 @@ public final class MoldSalesRules {
     private static final Pattern HISTORICAL_CANCELLATION=Pattern.compile("cancel|anulad|取消|作废|\\bvoid\\b",Pattern.CASE_INSENSITIVE);
     public static final String QUANTITY_POLICY="registered_non_cancelled_orders_v2";
     public record Identity(String style,String phone,String eligibility,BigDecimal quantity) {}
+    static LocalDate date(Object value){return value==null?null:LocalDate.parse(value.toString());}
+    static LocalDate earlier(LocalDate a,LocalDate b){return a==null?b:b==null?a:a.isBefore(b)?a:b;}
+    static void openingDate(Map<String,Object> target,LocalDate recorded,LocalDate firstOrder){
+        var value=recorded==null?firstOrder:recorded;
+        target.put("openedDate",value==null?null:value.toString());
+        target.put("openedDateSource",value==null?null:recorded==null?"first_order":"recorded");
+    }
+    static void mergeOpeningDate(Map<String,Object> target,Map<String,Object> source){
+        var value=date(source.get("openedDate"));if(value==null)return;
+        var current=date(target.get("openedDate"));boolean recorded="recorded".equals(source.get("openedDateSource")),wasRecorded="recorded".equals(target.get("openedDateSource"));
+        if(current==null||recorded&&!wasRecorded||recorded==wasRecorded&&value.isBefore(current)){
+            target.put("openedDate",value.toString());target.put("openedDateSource",source.get("openedDateSource"));
+        }
+    }
+    private static String newestPhoneCode(Map<String,Object> row){
+        Object codes=row.get("canonicalPhoneCodes");if(!(codes instanceof Collection<?> known)||known.isEmpty())codes=row.get("phoneCodes");
+        if(!(codes instanceof Collection<?> values))return null;
+        return values.stream().map(Object::toString).filter(v->v.matches("[0-9]{4}")).max(String::compareTo).orElse(null);
+    }
+    static void sortRows(List<Map<String,Object>> rows,String sort,boolean production){
+        Comparator<Map<String,Object>> order=switch(sort){
+            case "openedDateDesc"->Comparator.comparing(r->date(r.get("openedDate")),Comparator.nullsLast(Comparator.reverseOrder()));
+            case "quantityDesc"->Comparator.comparing(r->{Object value=r.containsKey("totalSalesQuantity")?r.get("totalSalesQuantity"):production&&r.get("production") instanceof Map<?,?> p?p.get("finishedTotal"):r.get("salesQuantity");return value==null?null:new BigDecimal(value.toString());},Comparator.nullsLast(Comparator.reverseOrder()));
+            default->Comparator.comparing(MoldSalesRules::newestPhoneCode,Comparator.nullsLast(Comparator.reverseOrder()));
+        };
+        rows.sort(order.thenComparing(r->Objects.toString(r.getOrDefault("rowKey",r.get("sourceGroupKey")),"item:"+r.get("groupId"))));
+    }
     /** 4030 is assembled stock; other final steps come from the existing product/SKU catalogue. */
     public static String finishedSql(Set<String> profiles){
         return finishedSql(profiles,"item_code");

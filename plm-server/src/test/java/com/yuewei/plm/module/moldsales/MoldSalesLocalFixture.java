@@ -40,7 +40,7 @@ abstract class MoldSalesLocalFixture {
           create table plm_product(product_id bigint primary key,product_specific_code text,product_type text,parent_product_id bigint,finished_product_code text,project_kind text,color text,deleted_flag int default 0,product_name text,product_code text,status text,master_data_status text,phone_model_member_id bigint,phone_model_code text);
           create table plm_code_item(code_item_id bigint primary key,code_value text,code_name text,code_type text,deleted_flag int default 0);
           create table plm_collaboration_item(item_id bigint primary key,style_name text,mold_name text,compatible_models text,product_line_id bigint,phone_model_code_item_id bigint,phone_model_code text,pc_total numeric,tpu_total numeric,finished_total numeric,production_notes text,deleted_flag int default 0,brand_id bigint);
-          create table plm_collaboration_mold_set(mold_set_id bigint primary key,item_id bigint,deleted_flag int default 0);
+          create table plm_collaboration_mold_set(mold_set_id bigint primary key,item_id bigint,deleted_flag int default 0,opened_date date);
           create table plm_collaboration_mold_part(mold_part_id bigint primary key,mold_set_id bigint,part_type text,physical_status text,factory_arrival_date date,acceptance_status text,acceptance_date date);
           create table plm_phone_model_member(id bigint primary key,code_item_id bigint,brand_id bigint,model_name text);
           create table plm_phone_brand(id bigint primary key,name text);
