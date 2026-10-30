@@ -21,13 +21,7 @@ public class EngineeringBasisService {
     private final SupplierProfileService suppliers;
 
     public List<Map<String,Object>> supplierOptions() {
-        if (!access.hasPermission("supplier:view")) return List.of();
-        access.requireDomesticView();
-        return jdbc.queryForList("""
-            select p.supplier_id as "supplierId",p.supplier_code as "supplierCode",p.supplier_name as "supplierName",
-              p.status,p.version,p.needs_review as "needsReview"
-            from plm_supplier_profile p where p.deleted_flag=0 and
-            """ + access.visibleSqlClause("supplier_profile", "p.supplier_id") + " order by lower(p.supplier_name),p.supplier_id");
+        return suppliers.options();
     }
 
     /** Whitelist draft fields; older clients omitting the new field cannot erase an existing supply plan. */
@@ -43,7 +37,7 @@ public class EngineeringBasisService {
             if (rows.stream().anyMatch(r->"supplier".equals(r.get("mode")))||old.stream().anyMatch(r->"supplier".equals(r.get("mode")))) access.requirePermission("supplier:view");
             if (supplierReplaced(old,rows)) {filled(incoming.get("reason"),"供应商更换原因");require(text(incoming.get("reason")).length()<=2000,"供应商更换原因最多2000字");for(var row:old)if(!text(row.get("supplierCode")).isBlank())suppliers.requireSupplier(text(row.get("supplierCode")));}
             var previousCodes=old.stream().map(row->text(row.get("supplierCode"))).filter(code->!code.isBlank()).collect(java.util.stream.Collectors.toSet());
-            for(String code:rows.stream().map(row->text(row.get("supplierCode"))).filter(code->!code.isBlank()).distinct().sorted().toList()){if(previousCodes.contains(code))suppliers.requireSupplier(code);else suppliers.requireSupplierForNewUse(code);}
+            for(String code:rows.stream().map(row->text(row.get("supplierCode"))).filter(code->!code.isBlank()).distinct().sorted().toList()){var supplier=previousCodes.contains(code)?suppliers.requireSupplier(code):suppliers.requireSupplierForNewUse(code);if(rows.stream().anyMatch(row->code.equals(row.get("supplierCode"))&&"mold".equals(row.get("role")))&&old.stream().noneMatch(row->code.equals(row.get("supplierCode"))&&"mold".equals(row.get("role"))))SupplierProfileService.requireBusinessCategory(supplier,"mold");}
         }
         plan.put("supplierAssignments",rows);
         return plan;
@@ -73,7 +67,7 @@ public class EngineeringBasisService {
         var previous=matches.get(0);var oldSnapshot=supplierSnapshots(List.of(previous));
         var replacement=new LinkedHashMap<>(previous);
         if(!pending){
-            var supplier=suppliers.requireSupplierForNewUse(code);require(!"inactive".equals(supplier.get("status"))&&!Boolean.TRUE.equals(supplier.get("needsReview")),"新供应商已停用或身份待核对，请先补齐供应商资料");
+            var supplier=suppliers.requireSupplierForNewUse(code);if("mold".equals(previous.get("role")))SupplierProfileService.requireBusinessCategory(supplier,"mold");require(!"inactive".equals(supplier.get("status"))&&!Boolean.TRUE.equals(supplier.get("needsReview")),"新供应商已停用或身份待核对，请先补齐供应商资料");
             replacement.put("supplierCode",code);replacement.put("basis",text(input.get("basis")));require(text(replacement.get("basis")).length()<=2000,"采用依据最多2000字");
         }
         var after=before.stream().filter(row->!pending||row!=previous).map(row->row==previous?replacement:row).toList();
@@ -177,7 +171,7 @@ public class EngineeringBasisService {
     public Map<String,Object> supplierForNewUse(String code){return suppliers.requireSupplierForNewUse(code);}
     public void requireMoldSupplier(Map<String,Object> plan){
         var rows=normalizeAssignments(plan.get("supplierAssignments"),false).stream().filter(row->"supplier".equals(row.get("mode"))&&"mold".equals(row.get("role"))).toList();
-        require(!rows.isEmpty(),"请选择开模供应商");for(var row:rows)requireActiveSupplier(text(row.get("supplierCode")));
+        require(!rows.isEmpty(),"请选择开模供应商");for(var row:rows)SupplierProfileService.requireBusinessCategory(requireActiveSupplier(text(row.get("supplierCode"))),"mold");
     }
     private Map<String,Object> requireActiveSupplier(String code){
         access.requirePermission("supplier:view");var supplier=suppliers.requireSupplier(code);
@@ -191,6 +185,7 @@ public class EngineeringBasisService {
             var snapshot=new LinkedHashMap<>(row);
             if ("supplier".equals(row.get("mode"))) {
                 var supplier=requireActiveSupplier(text(row.get("supplierCode")));
+                if("mold".equals(row.get("role")))SupplierProfileService.requireBusinessCategory(supplier,"mold");
                 for (String key:List.of("supplierId","supplierName","version")) snapshot.put(key,supplier.get(key));
             }
             result.add(snapshot);

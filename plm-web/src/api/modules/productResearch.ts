@@ -145,6 +145,7 @@ export interface SupplierAssignment {
   basis: string;
 }
 export interface ResearchSupplierOption {
+  businessCategories?: import('@/types/supplier').SupplierBusinessCategory[];
   supplierId?: number;
   supplierCode: string;
   supplierName: string;

@@ -1,5 +1,6 @@
 {
   "V20260727_1300__ecount_material_groups.sql": "fb515d703341064c6003b694c260597ac151873cfad7c288261239f4cfd131cc",
   "V20260730_1130__seed_inventory_from_ecount_workbook_and_archive_minor_groups.sql": "8008445fe2f8bfc28f815d883ff20ea37f0f5c06a3e3b959d1ff1e98441bdeb2",
-  "V20260703_1600__m1_auth_and_operation_log.sql": "a9cebfb50724895b014eaedbaf15759d4b9221991e56f168d94f65c3ab8063c4"
+  "V20260703_1600__m1_auth_and_operation_log.sql": "a9cebfb50724895b014eaedbaf15759d4b9221991e56f168d94f65c3ab8063c4",
+  "V20261030_1100__supplier_business_categories.sql": "9509e6ece4c3e4b972bace24c7d2f726c68c9261dca7b389f41ecc95c922c59f"
 }

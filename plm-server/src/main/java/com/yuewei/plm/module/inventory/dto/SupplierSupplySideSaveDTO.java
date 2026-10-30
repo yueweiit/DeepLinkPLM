@@ -14,6 +14,8 @@ public class SupplierSupplySideSaveDTO {
     private String supplierCode;
     @Pattern(regexp="company|person|unknown")
     private String supplierType = "unknown";
+    @Size(max=2, message="供应商业务分类最多2项")
+    private List<@Pattern(regexp="mold|partner_selection", message="供应商业务分类无效") String> businessCategories;
     private Long version;
     @Size(max=80) private String requestId;
     @Size(max=2000) private String changeReason;

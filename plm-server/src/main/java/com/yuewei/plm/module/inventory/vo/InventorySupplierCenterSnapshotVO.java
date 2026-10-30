@@ -35,8 +35,9 @@ public record InventorySupplierCenterSnapshotVO(
         List<SupplyRecord> supplyRecords,
         List<ProjectItem> relatedProjects,
         List<QualificationItem> qualificationFiles,
-        String supplierType, Long version, boolean needsReview, String shortCode
+        String supplierType, Long version, boolean needsReview, String shortCode, List<String> businessCategories
     ) {
+        public SupplierDetail(Long id,String code,String name,String shortName,String person,String phone,String email,List<String> categories,String region,String status,String updated,String level,String payment,String risk,List<SupplyRecord> records,List<ProjectItem> projects,List<QualificationItem> files,String supplierType,Long version,boolean needsReview,String shortCode){this(id,code,name,shortName,person,phone,email,categories,region,status,updated,level,payment,risk,records,projects,files,supplierType,version,needsReview,shortCode,List.of());}
         public SupplierDetail(Long id,String code,String name,String shortName,String person,String phone,String email,List<String> categories,String region,String status,String updated,String level,String payment,String risk,List<SupplyRecord> records,List<ProjectItem> projects,List<QualificationItem> files,String supplierType,Long version,boolean needsReview){this(id,code,name,shortName,person,phone,email,categories,region,status,updated,level,payment,risk,records,projects,files,supplierType,version,needsReview,"");}
         public SupplierDetail(Long id,String code,String name,String shortName,String person,String phone,String email,List<String> categories,String region,String status,String updated,String level,String payment,String risk,List<SupplyRecord> records,List<ProjectItem> projects,List<QualificationItem> files){this(id,code,name,shortName,person,phone,email,categories,region,status,updated,level,payment,risk,records,projects,files,"unknown",0L,false);}
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { t as uiText } from '@/locales'
 
+import { canSelectMoldSupplier, moldSupplierOptions } from '@/utils/supplierBusiness';
 import { computed } from 'vue';
 import { materialKey, type DevelopmentMaterial, type EngineeringSummary, type ResearchSupplierOption, type SupplierAssignment } from '@/api/modules/productResearch';
 
@@ -20,6 +21,7 @@ const roles=[{value:'mold',label:'模具'},{value:'component',label:'部件'},{v
 const kinds=['bom','process'] as const;
 const roleName=(value:string)=>roles.find(r=>r.value===value)?.label||value;
 const statusName=(value:string)=>({draft:'工程草稿',active:'正式',released:'正式',locked:'正式／已锁定',frozen:'已冻结'} as Record<string,string>)[value]||value;
+function assignmentSuppliers(assignment:SupplierAssignment){return assignment.role==='mold'?moldSupplierOptions(props.suppliers,assignment.supplierCode):props.suppliers;}
 function update(index:number,patch:Partial<SupplierAssignment>){emit('update:assignments',props.assignments.map((a,i)=>i===index?{...a,...patch}:a));}
 function add(){emit('update:assignments',[...props.assignments,{mode:props.canSelectSupplier?'supplier':'internal',role:'component',scope:'',basis:''}]);}
 function remove(index:number){emit('update:assignments',props.assignments.filter((_,i)=>i!==index));}
@@ -56,7 +58,7 @@ function canReplace(assignment:SupplierAssignment){return props.canChangeSupplie
       <template v-if="assignmentsEditable">
         <el-form label-position="top" :disabled="busy" class="assignment-fields">
           <el-form-item :label='uiText("承担方式")'><el-select :model-value="assignment.mode" :aria-label="uiText('分工{value0}承担方式',{value0:(index+1)})" @update:model-value="update(index,{mode:$event,supplierCode:undefined,internalName:undefined})"><el-option :label='uiText("外部供应商")' value="supplier" :disabled="!canSelectSupplier"/><el-option :label='uiText("内部制作")' value="internal"/></el-select></el-form-item>
-          <el-form-item v-if="assignment.mode==='supplier'" :label='uiText("供应商")'><el-select :model-value="assignment.supplierCode" filterable clearable :disabled="!canSelectSupplier" :aria-label="uiText('分工{value0}供应商',{value0:(index+1)})" :placeholder='uiText("选择已有供应商")' @update:model-value="update(index,{supplierCode:$event})"><el-option v-for="supplier in suppliers" :key="supplier.supplierCode" :label="`${supplier.supplierName} · ${supplier.supplierCode}`" :value="supplier.supplierCode"/></el-select></el-form-item>
+          <el-form-item v-if="assignment.mode==='supplier'" :label='uiText("供应商")'><el-select :model-value="assignment.supplierCode" filterable clearable :disabled="!canSelectSupplier" :aria-label="uiText('分工{value0}供应商',{value0:(index+1)})" :placeholder='uiText("选择已有供应商")' @update:model-value="update(index,{supplierCode:$event})"><el-option v-for="supplier in assignmentSuppliers(assignment)" :key="supplier.supplierCode" :label="`${supplier.supplierName} · ${supplier.supplierCode}`" :value="supplier.supplierCode" :disabled="assignment.role==='mold'&&!canSelectMoldSupplier(supplier)"/></el-select></el-form-item>
           <el-form-item v-else :label='uiText("内部承担部门／人员")'><el-input :model-value="assignment.internalName" :aria-label="uiText('分工{value0}内部承担方',{value0:(index+1)})" :placeholder='uiText("如工程部／模具车间")' @update:model-value="update(index,{internalName:$event})"/></el-form-item>
           <el-form-item :label='uiText("承担职责")'><el-select :model-value="assignment.role" :aria-label="uiText('分工{value0}职责',{value0:(index+1)})" @update:model-value="update(index,{role:$event})"><el-option v-for="role in roles" :key="role.value" :label="role.label" :value="role.value"/></el-select></el-form-item>
           <el-form-item :label='uiText("供货／制作范围")'><el-input :model-value="assignment.scope" :aria-label="uiText('分工{value0}范围',{value0:(index+1)})" :placeholder='uiText("如 PC 背板、TPU 包边、组装")' @update:model-value="update(index,{scope:$event})"/></el-form-item>

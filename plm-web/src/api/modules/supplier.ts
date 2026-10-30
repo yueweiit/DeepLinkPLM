@@ -1,8 +1,9 @@
-import type { SupplierCenterSnapshot, SupplierDetail } from '@/types/supplier'
+import type { SupplierBusinessCategory, SupplierCenterSnapshot, SupplierDetail } from '@/types/supplier'
 
 import request, { unwrapResponse } from '../request'
 
 export interface SupplierSupplySidePayload {
+  businessCategories?: SupplierBusinessCategory[]
   supplierType?: string
   version?: number
   requestId?: string

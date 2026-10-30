@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { t as uiText } from '@/locales'
 
+import { canSelectMoldSupplier, moldSupplierOptions } from "@/utils/supplierBusiness";
 import { partnerError as requestError } from "@/utils/partnerError";
 import { computed, defineAsyncComponent, nextTick, reactive, ref, watch } from "vue";
 import {
@@ -186,6 +187,9 @@ const designDraft = computed<DesignDraftInput>(() => {
   };
 });
 const moldSupplier = computed(()=>((plan.supplierAssignments||[]) as SupplierAssignment[]).find(a=>a.mode==='supplier'&&a.role==='mold'));
+const moldSuppliers = computed(()=>moldSupplierOptions(suppliers.value,moldSupplier.value?.supplierCode));
+const hasMoldSuppliers = computed(()=>suppliers.value.some(canSelectMoldSupplier));
+const replacementSuppliers = computed(()=>form.role==='mold'?moldSupplierOptions(suppliers.value):suppliers.value);
 const nextMoldSupplierPending=computed(()=>!moldSupplier.value&&!!detail.value?.supplierFeedbackSummary?.nextSupplierPending);
 function supplierFeedbackLabel(summary?:SupplierFeedbackSummary){
  if(summary?.restricted)return '反馈受限';
@@ -1731,7 +1735,7 @@ function resultLabel(value: string) {
                     <el-form-item :label='uiText("产品名称")' required data-readiness-target="product-name" :error="fieldError('product-name')"><el-input v-model="profile.productName" maxlength="255" :placeholder='uiText("例如：透甲2.0手机壳")'/></el-form-item>
                     <el-form-item :label='uiText("项目负责人")' required data-readiness-target="owner" :error="fieldError('owner')"><el-select v-model="profile.ownerUserId" filterable clearable :placeholder='uiText("请选择负责推进这款新品的人")'><el-option v-for="o in owners" :key="o.userId" :label="o.name" :value="o.userId"/></el-select></el-form-item>
                     <el-form-item :label='uiText("开发需求")' required data-readiness-target="requirements" :error="fieldError('requirements')"><el-input ref="requirementsInput" v-model="profile.requirements" type="textarea" :autosize="{minRows:3}" :placeholder='uiText("写清想做的结构、功能和外观，例如：透明PC背板＋TPU包边，带磁吸和翻转支架。")'/></el-form-item>
-                    <el-form-item :label='uiText("意向开模供应商")' data-readiness-target="supplier"><el-select :model-value="moldSupplier?.supplierCode" filterable :disabled="!canSelectSupplier" :placeholder="nextMoldSupplierPending?uiText('下一家待定'):uiText('待确定')" @change="chooseMoldSupplier"><el-option v-for="o in suppliers" :key="o.supplierCode" :value="o.supplierCode" :label="o.supplierName"/></el-select><el-button v-if="editable&&moldSupplier&&detail.canChangeSupplier" link @click="openSupplierChange(moldSupplier)">{{ uiText("更换供应商") }}</el-button></el-form-item>
+                    <el-form-item :label='uiText("意向开模供应商")' data-readiness-target="supplier"><el-select :model-value="moldSupplier?.supplierCode" filterable :disabled="!canSelectSupplier" :placeholder="nextMoldSupplierPending?uiText('下一家待定'):uiText('待确定')" @change="chooseMoldSupplier"><el-option v-for="o in moldSuppliers" :key="o.supplierCode" :value="o.supplierCode" :label="o.supplierName" :disabled="!canSelectMoldSupplier(o)"/></el-select><el-button v-if="editable&&moldSupplier&&detail.canChangeSupplier" link @click="openSupplierChange(moldSupplier)">{{ uiText("更换供应商") }}</el-button><el-button v-if="user.hasPermission('supplier:view')" link @click="openSupplierMaterials">{{uiText("维护供应商分类 ↗")}}</el-button><p v-if="!hasMoldSuppliers" class="muted">{{uiText("暂无已分类的开模供应商，请在供应商资料中设置业务分类。")}}</p></el-form-item>
                   </el-form>
                 </section>
               </template>
@@ -1870,7 +1874,7 @@ function resultLabel(value: string) {
               >
               <template v-else-if="workKind === 'mold'">
                 <h3 class="work-heading">{{stage.step===5?uiText('供应商与模具设计'):uiText('逐套制作与试模')}}</h3>
-                <el-form v-if="stage.step===5&&confirmedPlan.needsMold" class="step-fields" label-position="top" :disabled="!editable||busy"><el-form-item :label='uiText("外部开模供应商")' required data-readiness-target="supplier"><el-select :model-value="moldSupplier?.supplierCode" filterable :disabled="!canSelectSupplier" :placeholder="nextMoldSupplierPending?uiText('下一家待定'):uiText('待确定')" @change="chooseMoldSupplier"><el-option v-for="o in suppliers" :key="o.supplierCode" :value="o.supplierCode" :label="o.supplierName"/></el-select><el-button v-if="editable&&moldSupplier&&detail.canChangeSupplier" link @click="openSupplierChange(moldSupplier)">{{ uiText("更换供应商") }}</el-button></el-form-item><el-form-item :label='uiText("本次模具设计资料")' required data-readiness-target="mold-design-files"><el-select v-model="stepForm.moldDesignReferences" multiple value-key="id" :placeholder='uiText("选择已上传的设计资料")'><el-option v-for="m in currentMaterials.filter(m=>m.type==='file')" :key="m.id" :value="{type:m.type,id:m.id}" :label="`${m.name} · ${m.versionNo}`"/></el-select></el-form-item><el-form-item :label='uiText("供应商交期")'><el-date-picker v-model="stepForm.supplierDueDate" value-format="YYYY-MM-DD"/></el-form-item></el-form>
+                <el-form v-if="stage.step===5&&confirmedPlan.needsMold" class="step-fields" label-position="top" :disabled="!editable||busy"><el-form-item :label='uiText("外部开模供应商")' required data-readiness-target="supplier"><el-select :model-value="moldSupplier?.supplierCode" filterable :disabled="!canSelectSupplier" :placeholder="nextMoldSupplierPending?uiText('下一家待定'):uiText('待确定')" @change="chooseMoldSupplier"><el-option v-for="o in moldSuppliers" :key="o.supplierCode" :value="o.supplierCode" :label="o.supplierName" :disabled="!canSelectMoldSupplier(o)"/></el-select><el-button v-if="editable&&moldSupplier&&detail.canChangeSupplier" link @click="openSupplierChange(moldSupplier)">{{ uiText("更换供应商") }}</el-button><el-button v-if="user.hasPermission('supplier:view')" link @click="openSupplierMaterials">{{uiText("维护供应商分类 ↗")}}</el-button><p v-if="!hasMoldSuppliers" class="muted">{{uiText("暂无已分类的开模供应商，请在供应商资料中设置业务分类。")}}</p></el-form-item><el-form-item :label='uiText("本次模具设计资料")' required data-readiness-target="mold-design-files"><el-select v-model="stepForm.moldDesignReferences" multiple value-key="id" :placeholder='uiText("选择已上传的设计资料")'><el-option v-for="m in currentMaterials.filter(m=>m.type==='file')" :key="m.id" :value="{type:m.type,id:m.id}" :label="`${m.name} · ${m.versionNo}`"/></el-select></el-form-item><el-form-item :label='uiText("供应商交期")'><el-date-picker v-model="stepForm.supplierDueDate" value-format="YYYY-MM-DD"/></el-form-item></el-form>
 
                 <template v-if="currentMold"
                   ><div class="toolbar">
@@ -2328,7 +2332,7 @@ function resultLabel(value: string) {
           <p class="muted">{{ uiText("原供应商：") }}{{form.previousSupplierName}} · {{form.previousSupplierCode}}</p>
           <p class="muted">{{ uiText("供货／制作范围：") }}{{form.scope||uiText('待补')}}{{ uiText("。更换后需重新确认工程方案，历史评审及样品保留。") }}</p>
           <el-form-item :label='uiText("后续供应商")'><el-checkbox v-model="form.replacementPending" :disabled="busy">{{ uiText("下一家待定，结束原供应商对接") }}</el-checkbox></el-form-item>
-          <el-form-item v-if="!form.replacementPending" :label='uiText("新供应商")' required><el-select v-model="form.supplierCode" filterable clearable :disabled="busy" :aria-label='uiText("新供应商")' :placeholder='uiText("选择已有供应商")'><el-option v-for="supplier in suppliers" :key="supplier.supplierCode" :value="supplier.supplierCode" :label="`${supplier.supplierName} · ${supplier.supplierCode}`" :disabled="supplier.status==='inactive'||supplier.needsReview||supplier.supplierCode===form.previousSupplierCode"/></el-select></el-form-item>
+          <el-form-item v-if="!form.replacementPending" :label='uiText("新供应商")' required><el-select v-model="form.supplierCode" filterable clearable :disabled="busy" :aria-label='uiText("新供应商")' :placeholder='uiText("选择已有供应商")'><el-option v-for="supplier in replacementSuppliers" :key="supplier.supplierCode" :value="supplier.supplierCode" :label="`${supplier.supplierName} · ${supplier.supplierCode}`" :disabled="supplier.status==='inactive'||supplier.needsReview||supplier.supplierCode===form.previousSupplierCode"/></el-select></el-form-item>
           <el-form-item :label='uiText("供应商更换原因")' required><el-input v-model="form.reason" :disabled="busy" type="textarea" :autosize="{minRows:3}" maxlength="2000" show-word-limit :aria-label='uiText("供应商更换原因")' :placeholder='uiText("说明原供方无法实现的技术要求，以及本次更换原因")'/></el-form-item>
           <el-form-item v-if="!form.replacementPending" :label='uiText("新供方采用依据（可后补）")'><el-input v-model="form.basis" :disabled="busy" type="textarea" :autosize="{minRows:2}" maxlength="2000" :aria-label='uiText("新供方采用依据")' :placeholder='uiText("新供方的沟通、报价或打样依据；尚未取得可留空")'/></el-form-item>
           <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon/>

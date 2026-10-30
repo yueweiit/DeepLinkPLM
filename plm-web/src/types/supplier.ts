@@ -1,5 +1,7 @@
 import type { CommonStatus } from './common'
 
+export type SupplierBusinessCategory = 'mold' | 'partner_selection'
+
 export interface SupplierMetric {
   label: string
   value: string
@@ -8,6 +10,7 @@ export interface SupplierMetric {
 }
 
 export interface SupplierSummary {
+  businessCategories?: SupplierBusinessCategory[]
   supplierType?: string
   version?: number
   needsReview?: boolean

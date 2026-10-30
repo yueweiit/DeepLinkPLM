@@ -303,14 +303,14 @@ class EightStepEvidenceRegressionTest {
         assertThatThrownBy(()->policy.requireMoldSupplier(plan)).hasMessageContaining("尚未启用");
         when(suppliers.requireSupplier("SUP-A")).thenReturn(Map.of("status","active","needsReview",true));
         assertThatThrownBy(()->policy.requireMoldSupplier(plan)).hasMessageContaining("身份待核对");
-        when(suppliers.requireSupplier("SUP-A")).thenReturn(Map.of("status","active","needsReview",false));
+        when(suppliers.requireSupplier("SUP-A")).thenReturn(Map.of("status","active","needsReview",false,"businessCategories",List.of("mold")));
         assertThatCode(()->policy.requireMoldSupplier(plan)).doesNotThrowAnyException();verifyNoInteractions(jdbc);
     }
 
     @Test void aPriorEmptyConfirmedSupplierPlanCanRecoverFromItsSavedDraftButCannotOverwriteAConflictingPlan()throws Exception{
         var suppliers=mock(com.yuewei.plm.module.partner.SupplierProfileService.class);var policy=new EngineeringBasisService(jdbc,access,suppliers);
-        when(suppliers.requireSupplier("SUP-A")).thenReturn(Map.of("supplierId",1L,"supplierName","原供方","version",1,"status","active"));
-        doCallRealMethod().when(suppliers).requireSupplierForNewUse(anyString());when(suppliers.requireSupplier("SUP-B")).thenReturn(Map.of("supplierId",2L,"supplierName","新供方","version",1,"status","active"));
+        when(suppliers.requireSupplier("SUP-A")).thenReturn(Map.of("supplierId",1L,"supplierName","原供方","version",1,"status","active","businessCategories",List.of("mold")));
+        doCallRealMethod().when(suppliers).requireSupplierForNewUse(anyString());when(suppliers.requireSupplier("SUP-B")).thenReturn(Map.of("supplierId",2L,"supplierName","新供方","version",1,"status","active","businessCategories",List.of("mold")));
         var before=Map.<String,Object>of("mode","supplier","role","mold","supplierCode","SUP-A","scope","PC与TPU制作","basis","原采用依据");
         var state=state();var confirmed=new LinkedHashMap<>(DevelopmentWorkflowStore.map(state.get("plan")));confirmed.put("supplierAssignments",List.of());state.put("plan",confirmed);
         var draft=new LinkedHashMap<>(confirmed);draft.put("supplierAssignments",List.of(before));state.put("planDraft",draft);

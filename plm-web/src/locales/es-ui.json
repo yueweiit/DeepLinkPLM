@@ -4228,5 +4228,17 @@
   "记录只关心产品、测试项、结果、执行人和备注。": "Producto, prueba, resultado y ejecutor: los datos esenciales del registro.",
   "新增测试记录": "Nuevo registro de prueba",
   "测试项": "Prueba",
-  "日期": "Fecha"
+  "日期": "Fecha",
+  "业务分类": "Clasificación comercial",
+  "开模供应商": "Proveedor de moldes",
+  "合作选品供应商": "Proveedor de selección colaborativa",
+  "开模供应商、合作选品供应商": "Proveedor de moldes y de selección colaborativa",
+  "合作选品供应商、开模供应商": "Proveedor de selección colaborativa y de moldes",
+  "全部业务分类": "Todas las clasificaciones comerciales",
+  "供应商业务分类筛选": "Filtrar clasificación comercial del proveedor",
+  "供应商业务分类": "Clasificación comercial del proveedor",
+  "选择该供应商承担的业务，可多选": "Seleccione una o varias funciones del proveedor",
+  "开模申请与研发开模只显示开模供应商；同一家公司可兼任两类。": "Las solicitudes y el desarrollo de moldes muestran proveedores de moldes; una empresa puede tener ambas funciones.",
+  "维护供应商分类 ↗": "Gestionar clasificación del proveedor ↗",
+  "暂无已分类的开模供应商，请在供应商资料中设置业务分类。": "No hay proveedores clasificados para moldes. Configure su clasificación comercial en la ficha del proveedor."
 }

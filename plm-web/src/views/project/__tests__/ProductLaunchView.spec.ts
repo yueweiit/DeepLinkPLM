@@ -911,3 +911,25 @@ describe('explicit 3D product drawing materials',()=>{
 it('retries only failed explicitly designated renders while retaining pending adopted IDs and unsaved project input',async()=>{
  const d=current(2),image=new File(['png'],'工程师效果图.png'),pdf=new File(['pdf'],'工程师效果图.pdf');await launch(d);const notes=wrapper.get('textarea[placeholder="说明本次产品图的结构、功能及版本改动"]');await notes.setValue('重试期间保留');await button('上传3D效果图').trigger('click');await flushPromises();const dialog=wrapper.get('.test-dialog[data-title="上传3D效果图"]');Object.assign(image,{uid:101});Object.assign(pdf,{uid:102});dialog.getComponent(ElUpload).vm.$emit('update:fileList',[{uid:101,name:image.name,raw:image},{uid:102,name:pdf.name,raw:pdf}]);vi.mocked(uploadProjectAttachment).mockResolvedValueOnce({attachmentId:101} as any).mockRejectedValueOnce(Error('效果图网络失败')).mockResolvedValueOnce({attachmentId:102} as any);await button('保存版本',dialog).trigger('click');await flushPromises();expect(dialog.get('[role=alert]').text()).toContain('效果图网络失败');expect(wrapper.getComponent(Product3dMaterials).props('selected')).toEqual(['file:101']);await button('继续上传',dialog).trigger('click');await flushPromises();expect(vi.mocked(uploadProjectAttachment).mock.calls.map(call=>[call[1].name,call[2].fileCategory])).toEqual([[image.name,'render_3d'],[pdf.name,'render_3d'],[pdf.name,'render_3d']]);expect(wrapper.getComponent(Product3dMaterials).props('selected')).toEqual(['file:101','file:102']);expect((notes.element as HTMLTextAreaElement).value).toBe('重试期间保留');expect(researchAction).not.toHaveBeenCalled();expect(confirmTimelineNode).not.toHaveBeenCalled();
 });
+
+describe('supplier business classification in mold work',()=>{
+ const choices=()=>vi.mocked(getResearchOwnerOptions).mockResolvedValue({owners:[{userId:1,name:'研发负责人'}],canSelectSupplier:true,suppliers:[
+  {supplierCode:'MOLD',supplierName:'开模公司',businessCategories:['mold'],status:'active'},
+  {supplierCode:'PARTNER',supplierName:'合作选品公司',businessCategories:['partner_selection'],status:'active'},
+  {supplierCode:'BOTH',supplierName:'兼任公司',businessCategories:['mold','partner_selection'],status:'active'},
+  {supplierCode:'OLD',supplierName:'历史未分类公司',status:'active'},
+  {supplierCode:'INACTIVE',supplierName:'停用开模公司',businessCategories:['mold'],status:'inactive'},
+ ]});
+ it.each([1,5])('offers classified mold suppliers at real research step %i and retains generic feedback candidates',async step=>{
+  choices();const d=current(step);d.workflow.plan={needsMold:true};d.workflow.planDraft={needsMold:true};await launch(d);const choice=wrapper.get('[data-readiness-target="supplier"]').getComponent(ElSelect);expect(choice.findAllComponents(ElOption).map(option=>option.props('value'))).toEqual(['MOLD','BOTH']);expect(wrapper.getComponent(SupplierFeedbackPanel).props('suppliers')).toHaveLength(5);expect(wrapper.text()).toContain('维护供应商分类 ↗');
+ });
+ it('keeps a saved unclassified mold choice visible but disabled without discarding the project plan',async()=>{
+  choices();const d=current(1);d.workflow.planDraft={supplierAssignments:[{mode:'supplier',supplierCode:'OLD',role:'mold',scope:'本次开发',basis:'原采用依据'}]};await launch(d);const choice=wrapper.get('[data-readiness-target="supplier"]').getComponent(ElSelect);expect(choice.props('modelValue')).toBe('OLD');const original=choice.findAllComponents(ElOption).find(option=>option.props('value')==='OLD')!;expect(original.props('label')).toBe('历史未分类公司');expect(original.props('disabled')).toBe(true);expect(saveResearchDesignDraft).not.toHaveBeenCalled();
+ });
+ it('offers only mold suppliers when replacing a mold assignment without hiding the original project choice',async()=>{
+  choices();const d=current(1);d.canChangeSupplier=true;d.workflow.planDraft={supplierAssignments:[{mode:'supplier',supplierCode:'OLD',role:'mold',scope:'本次开发',basis:'原采用依据'}]};await launch(d);await button('更换供应商').trigger('click');await flushPromises();const choice=wrapper.get('.test-dialog[data-title="更换供应商"]').getComponent(ElSelect);expect(choice.findAllComponents(ElOption).map(option=>option.props('value'))).toEqual(['MOLD','BOTH']);expect(researchAction).not.toHaveBeenCalled();
+ });
+ it('explains an empty mold category without falling back to all suppliers',async()=>{
+  vi.mocked(getResearchOwnerOptions).mockResolvedValue({owners:[],canSelectSupplier:true,suppliers:[{supplierCode:'PARTNER',supplierName:'合作公司',businessCategories:['partner_selection']}]});await launch(current(1));expect(wrapper.get('[data-readiness-target="supplier"]').findAllComponents(ElOption)).toHaveLength(0);expect(wrapper.text()).toContain('暂无已分类的开模供应商，请在供应商资料中设置业务分类。');
+ });
+});

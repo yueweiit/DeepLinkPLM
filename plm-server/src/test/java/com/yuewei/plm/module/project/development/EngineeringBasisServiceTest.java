@@ -109,11 +109,29 @@ class EngineeringBasisServiceTest {
         input.put("supplierCode","SUP-B");assertThatThrownBy(()->policy.changeSupplier(42L,state,3,input)).hasMessageContaining("同时选择");
     }
 
-    @Test void supplierOptionsAreLightweightAndNoSupplierPermissionDoesNotBlockOwnerLoading(){
-        assertThat(policy.supplierOptions()).isEmpty();verifyNoInteractions(jdbc);
-        when(access.hasPermission("supplier:view")).thenReturn(true);when(access.visibleSqlClause("supplier_profile","p.supplier_id")).thenReturn("p.supplier_id=3");
-        when(jdbc.queryForList(anyString())).thenReturn(List.of(Map.of("supplierId",3L,"supplierCode","SUP-A","supplierName","供方","status","active","version",2)));
-        assertThat(policy.supplierOptions()).hasSize(1);verify(jdbc).queryForList(argThat(sql->sql.contains("p.supplier_id=3")&&!sql.contains("contact")&&!sql.contains("inventory_supplier_item")));
+    @Test void supplierOptionsReuseTheScopedMasterClassificationProjection(){
+        when(suppliers.options()).thenReturn(List.of(Map.of("supplierCode","SUP-A","businessCategories",List.of("mold"))));
+        assertThat(policy.supplierOptions()).singleElement().satisfies(row->assertThat(row.get("businessCategories")).isEqualTo(List.of("mold")));verifyNoInteractions(jdbc);
+    }
+
+    @Test void onlyNewMoldUseRequiresClassificationIncludingAnExistingComponentSupplier(){
+        supplier("active");var mold=Map.<String,Object>of("supplierAssignments",List.of(assignment("supplier","SUP-A","mold")),"reason","增加开模职责");
+        assertThatThrownBy(()->policy.preparePlan(mold,Map.of())).hasMessageContaining("开模供应商");
+        var component=Map.<String,Object>of("supplierAssignments",List.of(assignment("supplier","SUP-A","component")));
+        assertThatCode(()->policy.preparePlan(component,Map.of())).doesNotThrowAnyException();
+        assertThatThrownBy(()->policy.preparePlan(mold,component)).hasMessageContaining("开模供应商");
+        assertThat(policy.preparePlan(mold,mold)).containsEntry("supplierAssignments",mold.get("supplierAssignments"));
+        var classified=new LinkedHashMap<>(suppliers.requireSupplier("SUP-A"));classified.put("businessCategories",List.of("mold","partner_selection"));when(suppliers.requireSupplier("SUP-A")).thenReturn(classified);
+        assertThatCode(()->policy.preparePlan(mold,Map.of())).doesNotThrowAnyException();
+    }
+
+    @Test void replacingAndConfirmingMoldSuppliersCannotBypassTheirBusinessClassification(){
+        replacementSuppliers();var original=assignment("supplier","SUP-A","mold");var plan=Map.<String,Object>of("supplierAssignments",List.of(original));var state=new LinkedHashMap<String,Object>(Map.of("planDraft",plan));
+        var input=new LinkedHashMap<>(replacement());input.put("role","mold");
+        assertThatThrownBy(()->policy.changeSupplier(42L,state,1,input)).hasMessageContaining("开模供应商");
+        assertThatThrownBy(()->policy.requireMoldSupplier(plan)).hasMessageContaining("开模供应商");
+        var classified=new LinkedHashMap<>(suppliers.requireSupplier("SUP-A"));classified.put("businessCategories",List.of("mold"));when(suppliers.requireSupplier("SUP-A")).thenReturn(classified);
+        assertThatCode(()->policy.requireMoldSupplier(plan)).doesNotThrowAnyException();
     }
 
     @Test void aDraftCanBeIncompleteAndOlderClientsCannotEraseTheSingleSupplierPlan(){

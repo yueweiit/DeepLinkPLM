@@ -2,7 +2,7 @@ import {defineComponent,h,ref,type Ref} from 'vue';
 import { mount,flushPromises,type VueWrapper } from '@vue/test-utils';
 import { createPinia,setActivePinia } from 'pinia';
 import { createMemoryHistory,createRouter } from 'vue-router';
-import ElementPlus,{ ElMessageBox,ElRadioGroup,ElForm,ElSelect,ElDatePicker } from 'element-plus';
+import ElementPlus,{ ElMessageBox,ElOption,ElFormItem,ElRadioGroup,ElForm,ElSelect,ElDatePicker } from 'element-plus';
 import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 import { useUserStore } from '@/stores/user';
 import { deleteDevelopmentDraft,getProductResearchDetail,previewUnitCost,researchAction,saveDevelopmentRound,type ProductResearchDetail,type UnitCostSheet } from '@/api/modules/productResearch';
@@ -125,4 +125,12 @@ describe('single-column child forms keep labels and original writes',()=>{
  it('preserves readonly engineering selectors while leaving the original version viewing entries available',async()=>{
   app=mount(EngineeringBasisPanel,{props:{...engineeringProps(),editable:false,assignmentsEditable:false,canConfirm:false} as any,global:{plugins:[ElementPlus]}});wrapper=app;expect(wrapper.findAllComponents(ElSelect).every(select=>select.props('disabled'))).toBe(true);expect(wrapper.find('input[aria-label="分工1范围"]').exists()).toBe(false);expect(wrapper.find('input[aria-label="工程方案确认说明"]').exists()).toBe(false);await button('查看 BOM').trigger('click');expect(wrapper.emitted('engineering')).toEqual([['bom']]);expect(wrapper.emitted('update:assignments')).toBeUndefined();expect(wrapper.emitted('confirm')).toBeUndefined();
  });
+});
+
+it('filters only mold assignment suppliers and preserves a saved unclassified choice as disabled',async()=>{
+ const props={assignments:[{mode:'supplier',supplierCode:'OLD',role:'mold',scope:'整套',basis:'历史依据'},{mode:'supplier',supplierCode:'PARTNER',role:'component',scope:'部件',basis:''}],persistedAssignments:[],selected:[],materials:[],suppliers:[{supplierCode:'MOLD',supplierName:'开模公司',businessCategories:['mold']},{supplierCode:'PARTNER',supplierName:'合作公司',businessCategories:['partner_selection']},{supplierCode:'OLD',supplierName:'原公司'}],editable:true,assignmentsEditable:true,canSelectSupplier:true,canConfirm:false,canManageSupplier:true,busy:false,reason:''};
+ app=mount(EngineeringBasisPanel,{props:props as any,global:{plugins:[ElementPlus]}});wrapper=app;
+ const supplierChoices=wrapper.findAllComponents(ElFormItem).filter(item=>item.props('label')==='供应商').map(item=>item.getComponent(ElSelect));
+ expect(supplierChoices[0]!.findAllComponents(ElOption).map(option=>option.props('value'))).toEqual(['MOLD','OLD']);expect(supplierChoices[0]!.findAllComponents(ElOption).find(option=>option.props('value')==='OLD')!.props('disabled')).toBe(true);
+ expect(supplierChoices[1]!.findAllComponents(ElOption).map(option=>option.props('value'))).toEqual(['MOLD','PARTNER','OLD']);expect(wrapper.emitted('update:assignments')).toBeUndefined();
 });
