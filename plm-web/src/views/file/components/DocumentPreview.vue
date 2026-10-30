@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { getAttachmentDetail, previewAttachment, type AttachmentVO } from '@/api/modules/attachment'
 import { useUserStore } from '@/stores/user'
@@ -27,7 +29,7 @@ watch(() => user.token, () => { generation++; clear(); target.value = undefined;
 onBeforeUnmount(() => { generation++; clear() })
 </script>
 <template>
-  <section class="document-preview" :class="{'document-preview--compact':compact}" v-loading="loading"><div class="preview-caption" v-if="target">预览 {{ target.originalFileName }} · {{ target.versionNo }}<span v-if="target.attachmentId !== file.attachmentId">（本版本关联的 PDF）</span></div><el-alert v-if="error" :title="error" type="error" :closable="false"/><el-button v-if="error" size="small" @click="load">重试预览</el-button><iframe v-if="url && kind === 'pdf'" :src="url" title="图纸 PDF 预览"/><img v-else-if="url && kind === 'image'" :src="url" :alt="target?.originalFileName"/><pre v-else-if="kind === 'text' && !error">{{ content }}</pre><div v-else-if="kind === 'unsupported' && !error" class="unsupported">当前格式请下载原文件查看；CAD 可关联 PDF 后在此预览。</div></section>
+  <section class="document-preview" :class="{'document-preview--compact':compact}" v-loading="loading"><div class="preview-caption" v-if="target">{{ uiText("预览 ") }}{{ target.originalFileName }} · {{ target.versionNo }}<span v-if="target.attachmentId !== file.attachmentId">{{ uiText("（本版本关联的 PDF）") }}</span></div><el-alert v-if="error" :title="error" type="error" :closable="false"/><el-button v-if="error" size="small" @click="load">{{ uiText("重试预览") }}</el-button><iframe v-if="url && kind === 'pdf'" :src="url" :title='uiText("图纸 PDF 预览")'/><img v-else-if="url && kind === 'image'" :src="url" :alt="target?.originalFileName"/><pre v-else-if="kind === 'text' && !error">{{ content }}</pre><div v-else-if="kind === 'unsupported' && !error" class="unsupported">{{ uiText("当前格式请下载原文件查看；CAD 可关联 PDF 后在此预览。") }}</div></section>
 </template>
 <style scoped>
 .document-preview{display:flex;flex-direction:column;gap:8px;min-height:420px;font-size:12px}.preview-caption{color:#66798e;overflow-wrap:anywhere}.document-preview iframe{border:1px solid #e1e7ee;width:100%;height:60vh;min-height:380px;box-sizing:border-box}.document-preview img{max-width:100%;max-height:65vh;object-fit:contain}.document-preview pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:60vh;overflow:auto;line-height:18px}.unsupported{display:grid;place-content:center;min-height:360px;background:#f7f9fc;color:#697d92;text-align:center;padding:12px}

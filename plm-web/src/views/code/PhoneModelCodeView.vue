@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import { getMoldOptions } from '@/api/modules/molds'
@@ -44,9 +46,9 @@ onMounted(() => void loadPermissions())
 </script>
 
 <template>
-  <main class="phone-model-code-page" aria-label="手机编码">
-    <header><h2>手机编码</h2><span>{{loading ? '权限读取中' : editable ? '工程资料维护' : '资料只读'}}</span></header>
-    <el-alert v-if="error" :title="error" type="error" :closable="false"><el-button link @click="loadPermissions">重试</el-button></el-alert>
+  <main class="phone-model-code-page" :aria-label='uiText("手机编码")'>
+    <header><h2>{{ uiText("手机编码") }}</h2><span>{{loading ? uiText('权限读取中') : editable ? uiText('工程资料维护') : uiText('资料只读')}}</span></header>
+    <el-alert v-if="error" :title="error" type="error" :closable="false"><el-button link @click="loadPermissions">{{ uiText("重试") }}</el-button></el-alert>
     <PhoneReferenceManager :inline="true" :model-value="true" :editable="editable" :initial-tab="tab" :keyword="keyword" :phone-model-id="phoneModelId" :coverage-on-open="route.query.panel==='coverage'" :review-kind="reviewKind" :review-state="reviewState" @tab-change="changeTab"/>
   </main>
 </template>

@@ -1,7 +1,7 @@
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
-import ElementPlus, { ElPagination, ElSelect, ElInput, ElMessageBox, ElCheckbox, ElDialog } from 'element-plus'
+import ElementPlus, { ElPagination, ElSelect, ElInput, ElMessageBox, ElCheckbox, ElDialog, ElDrawer } from 'element-plus'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const api=vi.hoisted(()=>Object.fromEntries(['startResearchMoldApplication','getResearchMoldApplicationContext','previewMoldHistoricalAssociation','associateMoldHistory','getMoldTargetOptions','startMoldApplication','retryMoldProvision','resolveMoldExecution','correctMoldTargets','selectMoldFiles','discardMoldSelection','getMoldApplicationConfig','getMoldOptions','getMoldApplications','getMoldSummary','getMoldApplication','saveMoldApplication','reserveMoldCodes','uploadMoldFile','downloadMoldFile','submitMoldApplication','withdrawMoldApplication','syncMoldApplication','syncMoldApplications','saveMoldConfig'].map(k=>[k,vi.fn()])))
 vi.mock('@/api/modules/moldApplications',()=>({...api,moldBusinessStatusNames:{draft:'草稿',submitting:'提交中',submission_unknown:'提交待核对',awaiting_approval:'待 Tiffany 审核',approved:'Tiffany 已同意',rejected:'已拒绝',withdrawn:'已撤回',terminated:'已终止',approval_unknown:'审批待核对'}}))
@@ -171,5 +171,37 @@ describe('shared application editor on the application homepage',()=>{
   it('restores the stable standard phone and preserves a historical explicit reuse selection',async()=>{const saved={...draft(),phoneModelId:72,phoneCodeItemId:317,executionIntent:'reuse',targetItemId:45,targetMoldSetId:67,model:sharedPhone.modelName,form:{...draft().form,model:sharedPhone.modelName},reservedCompatibility:sharedMold};api.getMoldApplication.mockResolvedValue(saved);api.saveMoldApplication.mockResolvedValue({...saved,version:2,generatedCodes:null});await start(await api.getMoldApplication());expect(reference.getPhoneModelOptions).toHaveBeenCalledWith([72]);expect(wrapper!.get('input[aria-label="model"]').element).toHaveProperty('value',sharedPhone.modelName);api.getMoldApplication.mockResolvedValue({...saved,version:2});await button('确认复用原刻码').trigger('click');await flushPromises();expect(api.saveMoldApplication).toHaveBeenLastCalledWith(7,expect.objectContaining({phoneModelId:72,phoneCodeItemId:317,executionIntent:'reuse',targetItemId:45,targetMoldSetId:67}));expect(api.reserveMoldCodes).toHaveBeenLastCalledWith(7,2,{phoneModelId:72,itemId:45,moldSetId:67,compatibilityDigest:'confirmed-snapshot'});expect(api.submitMoldApplication).not.toHaveBeenCalled()})
 
   it('closes an untouched manual form without asking to discard nonexistent work',async()=>{const confirm=vi.spyOn(ElMessageBox,'confirm');await start();await wrapper!.get('.el-drawer__close-btn').trigger('click');await flushPromises();expect(confirm).not.toHaveBeenCalled();expect(wrapper!.emitted('closed')).toHaveLength(1);expect(api.saveMoldApplication).not.toHaveBeenCalled()})
+
+  it('requires the original explicit retry flag and reason only when the selected phone has a closed request',async()=>{
+    await researchOptions();const context={...source(),submissionPolicy:researchPolicy(),phoneModelId:72,phoneCodeItemId:317,historyApplications:[{applicationId:9,phoneModelId:72,businessStatus:'rejected',status:'completed',terminal:true}],form:{...source().form,model:sharedPhone.modelName}};
+    const saved={...context,applicationId:8,version:1,status:'draft',newApplication:true,executionReason:'调整市场计划后重新评估',files:[]};api.startResearchMoldApplication.mockResolvedValue(saved);api.getMoldApplication.mockResolvedValue(saved);await start(context,true);
+    expect(wrapper!.text()).toContain('同型号重新申请，并填写原因');await button('保存草稿').trigger('click');await flushPromises();expect(api.startResearchMoldApplication).not.toHaveBeenCalled();expect(wrapper!.text()).toContain('同型号重新申请须明确选择并填写原因');
+    wrapper!.findAllComponents(ElCheckbox).find(item=>item.text()==='同型号重新申请，并填写原因')!.vm.$emit('update:modelValue',true);await wrapper!.get('textarea[placeholder="新增实物套或另建模具时填写原因"]').setValue(saved.executionReason);await button('保存草稿').trigger('click');await flushPromises();
+    expect(api.startResearchMoldApplication).toHaveBeenCalledWith(expect.objectContaining({projectId:42,phoneModelId:72,draft:expect.objectContaining({newApplication:true,executionReason:saved.executionReason})}));expect(api.submitMoldApplication).not.toHaveBeenCalled();expect(api.saveMoldApplication).not.toHaveBeenCalled();
+  })
+  it('does not ask for retry intent when a different closed phone belongs to the project',async()=>{
+    await researchOptions();const history={applicationId:9,phoneModelId:99,model:'Honor 600 Lite',status:'completed',businessStatus:'rejected',terminal:true};const context={...source(),submissionPolicy:researchPolicy(),phoneModelId:72,phoneCodeItemId:317,historyApplications:[history],form:{...source().form,model:sharedPhone.modelName}};const saved={...context,applicationId:8,version:1,files:[]};api.startResearchMoldApplication.mockResolvedValue(saved);api.getMoldApplication.mockResolvedValue(saved);await start(context,true);
+    expect(wrapper!.text()).not.toContain('同型号重新申请，并填写原因');await button('保存草稿').trigger('click');await flushPromises();expect(api.startResearchMoldApplication).toHaveBeenCalledWith(expect.objectContaining({phoneModelId:72,draft:expect.objectContaining({newApplication:false,executionReason:null})}));expect(context.historyApplications).toEqual([history]);expect(api.submitMoldApplication).not.toHaveBeenCalled();
+  })
+  it('invalidates an in-flight opening when the research host changes project',async()=>{
+    const options=await api.getMoldOptions();let finish!:(value:unknown)=>void;api.getMoldOptions.mockReturnValueOnce(new Promise(resolve=>{finish=resolve}));const opening=start(source(),true);await flushPromises();expect(wrapper).toBeDefined();(wrapper!.vm as unknown as {invalidate:()=>void}).invalidate();finish(options);await opening;await flushPromises();expect(wrapper!.findComponent(ElDrawer).props('modelValue')).toBe(false);expect(api.startResearchMoldApplication).not.toHaveBeenCalled();expect(api.saveMoldApplication).not.toHaveBeenCalled();
+  })
+  it.each([
+    {phase:'save',alreadyExists:true},{phase:'save',alreadyExists:false},
+    {phase:'detail',alreadyExists:true},{phase:'detail',alreadyExists:false},
+  ])('discards an old $phase response after the same account changes research host, alreadyExists=$alreadyExists',async({phase,alreadyExists})=>{
+    await researchOptions();const first={...source(),submissionPolicy:researchPolicy()};const saved={...first,applicationId:7,version:1,alreadyExists};
+    let finish!:(value:unknown)=>void;
+    if(phase==='save')api.startResearchMoldApplication.mockReturnValueOnce(new Promise(resolve=>{finish=resolve}));
+    else{api.startResearchMoldApplication.mockResolvedValueOnce(saved);api.getMoldApplication.mockReturnValueOnce(new Promise(resolve=>{finish=resolve}));}
+    await start(first,true);await button('保存草稿').trigger('click');await flushPromises();expect(api.startResearchMoldApplication).toHaveBeenCalledTimes(1);
+    const editor=wrapper!.vm as unknown as {invalidate:()=>void;openResearch:(row:unknown)=>Promise<void>};editor.invalidate();
+    const options=await api.getMoldOptions();api.getMoldOptions.mockResolvedValue({...options,productLines:[{productId:43,productName:'另一个新品B',salesStatus:'unconfirmed',moldApplicationEligibility:{eligible:true,kind:'research',reason:null},submissionPolicy:researchPolicy()}]});
+    const next={...source(),submissionPolicy:researchPolicy(),productLineId:43,form:{...source().form,model:'B项目手机原文'},sourceSnapshot:{research:{...source().sourceSnapshot.research,projectId:43,productName:'另一个新品B'}}};
+    await editor.openResearch(next);await flushPromises();finish(saved);await flushPromises();
+    expect(wrapper!.getComponent(ElDrawer).props('modelValue')).toBe(true);expect(wrapper!.get('[aria-label="新品项目带入资料"]').text()).toContain('另一个新品B');expect(wrapper!.get('[aria-label="新品项目带入资料"]').text()).not.toContain('亮甲3.0');
+    expect(wrapper!.get('input[aria-label="model"]').element).toHaveProperty('value','B项目手机原文');expect(wrapper!.emitted('saved')).toBeUndefined();expect(wrapper!.emitted('progress')).toBeUndefined();expect(useCollaborationWorkspace().revision).toBe(0);
+    expect(api.getMoldApplication).toHaveBeenCalledTimes(phase==='detail'?1:0);expect(api.saveMoldApplication).not.toHaveBeenCalled();expect(api.submitMoldApplication).not.toHaveBeenCalled();
+  })
 
 })

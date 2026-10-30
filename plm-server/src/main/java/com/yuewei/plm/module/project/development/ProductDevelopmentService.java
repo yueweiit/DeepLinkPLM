@@ -44,8 +44,32 @@ public class ProductDevelopmentService {
     private EngineeringBasisService engineering;
     @org.springframework.beans.factory.annotation.Autowired
     private SupplierFeedbackWorkflow supplierFeedback;
+    @org.springframework.beans.factory.annotation.Autowired @org.springframework.context.annotation.Lazy
+    private com.yuewei.plm.module.moldapplication.MoldApplicationService moldApplications;
 
     public static boolean isLaunch(Product product) {return product!=null && "product_line".equals(product.getProductType()) && "launch_v1".equals(product.getDevelopmentMode());}
+    @Transactional
+    public void linkAuthorizedResearchMold(long projectId,long applicationId){
+        var p=product(projectId,true);DevelopmentRules.require(isLaunch(p),"自动关联须保留原新品项目");
+        access.requirePermission("documents:write");
+        var rows=jdbc.queryForList("""
+            select application_id,mold_set_id,phone_model_id from plm_mold_application
+            where application_id=? and product_line_id=? and project_id=? and source_system='plm' and deleted_flag=0
+              and approval_granted and execution_status='active' and mold_set_id is not null
+              and source_snapshot_json->'researchSubmission'->>'mode'='research'
+              and execution_resolution_json->'researchCoding'->'m'->>'status'='ready'
+              and authorization_json->>'evidenceSource'='task' and nullif(authorization_json->>'taskId','') is not null
+              and authorization_json->>'approverUserId'=?
+            """,applicationId,projectId,projectId,com.yuewei.plm.module.moldapplication.MoldApplicationForms.EXECUTION_APPROVER_USER_ID);
+        DevelopmentRules.require(rows.size()==1,"原开模申请尚未取得有效授权或模具建档未完成");
+        var row=rows.get(0);long mold=number(row.get("mold_set_id"));access.requireMold(mold);
+        var data=new LinkedHashMap<String,Object>();data.put("applicationId",applicationId);data.put("moldSetId",mold);
+        data.put("applicationSnapshot",row);data.put("reason","Tiffany任务同意后自动关联原申请与模具");
+        var state=workflow.load(projectId);
+        if(launch.appendMoldLink(state,data)){
+            workflow.save(projectId,state);event(projectId,"mold_link",data,null);audit(projectId,"PRODUCT_RESEARCH_MOLD_LINK",data);
+        }
+    }
     public void registerCreated(Product product) {
         long actor = access.actorId();
         var initial=workflow.load(product.getProductId());initial.put("phaseModel","eight_step");workflow.save(product.getProductId(),initial);
@@ -113,9 +137,9 @@ public class ProductDevelopmentService {
         args.add(normalizedSize); args.add((normalizedPage - 1L) * normalizedSize);
         var rows = jdbc.queryForList("""
             select p.product_id as "productId",p.product_code as "productCode",p.product_name as "productName",
-              p.model,p.status,(p.current_step_no=8 and p.timeline_current_confirmed and not exists(select 1 from plm_product_development_state rs where rs.product_id=p.product_id and rs.data->'revision' is not null)) as "workflowComplete",coalesce((select (s.data->'revision'->>'stage')::int from plm_product_development_state s where s.product_id=p.product_id),p.current_step_no) as "currentStepNo",p.expected_delivery_date as "expectedDeliveryDate",
+              p.model,p.status,p.lock_status as "moldEntryLock",(p.current_step_no=8 and p.timeline_current_confirmed and not exists(select 1 from plm_product_development_state rs where rs.product_id=p.product_id and rs.data->'revision' is not null)) as "workflowComplete",coalesce((select (s.data->'revision'->>'stage')::int from plm_product_development_state s where s.product_id=p.product_id),p.current_step_no) as "currentStepNo",p.expected_delivery_date as "expectedDeliveryDate",
               p.target_cost as "targetCost",coalesce(u.display_name,u.user_name) as "ownerName",
-              (select jsonb_build_object('planDraft',s.data->'planDraft','plan',s.data->'plan')::text from plm_product_development_state s where s.product_id=p.product_id) as "planJson",
+              (select jsonb_build_object('planDraft',s.data->'planDraft','plan',s.data->'plan','profileDraft',s.data->'profileDraft','revision',s.data->'revision')::text from plm_product_development_state s where s.product_id=p.product_id) as "planJson",
               (select count(*) from plm_product_development_round r where r.product_id=p.product_id and r.deleted_flag=0) as "roundCount"
             from plm_product p left join sys_user u on u.user_id=p.owner_user_id where
             """ + condition + " order by p.created_at desc,p.product_id desc limit ? offset ?", args.toArray());
@@ -124,14 +148,30 @@ public class ProductDevelopmentService {
         var supplierNames=new HashMap<String,String>();
         for(var supplier:options)supplierNames.put(text(supplier.get("supplierCode")),text(supplier.get("supplierName")));
         var supplierIds=readableSupplierIds(options);var feedbackEvents=supplierSummaryEvents(rows,canReadSuppliers);
+        var applicationSummaries=moldApplications==null?Map.<Long,Map<String,Object>>of():moldApplications.researchSummaries(rows.stream().map(row->number(row.get("productId"))).toList());
+        var states=new HashMap<Long,Map<String,Object>>();var projectPhones=new HashMap<Long,List<Long>>();
+        for(var row:rows){
+            long projectId=number(row.get("productId"));var stateData=DevelopmentWorkflowStore.map(readJson(row.remove("planJson")));states.put(projectId,stateData);
+            projectPhones.put(projectId,researchPhoneIds(stateData));
+        }
+        var phoneIds=projectPhones.values().stream().flatMap(Collection::stream).distinct().toList();var phoneModels=new HashMap<Long,Map<String,Object>>();
+        for(int offset=0;offset<phoneIds.size();offset+=100){
+            var batch=phoneIds.subList(offset,Math.min(offset+100,phoneIds.size()));
+            for(var phone:launch.phoneSnapshots(batch,batch))phoneModels.put(number(phone.get("phoneModelId")),phone);
+        }
+        boolean canCreateApplication=canCreateMoldApplication();
         for (var row : rows) {
-            var plan=EngineeringBasisService.currentPlan(DevelopmentWorkflowStore.map(readJson(row.remove("planJson"))));
+            long projectId=number(row.get("productId"));var stateData=states.get(projectId);var plan=EngineeringBasisService.currentPlan(stateData);
+            row.put("phoneModels",projectPhones.get(projectId).stream().map(phoneModels::get).filter(Objects::nonNull).toList());
+            var entry=moldApplicationEntry(text(row.get("status")),text(row.remove("moldEntryLock")),stateData,canCreateApplication);
+            var summary=applicationSummaries.get(number(row.get("productId")));
+            if(summary!=null){summary.put("canCreate",Boolean.TRUE.equals(entry.get("eligible"))&&Boolean.TRUE.equals(entry.get("canCreate")));row.put("moldApplicationSummary",summary);}
             row.put("supplierNames",LaunchReviewWorkflow.records(plan.get("supplierAssignments")).stream().filter(a->"supplier".equals(a.get("mode"))&&!text(a.get("supplierCode")).isBlank()).map(a->supplierNames.getOrDefault(text(a.get("supplierCode")),"供应商受限")).distinct().toList());
             if(supplierFeedback!=null)row.put("supplierFeedbackSummary",supplierFeedback.summary(feedbackEvents.getOrDefault(number(row.get("productId")),List.of()),plan,supplierIds,canReadSuppliers));
             if(!canReadFinance)row.put("targetCost",null);
             int step = row.get("currentStepNo") instanceof Number number ? number.intValue() : 1;
             row.put("currentStage", TimelineNodeConstants.LAUNCH_PRODUCT_NODES.get(Math.max(0, Math.min(7, step - 1))).nodeName());
-            row.put("nextAction",List.of("负责人确认立项","采用代表型号与3D图纸","登记本轮实际收样","负责人确认代表样","确认设计与原申请授权","逐套试模与验证","试产、技术资料及成本定型","确认实际发模批次").get(Math.max(0,Math.min(7,step-1))));
+            row.put("nextAction",List.of("负责人确认立项","采用开发型号与3D图纸","登记本轮实际收样","负责人确认代表样","确认设计与原申请授权","逐套试模与验证","试产、技术资料及成本定型","确认实际发模批次").get(Math.max(0,Math.min(7,step-1))));
             if(Boolean.TRUE.equals(row.get("workflowComplete")))row.put("nextAction",Set.of("released","archived").contains(text(row.get("status")))?"发模已完成":"发模已完成，可形成正式资料包");
         }
         return Map.of("content", rows, "page", normalizedPage, "size", normalizedSize, "totalElements", total,
@@ -171,12 +211,18 @@ public class ProductDevelopmentService {
 
     /** OA preparation follows project editability; incomplete research facts are completed in its editor. */
     private Map<String,Object> moldApplicationEntry(Product product,Map<String,Object> state) {
-        boolean canCreate=access.hasPermission("documents:write")&&access.hasPermission("collaboration:view")&&access.hasPermission("mold-application:create")&&!access.isExternal();
+        return moldApplicationEntry(product.getStatus(),product.getLockStatus(),state,canCreateMoldApplication());
+    }
+    private boolean canCreateMoldApplication(){return access.hasPermission("documents:write")&&access.hasPermission("collaboration:view")&&access.hasPermission("mold-application:create")&&!access.isExternal();}
+    private Map<String,Object> moldApplicationEntry(String status,String lockStatus,Map<String,Object> state,boolean canCreate) {
         String reason=!canCreate?"没有发起开模申请的权限，请联系项目工程人员":null;
-        if(reason==null&&("archived".equals(product.getStatus())||Set.of("frozen","abandoned").contains(text(product.getLockStatus()))||("released".equals(product.getStatus())&&!hasActiveRevision(product.getProductId()))))reason="冻结、停止、归档或已发布的项目不能新建申请；已有审批记录继续保留";
-        var plan=EngineeringBasisService.currentPlan(state);
-        var phones=DevelopmentRules.ids(plan.containsKey("phoneModelIds")?plan.get("phoneModelIds"):DevelopmentWorkflowStore.map(state.get("profileDraft")).get("phoneModelIds"));
+        if(reason==null&&("archived".equals(status)||Set.of("frozen","abandoned").contains(text(lockStatus))||("released".equals(status)&&DevelopmentWorkflowStore.map(state.get("revision")).isEmpty())))reason="冻结、停止、归档或已发布的项目不能新建申请；已有审批记录继续保留";
+        var phones=researchPhoneIds(state);
         var result=new LinkedHashMap<String,Object>();result.put("eligible",reason==null);result.put("reason",reason);result.put("canCreate",canCreate);result.put("phoneModelIds",phones);return result;
+    }
+    private List<Long> researchPhoneIds(Map<String,Object> state){
+        for(String key:List.of("planDraft","plan","profileDraft")){var value=DevelopmentWorkflowStore.map(state.get(key));if(value.containsKey("phoneModelIds"))return DevelopmentRules.ids(value.get("phoneModelIds"));}
+        return List.of();
     }
 
     /** Caller holds the selected phone lock before the project lock for writes; previews acquire neither. */
@@ -353,7 +399,7 @@ public class ProductDevelopmentService {
         checks.add(DevelopmentRules.check("MATERIAL_ACCESS","已关联资料的有效性","drawings",()->snapshotReferences(id,input.profile().references())));
         checks.add(DevelopmentRules.check("REQUIREMENT_CHANGE","需求变更原因","requirement-change",()->requireRequirementChange(state,draft)));
         checks.add(DevelopmentRules.check("INIT_OWNER_CONFIRMATION","项目负责人确认立项","owner",()->requireResponsibleConfirmation(state)));
-        return Map.of("version",number(state.get("version")),"ready",checks.stream().allMatch(DevelopmentRules.ReadinessCheck::complete),"checks",checks);
+        return Map.of("version",number(state.get("version")),"ready",checks.stream().allMatch(DevelopmentRules.ReadinessCheck::satisfied),"checks",checks);
     }
 
     public Map<String,Object> stageReadiness(long id,StageReadinessInput input){
@@ -378,7 +424,7 @@ public class ProductDevelopmentService {
             if(input.stage()==2&&draft.get("phoneModelIds") instanceof List<?>){var plan=new LinkedHashMap<>(DevelopmentWorkflowStore.map(state.get("planDraft")));plan.put("phoneModelIds",draft.get("phoneModelIds"));state.put("planDraft",plan);}
         }
         var checks=launch.stageChecks(id,input.stage(),state,this);
-        return Map.of("version",number(state.get("version")),"ready",checks.stream().allMatch(DevelopmentRules.ReadinessCheck::complete),"checks",checks);
+        return Map.of("version",number(state.get("version")),"ready",checks.stream().allMatch(DevelopmentRules.ReadinessCheck::satisfied),"checks",checks);
     }
 
     private List<Map<String, Object>> rounds(long id) { return rounds(id,true); }
@@ -796,7 +842,7 @@ public class ProductDevelopmentService {
         @SuppressWarnings("unchecked") var originals=(List<Map<String,Object>>)source;
         boolean documentationOnly=Boolean.TRUE.equals(draft.get("documentationOnly"));
         if(documentationOnly)DevelopmentRules.filled(draft.get("documentationReason"),"资料更正不影响已验证方案的说明");
-        for(String group:List.of("bom","process","drawing","sop","sip")){
+        for(String group:List.of("bom","process","drawing","render_3d","sop","sip")){
             var current=selected.stream().filter(r->group.equals(r.get("type"))||group.equals(r.get("category"))).toList();
             if(current.isEmpty())continue; // Kept as a visible publication gap, never claimed to be verified.
             var old=originals.stream().filter(r->group.equals(r.get("type"))||group.equals(r.get("category"))).toList();
@@ -883,7 +929,9 @@ public class ProductDevelopmentService {
             var policy=Objects.requireNonNull(engineering,"EngineeringBasisService is required for engineering confirmation");
             var basis=policy.confirm(id,state,engineeringReferences(id,p,state,data),text(data.get("reason")));
             basis.put("sourceStage",stage);if(stage==6&&number(data.get("sampleRoundId"))>0)basis.put("sourceRoundId",number(data.get("sampleRoundId")));
-            workflow.save(id,state);event(id,action,basis,input.requestId());audit(id,"PRODUCT_RESEARCH_ENGINEERING_CONFIRM",basis);return detail(id);
+            workflow.save(id,state);event(id,action,basis,input.requestId());audit(id,"PRODUCT_RESEARCH_ENGINEERING_CONFIRM",basis);
+            if(moldApplications!=null)moldApplications.retryResearchProject(id);
+            return detail(id);
         }
         if("plan_draft".equals(action)&&engineering!=null){var normalized=engineering.preparePlan(data,DevelopmentWorkflowStore.map(state.get("planDraft")));data.clear();data.putAll(normalized);}
         switch(action){
@@ -903,7 +951,9 @@ public class ProductDevelopmentService {
         if(isLaunch(p)&&launch.handles(action)){
             DevelopmentRules.require(!Set.of("frozen","abandoned").contains(text(p.getLockStatus()))&&!"archived".equals(p.getStatus()),"冻结、停止或归档项目只读");
             var previous=DevelopmentWorkflowStore.map(state.get("planDraft"));launch.action(id,p,state,action,data,this);if("plan_draft".equals(action))recordSupplierChange(id,previous,data,1);
-            workflow.save(id,state);event(id,action,data,input.requestId());audit(id,"PRODUCT_RESEARCH_"+action.toUpperCase(Locale.ROOT),data);return detail(id);
+            workflow.save(id,state);event(id,action,data,input.requestId());audit(id,"PRODUCT_RESEARCH_"+action.toUpperCase(Locale.ROOT),data);
+            if(moldApplications!=null&&"launch_draft".equals(action))moldApplications.retryResearchProject(id);
+            return detail(id);
         }
         if(Set.of("supplement","gap_plan","transfer","receipt","start_revision").contains(action)){
             DevelopmentRules.require(!Set.of("frozen","abandoned").contains(text(p.getLockStatus()))&&!"archived".equals(p.getStatus()),"冻结、停止或归档项目只读");

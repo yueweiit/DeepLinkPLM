@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, onMounted, reactive, ref, toRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Bottom, Check, CopyDocument, Delete, Plus, Top } from '@element-plus/icons-vue'
@@ -142,7 +144,7 @@ function addNode() {
 
 function removeNode(index: number) {
   if (workflowForm.nodes.length === 1) {
-    ElMessage.warning('流程至少保留一个节点。')
+    ElMessage.warning(uiText('流程至少保留一个节点。'))
     return
   }
   workflowForm.nodes.splice(index, 1)
@@ -186,21 +188,21 @@ function normalizeNode(node: WorkflowTemplateNode, index: number): WorkflowTempl
 
 function validateWorkflow() {
   if (!workflowForm.templateName.trim()) {
-    ElMessage.warning('请填写流程模板名称。')
+    ElMessage.warning(uiText('请填写流程模板名称。'))
     return false
   }
   if (!workflowForm.versionNo.trim()) {
-    ElMessage.warning('请填写版本号。')
+    ElMessage.warning(uiText('请填写版本号。'))
     return false
   }
   const invalidNode = workflowForm.nodes.find((node) => !node.nodeCode.trim() || !node.nodeName.trim())
   if (invalidNode) {
-    ElMessage.warning('请补全所有节点的编码和名称。')
+    ElMessage.warning(uiText('请补全所有节点的编码和名称。'))
     return false
   }
   const missingCategory = workflowForm.nodes.find((node) => node.requiredAttachment && !node.requiredFileCategory)
   if (missingCategory) {
-    ElMessage.warning(`节点“${missingCategory.nodeName || missingCategory.nodeCode}”已设为必传资料，请配置资料类别。`)
+    ElMessage.warning(uiText('节点“{value0}”已设为必传资料，请配置资料类别。',{value0:(missingCategory.nodeName || missingCategory.nodeCode)}))
     return false
   }
   return true
@@ -220,10 +222,10 @@ async function saveWorkflow() {
     }
     if (editingTemplateId.value) {
       await updateWorkflowTemplate(editingTemplateId.value, payload)
-      ElMessage.success('流程模板已更新。')
+      ElMessage.success(uiText('流程模板已更新。'))
     } else {
       await createWorkflowTemplate(payload)
-      ElMessage.success('流程模板已新增。')
+      ElMessage.success(uiText('流程模板已新增。'))
     }
     drawerVisible.value = false
     await loadData()
@@ -235,14 +237,14 @@ async function saveWorkflow() {
 async function activateTemplate(template: WorkflowTemplate) {
   if (!template.workflowTemplateId) return
   await activateWorkflowTemplate(template.workflowTemplateId)
-  ElMessage.success('流程模板已启用。')
+  ElMessage.success(uiText('流程模板已启用。'))
   await loadData()
 }
 
 async function copyTemplate(template: WorkflowTemplate) {
   if (!template.workflowTemplateId) return
   await copyWorkflowTemplate(template.workflowTemplateId, template.flowType)
-  ElMessage.success('已复制为草稿模板。')
+  ElMessage.success(uiText('已复制为草稿模板。'))
   await loadData()
 }
 
@@ -275,7 +277,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <PageContainer title="审批中心" description="维护新产品线和新型号线的流程节点、必传资料与节点提示。">
+  <PageContainer :title='uiText("审批中心")' :description='uiText("维护新产品线和新型号线的流程节点、必传资料与节点提示。")'>
     <template #actions>
       <el-segmented
         v-model="activeView"
@@ -284,53 +286,49 @@ onMounted(async () => {
           { label: '审批任务', value: 'tasks' }
         ]"
       />
-      <el-button v-if="activeView === 'workflow'" type="primary" :icon="Plus" @click="openCreateWorkflow()">
-        新增流程
-      </el-button>
+      <el-button v-if="activeView === 'workflow'" type="primary" :icon="Plus" @click="openCreateWorkflow()">{{ uiText(" 新增流程 ") }}</el-button>
     </template>
 
     <template v-if="activeView === 'workflow'">
       <section class="workflow-toolbar">
         <div class="metric">
           <strong>{{ workflowSummary.total }}</strong>
-          <span>流程模板</span>
+          <span>{{ uiText("流程模板") }}</span>
         </div>
         <div class="metric">
           <strong>{{ workflowSummary.active }}</strong>
-          <span>已启用</span>
+          <span>{{ uiText("已启用") }}</span>
         </div>
         <div class="metric">
           <strong>{{ workflowSummary.draft }}</strong>
-          <span>草稿</span>
+          <span>{{ uiText("草稿") }}</span>
         </div>
       </section>
 
       <section class="page-panel" v-loading="loading">
         <FixedTableViewport v-slot="{ tableHeight }" compact :refresh-key="workflowRows">
         <el-table :data="workflowRows" :height="tableHeight" border stripe>
-          <el-table-column prop="templateName" label="流程模板" min-width="220" />
-          <el-table-column label="流程线" width="140">
+          <el-table-column prop="templateName" :label='uiText("流程模板")' min-width="220" />
+          <el-table-column :label='uiText("流程线")' width="140">
             <template #default="{ row }">{{ flowTypeName(row.flowType) }}</template>
           </el-table-column>
-          <el-table-column prop="versionNo" label="版本" width="110" />
-          <el-table-column label="状态" width="110">
+          <el-table-column prop="versionNo" :label='uiText("版本")' width="110" />
+          <el-table-column :label='uiText("状态")' width="110">
             <template #default="{ row }">
               <el-tag :type="row.activeFlag ? 'success' : row.status === 'draft' ? 'warning' : 'info'" effect="light">
-                {{ row.activeFlag ? '启用' : row.status === 'draft' ? '草稿' : '停用' }}
+                {{ row.activeFlag ? uiText('启用') : row.status === 'draft' ? uiText('草稿') : uiText('停用') }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="节点" width="90">
+          <el-table-column :label='uiText("节点")' width="90">
             <template #default="{ row }">{{ row.nodes?.length || 0 }}</template>
           </el-table-column>
-          <el-table-column prop="description" label="说明" min-width="220" show-overflow-tooltip />
-          <el-table-column label="操作" width="260" fixed="right">
+          <el-table-column prop="description" :label='uiText("说明")' min-width="220" show-overflow-tooltip />
+          <el-table-column :label='uiText("操作")' width="260" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" @click.stop="openEditWorkflow(row)">编辑</el-button>
-              <el-button link :icon="CopyDocument" @click="copyTemplate(row)">复制</el-button>
-              <el-button v-if="!row.activeFlag" link type="success" :icon="Check" @click="activateTemplate(row)">
-                启用
-              </el-button>
+              <el-button link type="primary" @click.stop="openEditWorkflow(row)">{{ uiText("编辑") }}</el-button>
+              <el-button link :icon="CopyDocument" @click="copyTemplate(row)">{{ uiText("复制") }}</el-button>
+              <el-button v-if="!row.activeFlag" link type="success" :icon="Check" @click="activateTemplate(row)">{{ uiText(" 启用 ") }}</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -349,26 +347,26 @@ onMounted(async () => {
       <section class="page-panel" v-loading="loading">
         <FixedTableViewport v-slot="{ tableHeight }" compact :refresh-key="table.pagedRows.value">
         <el-table :data="table.pagedRows.value" :height="tableHeight" border stripe @row-click="openTask">
-          <el-table-column prop="objectName" label="业务对象" min-width="260" />
-          <el-table-column prop="nodeName" label="审批节点" min-width="180" />
-          <el-table-column prop="initiator" label="发起人" width="120" />
-          <el-table-column prop="approver" label="审批人" width="120" />
-          <el-table-column prop="dueDate" label="截止日期" width="140" />
-          <el-table-column label="状态" width="120">
+          <el-table-column prop="objectName" :label='uiText("业务对象")' min-width="260" />
+          <el-table-column prop="nodeName" :label='uiText("审批节点")' min-width="180" />
+          <el-table-column prop="initiator" :label='uiText("发起人")' width="120" />
+          <el-table-column prop="approver" :label='uiText("审批人")' width="120" />
+          <el-table-column prop="dueDate" :label='uiText("截止日期")' width="140" />
+          <el-table-column :label='uiText("状态")' width="120">
             <template #default="{ row }">
               <StatusTag :status="row.status" object-type="product" />
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="100" fixed="right">
+          <el-table-column :label='uiText("操作")' width="100" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" @click.stop="openTask(row)">查看</el-button>
+              <el-button link type="primary" @click.stop="openTask(row)">{{ uiText("查看") }}</el-button>
             </template>
           </el-table-column>
         </el-table>
         </FixedTableViewport>
 
         <div class="toolbar-row pager-row">
-          <span class="subtle-text">共 {{ table.filteredRows.value.length }} 条</span>
+          <span class="subtle-text">{{ uiText("共 ") }}{{ table.filteredRows.value.length }}{{ uiText(" 条") }}</span>
           <el-pagination
             v-model:current-page="table.currentPage.value"
             v-model:page-size="table.pageSize.value"
@@ -379,24 +377,24 @@ onMounted(async () => {
       </section>
     </template>
 
-    <el-drawer v-model="drawerVisible" title="流程模板配置" size="86%">
+    <el-drawer v-model="drawerVisible" :title='uiText("流程模板配置")' size="86%">
       <div class="drawer-stack">
         <section class="template-form-grid">
-          <el-input v-model="workflowForm.templateName" placeholder="模板名称，例如：新产品线标准流程" />
-          <el-select v-model="workflowForm.flowType" placeholder="流程线" :disabled="Boolean(editingTemplateId)">
+          <el-input v-model="workflowForm.templateName" :placeholder='uiText("模板名称，例如：新产品线标准流程")' />
+          <el-select v-model="workflowForm.flowType" :placeholder='uiText("流程线")' :disabled="Boolean(editingTemplateId)">
             <el-option v-for="item in options.flowTypes" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
-          <el-input v-model="workflowForm.versionNo" placeholder="版本号，例如：V2" />
-          <el-select v-model="workflowForm.status" placeholder="状态" :disabled="Boolean(workflowForm.activeFlag)">
+          <el-input v-model="workflowForm.versionNo" :placeholder='uiText("版本号，例如：V2")' />
+          <el-select v-model="workflowForm.status" :placeholder='uiText("状态")' :disabled="Boolean(workflowForm.activeFlag)">
             <el-option v-for="item in options.statuses" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </section>
 
-        <el-input v-model="workflowForm.description" type="textarea" :rows="2" placeholder="流程说明" />
+        <el-input v-model="workflowForm.description" type="textarea" :rows="2" :placeholder='uiText("流程说明")' />
 
         <div class="toolbar-row">
-          <h3 class="section-title">节点配置</h3>
-          <el-button type="primary" plain :icon="Plus" @click="addNode">新增节点</el-button>
+          <h3 class="section-title">{{ uiText("节点配置") }}</h3>
+          <el-button type="primary" plain :icon="Plus" @click="addNode">{{ uiText("新增节点") }}</el-button>
         </div>
 
         <section class="node-list">
@@ -411,32 +409,32 @@ onMounted(async () => {
             </div>
 
             <div class="node-fields">
-              <el-input v-model="node.nodeCode" placeholder="节点编码，例如 PRODUCT_LINE_INIT_CREATE" />
-              <el-input v-model="node.nodeName" placeholder="节点名称" />
-              <el-input v-model="node.stageCode" placeholder="阶段编码" />
-              <el-input v-model="node.stageName" placeholder="阶段名称" />
-              <el-input v-model="node.phaseName" placeholder="阶段展示名" />
-              <el-select v-model="node.requiredFileCategory" placeholder="必传资料类别" :disabled="!node.requiredAttachment">
+              <el-input v-model="node.nodeCode" :placeholder='uiText("节点编码，例如 PRODUCT_LINE_INIT_CREATE")' />
+              <el-input v-model="node.nodeName" :placeholder='uiText("节点名称")' />
+              <el-input v-model="node.stageCode" :placeholder='uiText("阶段编码")' />
+              <el-input v-model="node.stageName" :placeholder='uiText("阶段名称")' />
+              <el-input v-model="node.phaseName" :placeholder='uiText("阶段展示名")' />
+              <el-select v-model="node.requiredFileCategory" :placeholder='uiText("必传资料类别")' :disabled="!node.requiredAttachment">
                 <el-option v-for="item in options.fileCategories" :key="item.value" :label="item.label" :value="item.value" />
               </el-select>
-              <el-input v-model="node.uploadPrompt" placeholder="上传资料提示" />
-              <el-input v-model="node.confirmPrompt" placeholder="确认节点提示" />
-              <el-input v-model="node.emptyFileMessage" placeholder="缺少资料提示" />
-              <el-input v-model="node.remark" placeholder="备注" />
+              <el-input v-model="node.uploadPrompt" :placeholder='uiText("上传资料提示")' />
+              <el-input v-model="node.confirmPrompt" :placeholder='uiText("确认节点提示")' />
+              <el-input v-model="node.emptyFileMessage" :placeholder='uiText("缺少资料提示")' />
+              <el-input v-model="node.remark" :placeholder='uiText("备注")' />
             </div>
 
             <div class="node-switches">
-              <el-checkbox v-model="node.requiredAttachment">必传资料</el-checkbox>
-              <el-checkbox v-model="node.gateFlag">门禁节点</el-checkbox>
-              <el-checkbox v-model="node.enabledFlag">启用</el-checkbox>
+              <el-checkbox v-model="node.requiredAttachment">{{ uiText("必传资料") }}</el-checkbox>
+              <el-checkbox v-model="node.gateFlag">{{ uiText("门禁节点") }}</el-checkbox>
+              <el-checkbox v-model="node.enabledFlag">{{ uiText("启用") }}</el-checkbox>
               <span v-if="node.requiredAttachment" class="subtle-text">{{ fileCategoryName(node.requiredFileCategory) }}</span>
             </div>
           </article>
         </section>
 
         <div class="drawer-actions">
-          <el-button @click="drawerVisible = false">取消</el-button>
-          <el-button type="primary" :loading="saving" @click="saveWorkflow">保存流程</el-button>
+          <el-button @click="drawerVisible = false">{{ uiText("取消") }}</el-button>
+          <el-button type="primary" :loading="saving" @click="saveWorkflow">{{ uiText("保存流程") }}</el-button>
         </div>
       </div>
     </el-drawer>

@@ -1,9 +1,10 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
+import { watch } from 'vue'
 
 import Layout from '@/layout/index.vue'
 import { useUserStore } from '@/stores/user'
-import { t } from '@/locales'
+import { currentLanguage, t } from '@/locales'
 import { normalizeLegacyProductTarget, toArchivedProductRoute, toArchivedSkuRoute, toInProgressProjectRoute } from '@/utils/projectRoute'
 import { collaborationRedirect, moldScheduleTaskRoute } from '@/utils/collaboration'
 
@@ -462,9 +463,11 @@ router.beforeEach(async (to) => {
   return true
 })
 
-router.afterEach((to) => {
+function updatePageTitle(to: { meta: { title?: unknown } }) {
   const appName = t('common.appName')
-  document.title = to.meta.title ? `${to.meta.title} - ${appName}` : appName
-})
+  document.title = to.meta.title ? `${t(String(to.meta.title))} - ${appName}` : appName
+}
+router.afterEach(updatePageTitle)
+watch(currentLanguage, () => updatePageTitle(router.currentRoute.value))
 
 export default router

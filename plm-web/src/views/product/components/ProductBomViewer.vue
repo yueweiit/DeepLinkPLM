@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, ref, watch } from 'vue'
 
 import { getProductBomSummary } from '@/api/modules/bom'
@@ -39,32 +41,32 @@ watch(() => props.productId, load, { immediate: true })
     <el-alert v-if="error" type="error" :title="error" show-icon :closable="false" />
     <template v-else>
       <div class="viewer-switch" role="tablist">
-        <button :class="{ active: mode === 'test' }" @click="mode = 'test'">测试 BOM 成本</button>
-        <button data-test="formal-mode" :class="{ active: mode === 'formal' }" @click="mode = 'formal'">正式 BOM</button>
+        <button :class="{ active: mode === 'test' }" @click="mode = 'test'">{{ uiText("测试 BOM 成本") }}</button>
+        <button data-test="formal-mode" :class="{ active: mode === 'formal' }" @click="mode = 'formal'">{{ uiText("正式 BOM") }}</button>
       </div>
       <div v-if="summary" class="cost-summary-grid">
-        <div><span>研发总成本</span><strong>{{ summary.rdTotalCost ?? '--' }}</strong></div>
-        <div><span>正式版本平均单个成本</span><strong>{{ summary.formalAverageUnitCost ?? '--' }}</strong></div>
-        <div><span>当前 BOM 单个 SKU 成本</span><strong>{{ summary.currentBomSkuUnitCost ?? '--' }}</strong></div>
+        <div><span>{{ uiText("研发总成本") }}</span><strong>{{ summary.rdTotalCost ?? '--' }}</strong></div>
+        <div><span>{{ uiText("正式版本平均单个成本") }}</span><strong>{{ summary.formalAverageUnitCost ?? '--' }}</strong></div>
+        <div><span>{{ uiText("当前 BOM 单个 SKU 成本") }}</span><strong>{{ summary.currentBomSkuUnitCost ?? '--' }}</strong></div>
       </div>
 
       <section v-if="mode === 'test'" class="viewer-section">
         <template v-if="summary?.testTotalCost != null">
-          <div class="test-total"><span>测试阶段最终敲定总成本</span><strong>{{ summary.testTotalCost }}</strong><small>版本 {{ summary.testVersionNo || '--' }} · {{ summary.testCalculatedAt?.slice(0, 16).replace('T', ' ') || '--' }}</small></div>
+          <div class="test-total"><span>{{ uiText("测试阶段最终敲定总成本") }}</span><strong>{{ summary.testTotalCost }}</strong><small>{{ uiText("版本 ") }}{{ summary.testVersionNo || '--' }} · {{ summary.testCalculatedAt?.slice(0, 16).replace('T', ' ') || '--' }}</small></div>
         </template>
-        <el-empty v-else description="暂无测试 BOM" />
+        <el-empty v-else :description='uiText("暂无测试 BOM")' />
       </section>
 
       <section v-else class="viewer-section">
         <div v-if="summary?.formalVersions.length" class="viewer-controls">
-          <el-select v-model="selectedBomId" aria-label="正式 BOM 版本" @change="selectVersion"><el-option v-for="version in summary.formalVersions" :key="version.productBomId" :label="`${version.versionNo} · ${version.bomName}`" :value="version.productBomId" /></el-select>
-          <el-select v-model="selectedRouteId" aria-label="工艺路线"><el-option v-for="route in selectedVersion?.routes || []" :key="route.productBomRouteId" :label="route.variantName || route.routeName" :value="route.productBomRouteId" /></el-select>
+          <el-select v-model="selectedBomId" :aria-label='uiText("正式 BOM 版本")' @change="selectVersion"><el-option v-for="version in summary.formalVersions" :key="version.productBomId" :label="`${version.versionNo} · ${version.bomName}`" :value="version.productBomId" /></el-select>
+          <el-select v-model="selectedRouteId" :aria-label='uiText("工艺路线")'><el-option v-for="route in selectedVersion?.routes || []" :key="route.productBomRouteId" :label="route.variantName || route.routeName" :value="route.productBomRouteId" /></el-select>
         </div>
         <template v-if="selectedRoute">
-          <div class="route-summary"><div><strong>{{ selectedRoute.variantName || selectedRoute.routeName }}</strong><code>{{ selectedRoute.routeCode }} / {{ selectedRoute.routeVariantNo || 'BASE' }}</code></div><div class="route-colors"><el-tag v-for="color in selectedRoute.colors" :key="color" size="small">{{ color }}</el-tag></div><strong>{{ selectedRoute.costSnapshot ? `${selectedRoute.costSnapshot.currencyCode} ${selectedRoute.skuUnitCost ?? selectedRoute.costSnapshot.totalCost}` : '成本计算失败或尚未计算' }}</strong></div>
-          <table><thead><tr><th>行号</th><th>物料编码</th><th>物料名称</th><th>用量</th><th>单位</th><th>损耗率</th></tr></thead><tbody><tr v-for="item in selectedRoute.items" :key="item.productBomItemId || item.lineNo"><td>{{ item.lineNo }}</td><td>{{ item.itemCode || '--' }}</td><td>{{ item.itemName }}</td><td>{{ item.quantity }}</td><td>{{ item.unit }}</td><td>{{ item.lossRate || 0 }}</td></tr></tbody></table>
+          <div class="route-summary"><div><strong>{{ selectedRoute.variantName || selectedRoute.routeName }}</strong><code>{{ selectedRoute.routeCode }} / {{ selectedRoute.routeVariantNo || 'BASE' }}</code></div><div class="route-colors"><el-tag v-for="color in selectedRoute.colors" :key="color" size="small">{{ color }}</el-tag></div><strong>{{ selectedRoute.costSnapshot ? `${selectedRoute.costSnapshot.currencyCode} ${selectedRoute.skuUnitCost ?? selectedRoute.costSnapshot.totalCost}` : uiText('成本计算失败或尚未计算') }}</strong></div>
+          <table><thead><tr><th>{{ uiText("行号") }}</th><th>{{ uiText("物料编码") }}</th><th>{{ uiText("物料名称") }}</th><th>{{ uiText("用量") }}</th><th>{{ uiText("单位") }}</th><th>{{ uiText("损耗率") }}</th></tr></thead><tbody><tr v-for="item in selectedRoute.items" :key="item.productBomItemId || item.lineNo"><td>{{ item.lineNo }}</td><td>{{ item.itemCode || '--' }}</td><td>{{ item.itemName }}</td><td>{{ item.quantity }}</td><td>{{ item.unit }}</td><td>{{ item.lossRate || 0 }}</td></tr></tbody></table>
         </template>
-        <el-empty v-else description="暂无正式 BOM 或适用工艺路线" />
+        <el-empty v-else :description='uiText("暂无正式 BOM 或适用工艺路线")' />
       </section>
     </template>
   </div>

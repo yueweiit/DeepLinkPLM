@@ -26,6 +26,8 @@ public interface ProductService {
 
     ProductVO updateBasicInfo(Long productId, ProductUpdateDTO updateDTO);
 
+    String ensureResearchProductSpecificCode(Long productId, String operator);
+
     void freeze(Long productId, String reason, HttpServletRequest request);
 
     void publish(Long productId, String operator);

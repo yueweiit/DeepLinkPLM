@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed } from 'vue'
 import { useMediaQuery } from '@vueuse/core'
 import { useRoute, useRouter } from 'vue-router'
@@ -8,6 +10,8 @@ import { useAppStore } from '@/stores/app'
 import { useUserStore } from '@/stores/user'
 import { launchStage, legacyResearchStep } from '@/constants/productResearch'
 import { useClientUpdate } from '@/composables/useClientUpdate'
+import { t } from '@/locales'
+import LanguageSwitcher from '@/components/LanguageSwitcher/index.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -51,23 +55,24 @@ async function handleLogout() {
 <template>
   <header class="navbar">
     <div class="navbar__left">
-      <el-button circle :icon="appStore.sidebarCollapsed ? Expand : Fold" :aria-label="phone?'打开手机导航':'切换侧栏'" @click="toggleNavigation" />
+      <el-button circle :icon="appStore.sidebarCollapsed ? Expand : Fold" :aria-label="phone?uiText('打开手机导航'):uiText('切换侧栏')" @click="toggleNavigation" />
       <div class="navbar__route">
         <el-breadcrumb separator="/">
           <el-breadcrumb-item v-for="item in breadcrumbItems" :key="item.key">
-            {{ item.title }}
+            {{ t(item.title) }}
           </el-breadcrumb-item>
         </el-breadcrumb>
-        <span v-if="routeSubtitle" class="navbar__route-subtitle">{{ routeSubtitle }}</span>
+        <span v-if="routeSubtitle" class="navbar__route-subtitle">{{ t(routeSubtitle) }}</span>
       </div>
     </div>
     <div class="navbar__right">
-      <el-button v-if="clientUpdate.available.value" size="small" type="warning" plain title="先保存当前填写到草稿，再刷新加载新版" @click="clientUpdate.refresh">发现新版，保存后刷新</el-button>
+      <LanguageSwitcher />
+      <el-button v-if="clientUpdate.available.value" size="small" type="warning" plain :title='uiText("先保存当前填写到草稿，再刷新加载新版")' @click="clientUpdate.refresh">{{ uiText("发现新版，保存后刷新") }}</el-button>
       <div class="navbar__user">
         <strong>{{ userStore.profile?.userName || '--' }}</strong>
-        <span>{{ userStore.profile?.roleName || '--' }}</span>
+        <span>{{ t(userStore.profile?.roleName || '--') }}</span>
       </div>
-      <el-button text @click="handleLogout">退出</el-button>
+      <el-button text @click="handleLogout">{{ t('退出') }}</el-button>
     </div>
   </header>
 </template>
@@ -103,7 +108,7 @@ async function handleLogout() {
 .navbar__route-subtitle {
   color: var(--plm-color-text-secondary);
   font-size: 13px;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .navbar__user {

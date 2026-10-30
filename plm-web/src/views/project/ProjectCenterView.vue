@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import ProductMasterDataDialog from './components/ProductMasterDataDialog.vue'
 import ProductSalesCatalog from '@/components/ProductionMetadata/ProductSalesCatalog.vue'
 import CurrentProductCatalog from './components/CurrentProductCatalog.vue'
@@ -785,7 +787,7 @@ function handleArchiveImportFileChange(event: Event) {
 
 async function submitArchiveImport() {
   if (!archiveImportFile.value) {
-    ElMessage.warning('请先选择要导入的数据文件')
+    ElMessage.warning(uiText('请先选择要导入的数据文件'))
     return
   }
 
@@ -795,7 +797,7 @@ async function submitArchiveImport() {
     archiveImportPreview.value = preview
 
     if (preview.failCount > 0) {
-      ElMessage.warning(`导入预览发现 ${preview.failCount} 条异常，请修正文件后重新导入`)
+      ElMessage.warning(uiText('导入预览发现 {value0} 条异常，请修正文件后重新导入',{value0:(preview.failCount)}))
       return
     }
 
@@ -803,9 +805,9 @@ async function submitArchiveImport() {
     if(result.successCount>0)projectWorkspace.changed()
     archiveImportPreview.value = result
     if (result.failCount > 0) {
-      ElMessage.warning(`导入完成，成功 ${result.successCount} 条，失败 ${result.failCount} 条`)
+      ElMessage.warning(uiText('导入完成，成功 {value0} 条，失败 {value1} 条',{value0:(result.successCount),value1:(result.failCount)}))
     } else {
-      ElMessage.success(`导入成功，共导入 ${result.successCount} 条数据`)
+      ElMessage.success(uiText('导入成功，共导入 {value0} 条数据',{value0:(result.successCount)}))
       closeArchiveImport()
     }
     await loadData()
@@ -1010,13 +1012,13 @@ async function handleProductionConfirmationConfirmed() {
       timelineActionLoading.value = 'confirm'
       await confirmTimelineNode(projectId, 'MODEL_VARIANT_MOLD_TRANSFER', '投产颜色已确认，移交并创建 SKU')
       projectWorkspace.changed()
-      ElMessage.success('新型号已完成，正在移交钉钉审批')
+      ElMessage.success(uiText('新型号已完成，正在移交钉钉审批'))
     }
     await refreshDetailAfterChildChange()
     await refreshProjectTimeline(projectId)
   } catch (error) {
     ElMessage.error(shouldCompleteModelVariant
-      ? `SKU 已创建，但最终节点确认失败：${getErrorMessage(error)}`
+      ? uiText('SKU 已创建，但最终节点确认失败：{value0}',{value0:(getErrorMessage(error))})
       : getErrorMessage(error))
   } finally {
     timelineActionLoading.value = false
@@ -1036,16 +1038,16 @@ function applyDetailLifecycleResult(result: { status: ProductSummary['status']; 
 async function handleDetailFreezeProject() {
   if (!detailTarget.value || detailLifecycleLoading.value || !canFreezeDetailProject.value) return
   try {
-    await ElMessageBox.confirm('冻结会锁定当前 Product 资料状态，用于发布前版本留痕。', '冻结项目版本', {
-      confirmButtonText: '冻结',
-      cancelButtonText: '取消',
+    await ElMessageBox.confirm(uiText('冻结会锁定当前 Product 资料状态，用于发布前版本留痕。'), uiText('冻结项目版本'), {
+      confirmButtonText: uiText('冻结'),
+      cancelButtonText: uiText('取消'),
       type: 'warning'
     })
     detailLifecycleLoading.value = 'freeze'
     const result = await freezeProject(detailTarget.value.productId, { reason: '项目详情头部冻结' })
     applyDetailLifecycleResult(result)
     await handleLifecycleChanged()
-    ElMessage.success('项目版本已冻结')
+    ElMessage.success(uiText('项目版本已冻结'))
   } catch (error) {
     if (error !== 'cancel' && error !== 'close') ElMessage.error(getErrorMessage(error))
   } finally {
@@ -1059,15 +1061,15 @@ async function handleDetailPublishProject() {
     const gate = await checkProjectReleaseGate(detailTarget.value.productId)
     const blocking = Boolean(gate.blocking || (!gate.passed && !gate.confirmRequired))
     if (blocking) {
-      ElMessage.error('当前流程尚未满足发布条件，请先完成基础流程')
+      ElMessage.error(uiText('当前流程尚未满足发布条件，请先完成基础流程'))
       return
     }
     await ElMessageBox.confirm(
       buildReleaseConfirmationMessage(gate),
-      gate.confirmRequired ? '确认带风险发布' : '发布 Product',
+      gate.confirmRequired ? uiText('确认带风险发布') : uiText('发布 Product'),
       {
-      confirmButtonText: '发布',
-      cancelButtonText: '取消',
+      confirmButtonText: uiText('发布'),
+      cancelButtonText: uiText('取消'),
       type: 'warning'
       }
     )
@@ -1078,14 +1080,14 @@ async function handleDetailPublishProject() {
     })
     applyDetailLifecycleResult(result)
     await handleLifecycleChanged()
-    ElMessage.success('Product 已发布')
+    ElMessage.success(uiText('Product 已发布'))
   } catch (error) {
     const gateFromError = getReleaseGateFromError(error)
     if (gateFromError) {
       ElMessage.error(
         getReleaseGateErrorCode(error) === 40308
-          ? '检测到发布资料风险，请确认后重试'
-          : '当前流程尚未满足发布条件'
+          ? uiText('检测到发布资料风险，请确认后重试')
+          : uiText('当前流程尚未满足发布条件')
       )
       return
     }
@@ -1118,16 +1120,16 @@ function buildReleaseConfirmationMessage(gate: ProductReleaseGateCheckVO) {
 async function handleDetailArchiveProject() {
   if (!detailTarget.value || detailLifecycleLoading.value || !canArchiveDetailProject.value) return
   try {
-    const { value } = await ElMessageBox.prompt('请输入归档原因，便于后续追溯。', '归档项目', {
-      confirmButtonText: '归档',
-      cancelButtonText: '取消',
-      inputPlaceholder: '例如：发布版本停用，进入历史归档'
+    const { value } = await ElMessageBox.prompt(uiText('请输入归档原因，便于后续追溯。'), uiText('归档项目'), {
+      confirmButtonText: uiText('归档'),
+      cancelButtonText: uiText('取消'),
+      inputPlaceholder: uiText('例如：发布版本停用，进入历史归档')
     })
     detailLifecycleLoading.value = 'archive'
     const result = await archiveProject(detailTarget.value.productId, { reason: String(value || '').trim() || '项目详情头部归档' })
     applyDetailLifecycleResult(result)
     await handleLifecycleChanged()
-    ElMessage.success('项目已归档')
+    ElMessage.success(uiText('项目已归档'))
   } catch (error) {
     if (error !== 'cancel' && error !== 'close') ElMessage.error(getErrorMessage(error))
   } finally {
@@ -1138,17 +1140,17 @@ async function handleDetailArchiveProject() {
 async function handleDetailStopProject() {
   if (!detailTarget.value || detailLifecycleLoading.value || !canStopDetailProject.value) return
   try {
-    const { value } = await ElMessageBox.prompt('请输入停止原因。停止后项目会进入已停止/归档，并同步关闭关联 Order。', '停止项目', {
-      confirmButtonText: '确认停止',
-      cancelButtonText: '取消',
-      inputPlaceholder: '例如：客户取消需求，项目停止推进',
-      inputValidator: (value) => Boolean(String(value || '').trim()) || '请填写停止原因'
+    const { value } = await ElMessageBox.prompt(uiText('请输入停止原因。停止后项目会进入已停止/归档，并同步关闭关联 Order。'), uiText('停止项目'), {
+      confirmButtonText: uiText('确认停止'),
+      cancelButtonText: uiText('取消'),
+      inputPlaceholder: uiText('例如：客户取消需求，项目停止推进'),
+      inputValidator: (value) => Boolean(String(value || '').trim()) || uiText('请填写停止原因')
     })
     detailLifecycleLoading.value = 'abandon'
     const result = await abandonProject(detailTarget.value.productId, { reason: String(value || '').trim() })
     applyDetailLifecycleResult(result)
     await handleLifecycleChanged()
-    ElMessage.success('项目已停止并归档')
+    ElMessage.success(uiText('项目已停止并归档'))
   } catch (error) {
     if (error !== 'cancel' && error !== 'close') ElMessage.error(getErrorMessage(error))
   } finally {
@@ -1159,7 +1161,7 @@ async function handleDetailStopProject() {
 async function saveCurrentMoldTransferExpress() {
   if (!detailTarget.value || !activeProductFlowNode.value) return
   if (!moldTransferForm.trackingNo.trim()) {
-    ElMessage.warning('请填写快递单号')
+    ElMessage.warning(uiText('请填写快递单号'))
     return
   }
   moldTransferLoading.value = true
@@ -1170,7 +1172,7 @@ async function saveCurrentMoldTransferExpress() {
     })
     applyMoldTransferExpress(saved)
     await refreshProjectTimeline(detailTarget.value.productId)
-    ElMessage.success('运模快递单号已保存')
+    ElMessage.success(uiText('运模快递单号已保存'))
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   } finally {
@@ -1181,17 +1183,17 @@ async function saveCurrentMoldTransferExpress() {
 async function handleConfirmCurrentNode() {
   if (!detailTarget.value || !activeProductFlowNode.value || timelineActionLoading.value) return
   try {
-    const { value } = await ElMessageBox.prompt('可填写确认备注，留空则只确认当前节点。', '确认当前节点', {
-      confirmButtonText: '确认',
-      cancelButtonText: '取消',
-      inputPlaceholder: '例如：资料已检查，进入可推进状态'
+    const { value } = await ElMessageBox.prompt(uiText('可填写确认备注，留空则只确认当前节点。'), uiText('确认当前节点'), {
+      confirmButtonText: uiText('确认'),
+      cancelButtonText: uiText('取消'),
+      inputPlaceholder: uiText('例如：资料已检查，进入可推进状态')
     })
     timelineActionLoading.value = 'confirm'
     await confirmTimelineNode(detailTarget.value.productId, activeProductFlowNode.value.nodeKey, String(value || ''))
     projectWorkspace.changed()
     await refreshProjectTimeline(detailTarget.value.productId)
     await loadData()
-    ElMessage.success('节点已确认')
+    ElMessage.success(uiText('节点已确认'))
   } catch (error) {
     if (error !== 'cancel' && error !== 'close') ElMessage.error(getErrorMessage(error))
   } finally {
@@ -1202,13 +1204,13 @@ async function handleConfirmCurrentNode() {
 async function handleAdvanceCurrentNode() {
   if (!detailTarget.value || !activeProductFlowNode.value || timelineActionLoading.value) return
   if (!canAdvanceCurrentTimelineNode.value) {
-    ElMessage.warning(currentTimelineConfirmed.value ? '最后一个节点不能继续推进' : '请先确认当前节点')
+    ElMessage.warning(currentTimelineConfirmed.value ? uiText('最后一个节点不能继续推进') : uiText('请先确认当前节点'))
     return
   }
   try {
-    await ElMessageBox.confirm('推进后项目会进入下一节点，新节点会回到未确认状态。', '推进下一节点', {
-      confirmButtonText: '推进',
-      cancelButtonText: '取消',
+    await ElMessageBox.confirm(uiText('推进后项目会进入下一节点，新节点会回到未确认状态。'), uiText('推进下一节点'), {
+      confirmButtonText: uiText('推进'),
+      cancelButtonText: uiText('取消'),
       type: 'warning'
     })
     timelineActionLoading.value = 'confirm'
@@ -1216,7 +1218,7 @@ async function handleAdvanceCurrentNode() {
     projectWorkspace.changed()
     await refreshProjectTimeline(detailTarget.value.productId)
     await loadData()
-    ElMessage.success('已推进到下一节点')
+    ElMessage.success(uiText('已推进到下一节点'))
   } catch (error) {
     if (error !== 'cancel' && error !== 'close') ElMessage.error(getErrorMessage(error))
   } finally {
@@ -1228,14 +1230,14 @@ async function handleReturnCurrentNode(returnToPrevious: boolean) {
   if (!detailTarget.value || !activeProductFlowNode.value || timelineActionLoading.value) return
   try {
     const { value } = await ElMessageBox.prompt(
-      returnToPrevious ? '请输入退回上一节点的原因。' : '请输入退回当前节点修改的原因。',
-      returnToPrevious ? '退回上一节点' : '退回当前节点修改',
+      returnToPrevious ? uiText('请输入退回上一节点的原因。') : uiText('请输入退回当前节点修改的原因。'),
+      returnToPrevious ? uiText('退回上一节点') : uiText('退回当前节点修改'),
       {
-        confirmButtonText: '退回',
-        cancelButtonText: '取消',
-        inputPlaceholder: '必须填写，例如：图纸资料需补充',
+        confirmButtonText: uiText('退回'),
+        cancelButtonText: uiText('取消'),
+        inputPlaceholder: uiText('必须填写，例如：图纸资料需补充'),
         inputValidator: (value) => Boolean(String(value || '').trim()),
-        inputErrorMessage: '请填写退回原因'
+        inputErrorMessage: uiText('请填写退回原因')
       }
     )
     timelineActionLoading.value = 'return'
@@ -1248,7 +1250,7 @@ async function handleReturnCurrentNode(returnToPrevious: boolean) {
     projectWorkspace.changed()
     await refreshProjectTimeline(detailTarget.value.productId)
     await loadData()
-    ElMessage.success('已退回处理')
+    ElMessage.success(uiText('已退回处理'))
   } catch (error) {
     if (error !== 'cancel' && error !== 'close') ElMessage.error(getErrorMessage(error))
   } finally {
@@ -1460,7 +1462,7 @@ function applySavedBasicInfo(info: ProductBasicInfo) {
 async function saveBasicInfo() {
   if (!detailTarget.value || basicInfoSaving.value) return
   if (!basicInfoForm.productName.trim()) {
-    ElMessage.warning(`${detailObjectLabel.value}名称不能为空`)
+    ElMessage.warning(uiText('{value0}名称不能为空',{value0:(detailObjectLabel.value)}))
     return
   }
   basicInfoSaving.value = true
@@ -1494,7 +1496,7 @@ async function saveBasicInfo() {
     basicInfoEditing.value = false
     await refreshDetailAfterChildChange()
     applySavedBasicInfo(saved.basicInfo)
-    ElMessage.success('基础信息已保存')
+    ElMessage.success(uiText('基础信息已保存'))
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   } finally {
@@ -1641,17 +1643,17 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
 <template>
   <PageContainer
     :class="{'production-project-page':isFoundation,'workbench-project-page':!isFoundation}"
-    :title="isFoundation?'产品平台与型号':'项目中心'"
+    :title="isFoundation?uiText('产品平台与型号'):uiText('项目中心')"
   >
-    <div v-if="isFoundation" class="foundation-maintenance-toolbar"><el-button v-if="foundationMasterHome" size="small" @click="toggleFoundationSource">{{foundationSourceMode?'返回产品基础资料':'来源型号目录（CRM／MES）'}}</el-button><el-button v-if="!foundationMasterHome" size="small" @click="openProductMaintenance()">产品资料：查看／编辑／停用／删除</el-button><el-button v-if="!foundationMasterHome&&(user.profile?.canMaintainEngineeringData||user.hasPermission('*'))" size="small" type="primary" @click="openProductMaintenance(undefined,true)">新增产品资料</el-button></div>
+    <div v-if="isFoundation" class="foundation-maintenance-toolbar"><el-button v-if="foundationMasterHome" size="small" @click="toggleFoundationSource">{{foundationSourceMode?uiText('返回产品基础资料'):uiText('来源型号目录（CRM／MES）')}}</el-button><el-button v-if="!foundationMasterHome" size="small" @click="openProductMaintenance()">{{ uiText("产品资料：查看／编辑／停用／删除") }}</el-button><el-button v-if="!foundationMasterHome&&(user.profile?.canMaintainEngineeringData||user.hasPermission('*'))" size="small" type="primary" @click="openProductMaintenance(undefined,true)">{{ uiText("新增产品资料") }}</el-button></div>
     <ProductMasterDataDialog v-if="productMasterVisible" v-model="productMasterVisible" :initial-id="productMasterId" :create="productMasterCreate" @changed="foundationRevision++;loadData()"/>
     <ProductMasterDataDialog v-if="foundationMasterHome&&!foundationSourceMode" ref="foundationMasterPanel" :model-value="true" embedded @changed="foundationRevision++"/>
     <ProjectWorkbench v-else-if="!isFoundation"/>
     <CurrentProductCatalog :key="foundationRevision" v-else-if="masterDataStatus?.ready&&!legacyArchive&&!route.query.history&&!route.query.productId&&!route.query.skuId" :mode="archiveView==='sku'?'sku':'product'" :administrator="masterDataStatus.administrator" @history="legacyArchive=true" @maintenance="id=>openProductMaintenance(id)"/>
     <template v-else>
-    <el-button v-if="masterDataStatus?.ready" size="small" @click="legacyArchive=false;router.replace({path:'/projects',query:{tab:'archived',archiveView}})">返回本期资料（CRM／MES）</el-button>
-    <section class="project-filter-bar" aria-label="项目筛选">
-      <nav class="project-tag-bar" aria-label="项目视图">
+    <el-button v-if="masterDataStatus?.ready" size="small" @click="legacyArchive=false;router.replace({path:'/projects',query:{tab:'archived',archiveView}})">{{ uiText("返回本期资料（CRM／MES）") }}</el-button>
+    <section class="project-filter-bar" :aria-label='uiText("项目筛选")'>
+      <nav class="project-tag-bar" :aria-label='uiText("项目视图")'>
         <button
           v-for="tag in projectQuickTags"
           :key="tag.value"
@@ -1663,23 +1665,23 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
           {{ tag.label }}
         </button>
       </nav>
-      <el-input v-model="keyword" clearable class="project-filter-search" placeholder="搜索项目编码 / 名称 / 系列 / 负责人" />
+      <el-input v-model="keyword" clearable class="project-filter-search" :placeholder='uiText("搜索项目编码 / 名称 / 系列 / 负责人")' />
     </section>
 
     <section class="project-module-panel">
       <header class="project-module-panel__header">
         <div>
           <div class="project-current-heading">
-            <strong role="heading" aria-level="2">{{ currentModuleTitle }}</strong>
-            <span class="project-current-count">{{ currentModuleCount }} 个</span>
+            <strong role="heading" aria-level="2">{{ uiText(String((currentModuleTitle) ?? '')) }}</strong>
+            <span class="project-current-count">{{ currentModuleCount }}{{ uiText(" 个") }}</span>
           </div>
           <p class="project-module-panel__desc">{{ currentModuleDescription }}</p>
         </div>
-        <div class="project-module-panel__actions"><el-button v-if="productionPermissions.canMaintain" size="small" @click="salesCatalogVisible=true">在售产品与审批别名</el-button>
+        <div class="project-module-panel__actions"><el-button v-if="productionPermissions.canMaintain" size="small" @click="salesCatalogVisible=true">{{ uiText("在售产品与审批别名") }}</el-button>
           <ProductionStatusFilter v-model="productionFilter" @change="loadData"/>
-          <el-button v-if="productionPermissions.canMaintain&&selectedProductionRows.length" size="small" :disabled="selectedProductionRows.length>100" @click="editProductionBatch">批量维护 ({{selectedProductionRows.length}})</el-button><small v-if="selectedProductionRows.length>100">每批最多100条</small>
-          <el-button v-if="projectQuickTag === 'archived_product'" type="primary" @click="openArchiveImport('product')">导入数据</el-button>
-          <el-button v-if="projectQuickTag === 'archived_sku'" type="primary" @click="openArchiveImport('sku')">导入数据</el-button>
+          <el-button v-if="productionPermissions.canMaintain&&selectedProductionRows.length" size="small" :disabled="selectedProductionRows.length>100" @click="editProductionBatch">{{ uiText("批量维护 (") }}{{selectedProductionRows.length}})</el-button><small v-if="selectedProductionRows.length>100">{{ uiText("每批最多100条") }}</small>
+          <el-button v-if="projectQuickTag === 'archived_product'" type="primary" @click="openArchiveImport('product')">{{ uiText("导入数据") }}</el-button>
+          <el-button v-if="projectQuickTag === 'archived_sku'" type="primary" @click="openArchiveImport('sku')">{{ uiText("导入数据") }}</el-button>
         </div>
       </header>
 
@@ -1694,10 +1696,10 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
             <section v-if="skuPageStage === 'product-home'" class="page-panel sku-product-home">
               <div class="toolbar-row sku-product-home__head">
                 <div>
-                  <h3 class="section-title">SKU 管理</h3>
-                  <p class="page-panel-desc">先按产品卡片定位，再进入该产品下的 SKU 列表。</p>
+                  <h3 class="section-title">{{ uiText("SKU 管理") }}</h3>
+                  <p class="page-panel-desc">{{ uiText("先按产品卡片定位，再进入该产品下的 SKU 列表。") }}</p>
                 </div>
-                <el-button type="primary" @click="openArchiveImport('sku')">导入数据</el-button>
+                <el-button type="primary" @click="openArchiveImport('sku')">{{ uiText("导入数据") }}</el-button>
               </div>
               <div class="sku-product-grid" v-loading="loading">
                 <button
@@ -1710,12 +1712,12 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
                   <div class="sku-product-card__image"><span>{{ product.seriesName }}</span></div>
                   <div class="toolbar-row">
                     <strong>{{ product.productName }}</strong>
-                    <StatusTag :status="product.status" object-type="product" /><el-tag size="small">生产：{{productionStatusName(product.productionStatus)}}</el-tag>
+                    <StatusTag :status="product.status" object-type="product" /><el-tag size="small">{{ uiText("生产：") }}{{productionStatusName(product.productionStatus)}}</el-tag>
                   </div>
                   <p class="subtle-text">{{ getDisplayProductLineCode(product) }}</p>
                   <p class="sku-product-card__series">{{ product.seriesName }}</p>
                   <div class="sku-product-card__meta">
-                    <span>{{ getSkuCountForProduct(product) }} 个 SKU</span>
+                    <span>{{ getSkuCountForProduct(product) }}{{ uiText(" 个 SKU") }}</span>
                     <span class="subtle-text">{{ getRecentUpdate(product) }}</span>
                   </div>
                 </button>
@@ -1725,13 +1727,13 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
             <section v-else class="page-panel sku-list-panel" v-loading="loading">
               <div class="toolbar-row sku-list-panel__head">
                 <div>
-                  <el-button link type="primary" @click="skuBackToProductHome">返回产品卡片</el-button>
-                  <h3 class="section-title">{{ skuActiveProduct?.productName }} / SKU 列表</h3>
-                  <p class="page-panel-desc">查看当前产品下的 SKU 信息、版本状态和归档资料。</p>
+                  <el-button link type="primary" @click="skuBackToProductHome">{{ uiText("返回产品卡片") }}</el-button>
+                  <h3 class="section-title">{{ skuActiveProduct?.productName }}{{ uiText(" / SKU 列表") }}</h3>
+                  <p class="page-panel-desc">{{ uiText("查看当前产品下的 SKU 信息、版本状态和归档资料。") }}</p>
                 </div>
-                <div class="sku-list-panel__actions"><el-button v-if="productionPermissions.canMaintain" size="small" @click="salesCatalogVisible=true">在售产品与审批别名</el-button>
-                  <el-input v-model="skuKeyword" clearable class="sku-list-panel__search" placeholder="搜索编码 / 名称 / 型号 / 颜色" />
-                  <el-button type="primary" @click="openArchiveImport('sku')">导入数据</el-button>
+                <div class="sku-list-panel__actions"><el-button v-if="productionPermissions.canMaintain" size="small" @click="salesCatalogVisible=true">{{ uiText("在售产品与审批别名") }}</el-button>
+                  <el-input v-model="skuKeyword" clearable class="sku-list-panel__search" :placeholder='uiText("搜索编码 / 名称 / 型号 / 颜色")' />
+                  <el-button type="primary" @click="openArchiveImport('sku')">{{ uiText("导入数据") }}</el-button>
                 </div>
               </div>
               <ProductProductionList :rows="skuCurrentSkuRows" sku :code="getDisplaySkuCode" :selectable="productionPermissions.canMaintain" @selection-change="selectedProductionRows=$event as ProductSummary[]" @detail="openDetail" @changed="loadData"/>
@@ -1746,19 +1748,19 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
         <div class="detail-dialog-header">
           <div>
             <strong class="detail-dialog-header__title">
-              {{ detailDialogTitle }}
+              {{ uiText(String((detailDialogTitle) ?? '')) }}
             </strong>
             <div class="detail-dialog-header__meta" v-if="detailTarget">
               <span>{{ getDetailDisplayCode(detailTarget) }}</span>
-              <span v-if="!isProductDetailDialog">型号 {{ detailTarget.model }} / {{ detailTarget.color }}</span>
-              <span>系列 {{ detailTarget.seriesName }}</span>
-              <span>版本 {{ detailTarget.versionNo }}</span>
+              <span v-if="!isProductDetailDialog">{{ uiText("型号 ") }}{{ detailTarget.model }} / {{ detailTarget.color }}</span>
+              <span>{{ uiText("系列 ") }}{{ detailTarget.seriesName }}</span>
+              <span>{{ uiText("版本 ") }}{{ detailTarget.versionNo }}</span>
             </div>
           </div>
-          <div class="detail-dialog-header__actions"><el-button v-if="isFoundation&&detailTarget" size="small" @click="openProductMaintenance(detailTarget.productId)">资料维护／引用</el-button>
+          <div class="detail-dialog-header__actions"><el-button v-if="isFoundation&&detailTarget" size="small" @click="openProductMaintenance(detailTarget.productId)">{{ uiText("资料维护／引用") }}</el-button>
             <el-dropdown v-if="isProductDetailDialog && detailTarget" trigger="click" @command="openAssociatedBusiness">
-              <el-button size="small">关联业务</el-button>
-              <template #dropdown><el-dropdown-menu><el-dropdown-item v-if="user.hasPermission('collaboration:view')" command="market-metadata">市场资料维护</el-dropdown-item><el-dropdown-item v-if="user.hasPermission('collaboration:view')" command="/production-totals">累计产量</el-dropdown-item><el-dropdown-item v-if="user.hasPermission('collaboration:view')" command="/molds">模具台账</el-dropdown-item><el-dropdown-item v-if="user.hasPermission('schedule:read')" command="/mold-schedules">开模时间管控</el-dropdown-item></el-dropdown-menu></template>
+              <el-button size="small">{{ uiText("关联业务") }}</el-button>
+              <template #dropdown><el-dropdown-menu><el-dropdown-item v-if="user.hasPermission('collaboration:view')" command="market-metadata">{{ uiText("市场资料维护") }}</el-dropdown-item><el-dropdown-item v-if="user.hasPermission('collaboration:view')" command="/production-totals">{{ uiText("累计产量") }}</el-dropdown-item><el-dropdown-item v-if="user.hasPermission('collaboration:view')" command="/molds">{{ uiText("模具台账") }}</el-dropdown-item><el-dropdown-item v-if="user.hasPermission('schedule:read')" command="/mold-schedules">{{ uiText("开模时间管控") }}</el-dropdown-item></el-dropdown-menu></template>
             </el-dropdown>
             <StatusTag :status="detailTarget?.status || 'draft'" object-type="product" />
             <ProductProductionControl v-if="detailTarget" :product-id="detailTarget.productId" :model-value="detailTarget.productionStatus||'unknown'" :label="detailTarget.productName" @update:model-value="detailTarget.productionStatus=$event" @changed="loadData"/>
@@ -1768,9 +1770,7 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
                 :loading="detailLifecycleLoading === 'freeze'"
                 :disabled="Boolean(detailLifecycleLoading) || !canFreezeDetailProject"
                 @click="handleDetailFreezeProject"
-              >
-                冻结项目
-              </el-button>
+              >{{ uiText(" 冻结项目 ") }}</el-button>
               <el-button
                 v-if="isProductDetailDialog"
                 size="small"
@@ -1778,9 +1778,7 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
                 :loading="detailLifecycleLoading === 'publish'"
                 :disabled="Boolean(detailLifecycleLoading) || !canPublishDetailProject"
                 @click="handleDetailPublishProject"
-              >
-                发布 Product
-              </el-button>
+              >{{ uiText(" 发布 Product ") }}</el-button>
               <el-button
                 size="small"
                 type="danger"
@@ -1788,23 +1786,19 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
                 :loading="detailLifecycleLoading === 'abandon'"
                 :disabled="Boolean(detailLifecycleLoading) || !canStopDetailProject"
                 @click="handleDetailStopProject"
-              >
-                停止项目
-              </el-button>
+              >{{ uiText(" 停止项目 ") }}</el-button>
               <el-button
                 size="small"
                 :loading="detailLifecycleLoading === 'archive'"
                 :disabled="Boolean(detailLifecycleLoading) || !canArchiveDetailProject"
                 @click="handleDetailArchiveProject"
-              >
-                归档项目
-              </el-button>
+              >{{ uiText(" 归档项目 ") }}</el-button>
             </template>
           </div>
         </div>
       </template>
       <div v-if="detailTarget" v-loading="detailLoading" class="detail-dialog">
-        <nav class="detail-breadcrumb" aria-label="详情分区">
+        <nav class="detail-breadcrumb" :aria-label='uiText("详情分区")'>
           <button
             v-for="section in activeDetailSections"
             :key="section.key"
@@ -1813,7 +1807,7 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
             type="button"
             @click="activeDetailSection = section.key"
           >
-            {{ section.label }}
+            {{ uiText(String((section.label) ?? '')) }}
           </button>
         </nav>
 
@@ -1823,14 +1817,14 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
             type="info"
             :closable="false"
             show-icon
-            :title="timelineStartBlockReason || '当前项目时间轴尚未启动。'"
+            :title="timelineStartBlockReason || uiText('当前项目时间轴尚未启动。')"
           />
           <template v-if="timelineStarted !== false">
           <div class="product-node-hero">
             <div>
-              <p class="subtle-text">当前节点</p>
+              <p class="subtle-text">{{ uiText("当前节点") }}</p>
               <h4 class="product-node-hero__title">{{ activeProductFlowNode?.nodeName || detailTarget.currentStage }}</h4>
-              <p class="page-panel-desc">{{ activeProductFlowNode?.experienceSummary || activeProductFlowNode?.summary || detailPresentation?.summary || '暂无当前节点说明。' }}</p>
+              <p class="page-panel-desc">{{ activeProductFlowNode?.experienceSummary || activeProductFlowNode?.summary || detailPresentation?.summary || uiText('暂无当前节点说明。') }}</p>
             </div>
             <div class="product-node-hero__actions">
               <StatusTag :status="detailTarget.status" object-type="product" />
@@ -1840,9 +1834,9 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
           <div class="timeline-action-panel">
             <div class="timeline-action-panel__status">
               <el-tag :type="currentTimelineConfirmed ? 'success' : 'warning'" effect="light">
-                {{ currentTimelineConfirmed ? '已确认' : '未确认' }}
+                {{ currentTimelineConfirmed ? uiText('已确认') : uiText('未确认') }}
               </el-tag>
-              <span>{{ currentTimelineActionLabel }}</span>
+              <span>{{ uiText(String((currentTimelineActionLabel) ?? '')) }}</span>
             </div>
             <div class="timeline-action-panel__buttons">
               <el-button
@@ -1852,9 +1846,7 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
                 :loading="timelineActionLoading === 'confirm'"
                 :disabled="Boolean(timelineActionLoading)"
                 @click="handleConfirmCurrentNode"
-              >
-                确认当前节点
-              </el-button>
+              >{{ uiText(" 确认当前节点 ") }}</el-button>
               <el-button
                 v-if="activeProductFlowNode && currentTimelineConfirmed && canAdvanceCurrentTimelineNode"
                 data-test="project-timeline-advance"
@@ -1862,20 +1854,18 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
                 :loading="timelineActionLoading === 'confirm'"
                 :disabled="Boolean(timelineActionLoading) || !canAdvanceCurrentTimelineNode"
                 @click="handleAdvanceCurrentNode"
-              >
-                推进下一节点
-              </el-button>
+              >{{ uiText(" 推进下一节点 ") }}</el-button>
               <el-dropdown
                 v-if="activeProductFlowNode"
                 data-test="project-timeline-return"
                 :disabled="Boolean(timelineActionLoading)"
                 @command="handleReturnCommand"
               >
-                <el-button :loading="timelineActionLoading === 'return'">退回</el-button>
+                <el-button :loading="timelineActionLoading === 'return'">{{ uiText("退回") }}</el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item command="current">退回当前节点修改</el-dropdown-item>
-                    <el-dropdown-item command="previous">退回上一节点</el-dropdown-item>
+                    <el-dropdown-item command="current">{{ uiText("退回当前节点修改") }}</el-dropdown-item>
+                    <el-dropdown-item command="previous">{{ uiText("退回上一节点") }}</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
@@ -1885,30 +1875,30 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
           <section v-if="isMoldTransferNode" class="mold-transfer-panel">
             <div class="detail-section__head">
               <div>
-                <h4 class="section-title">运模快递登记</h4>
-                <p class="page-panel-desc">当前运模节点只登记快递单号和发运时间，不再查询或展示物流轨迹。</p>
+                <h4 class="section-title">{{ uiText("运模快递登记") }}</h4>
+                <p class="page-panel-desc">{{ uiText("当前运模节点只登记快递单号和发运时间，不再查询或展示物流轨迹。") }}</p>
               </div>
               <el-tag effect="light" :type="moldTransferExpress?.trackingNo ? 'success' : 'warning'">
-                {{ moldTransferExpress?.trackingNo ? '已登记单号' : '待登记单号' }}
+                {{ moldTransferExpress?.trackingNo ? uiText('已登记单号') : uiText('待登记单号') }}
               </el-tag>
             </div>
             <div class="mold-transfer-form mold-transfer-form--simple">
-              <el-input v-model="moldTransferForm.trackingNo" placeholder="快递单号" maxlength="128" />
+              <el-input v-model="moldTransferForm.trackingNo" :placeholder='uiText("快递单号")' maxlength="128" />
               <el-date-picker
                 v-model="moldTransferForm.shippedAt"
                 type="datetime"
                 value-format="YYYY-MM-DDTHH:mm:ss"
-                placeholder="发运时间"
+                :placeholder='uiText("发运时间")'
               />
-              <el-button type="primary" :loading="moldTransferLoading" @click="saveCurrentMoldTransferExpress">保存</el-button>
+              <el-button type="primary" :loading="moldTransferLoading" @click="saveCurrentMoldTransferExpress">{{ uiText("保存") }}</el-button>
             </div>
             <div v-if="moldTransferExpress?.trackingNo" class="mold-transfer-summary">
               <div class="info-card">
-                <span class="subtle-text">快递单号</span>
+                <span class="subtle-text">{{ uiText("快递单号") }}</span>
                 <strong>{{ moldTransferExpress.trackingNo }}</strong>
               </div>
               <div class="info-card">
-                <span class="subtle-text">发运时间</span>
+                <span class="subtle-text">{{ uiText("发运时间") }}</span>
                 <strong>{{ moldTransferExpress.shippedAt ? formatDate(moldTransferExpress.shippedAt, 'YYYY-MM-DD HH:mm') : '--' }}</strong>
               </div>
             </div>
@@ -1916,38 +1906,38 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
 
           <div class="detail-grid">
             <div class="info-card">
-              <span class="subtle-text">确认状态</span>
-              <strong>{{ currentTimelineConfirmed ? '已确认' : '未确认' }}</strong>
+              <span class="subtle-text">{{ uiText("确认状态") }}</span>
+              <strong>{{ currentTimelineConfirmed ? uiText('已确认') : uiText('未确认') }}</strong>
             </div>
             <div class="info-card">
-              <span class="subtle-text">最近动作</span>
-              <strong>{{ getTimelineActionLabel(timelineLastAction) }}</strong>
+              <span class="subtle-text">{{ uiText("最近动作") }}</span>
+              <strong>{{ uiText(String((getTimelineActionLabel(timelineLastAction)) ?? '')) }}</strong>
               <span class="subtle-text">{{ timelineLastOperatedAt ? formatDate(timelineLastOperatedAt) : '--' }}</span>
             </div>
             <div class="info-card">
-              <span class="subtle-text">最近操作人</span>
+              <span class="subtle-text">{{ uiText("最近操作人") }}</span>
               <strong>{{ timelineLastOperatorUserName || '--' }}</strong>
             </div>
             <div class="info-card">
-              <span class="subtle-text">最近退回原因</span>
+              <span class="subtle-text">{{ uiText("最近退回原因") }}</span>
               <strong>{{ timelineLastReason || '--' }}</strong>
             </div>
             <div class="info-card">
-              <span class="subtle-text">下一步动作</span>
+              <span class="subtle-text">{{ uiText("下一步动作") }}</span>
               <strong>{{ activeProductFlowNode?.nextAction || detailTarget.nextAction || detailPresentation?.nextNode || '--' }}</strong>
             </div>
             <div class="info-card">
-              <span class="subtle-text">接收人 / 时间</span>
+              <span class="subtle-text">{{ uiText("接收人 / 时间") }}</span>
               <strong>{{ activeProductFlowNode?.receiverUserName || activeProductFlowNode?.receiverRole || '--' }}</strong>
               <span class="subtle-text">{{ activeProductFlowNode?.receivedAt || '--' }}</span>
             </div>
             <div class="info-card">
-              <span class="subtle-text">推动人 / 时间</span>
+              <span class="subtle-text">{{ uiText("推动人 / 时间") }}</span>
               <strong>{{ activeProductFlowNode?.promoterUserName || activeProductFlowNode?.promoterRole || activeProductFlowNode?.ownerRole || '--' }}</strong>
-              <span class="subtle-text">{{ activeProductFlowNode?.promotedAt || (activeProductFlowNode?.status === 'current' ? '推进中' : '--') }}</span>
+              <span class="subtle-text">{{ activeProductFlowNode?.promotedAt || (activeProductFlowNode?.status === 'current' ? uiText('推进中') : '--') }}</span>
             </div>
             <div class="info-card">
-              <span class="subtle-text">下一接收方</span>
+              <span class="subtle-text">{{ uiText("下一接收方") }}</span>
               <strong>{{ activeProductFlowNode?.nextReceiverUserName || activeProductFlowNode?.nextReceiverRole || '--' }}</strong>
             </div>
           </div>
@@ -1971,152 +1961,152 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
         <section v-if="activeDetailSection === 'basic'" class="detail-section">
           <div class="detail-section__head">
             <div>
-              <h4 class="section-title">基础信息</h4>
+              <h4 class="section-title">{{ uiText("基础信息") }}</h4>
             </div>
             <div v-if="canEditDetailTarget" class="toolbar-actions">
               <template v-if="basicInfoEditing">
-                <el-button :disabled="basicInfoSaving" @click="cancelBasicInfoEdit">取消</el-button>
-                <el-button type="primary" :loading="basicInfoSaving" @click="saveBasicInfo">保存</el-button>
+                <el-button :disabled="basicInfoSaving" @click="cancelBasicInfoEdit">{{ uiText("取消") }}</el-button>
+                <el-button type="primary" :loading="basicInfoSaving" @click="saveBasicInfo">{{ uiText("保存") }}</el-button>
               </template>
-              <el-button v-else type="primary" plain size="small" @click="openDetailEdit">编辑基础信息</el-button>
+              <el-button v-else type="primary" plain size="small" @click="openDetailEdit">{{ uiText("编辑基础信息") }}</el-button>
             </div>
           </div>
 
           <el-form v-if="basicInfoEditing" label-position="top" class="basic-info-form">
             <div class="detail-grid">
-              <el-form-item :label="`${detailObjectLabel}名称`">
+              <el-form-item :label="uiText('{value0}名称',{value0:(detailObjectLabel)})">
                 <el-input v-model="basicInfoForm.productName" />
               </el-form-item>
-              <el-form-item label="系列">
+              <el-form-item :label='uiText("系列")'>
                 <el-input v-model="basicInfoForm.seriesName" />
               </el-form-item>
-              <el-form-item label="负责人">
+              <el-form-item :label='uiText("负责人")'>
                 <el-input v-model="basicInfoForm.ownerUserName" />
               </el-form-item>
-              <el-form-item label="型号">
+              <el-form-item :label='uiText("型号")'>
                 <el-input v-model="basicInfoForm.model" />
               </el-form-item>
-              <el-form-item label="颜色">
+              <el-form-item :label='uiText("颜色")'>
                 <el-input v-model="basicInfoForm.color" />
               </el-form-item>
-              <el-form-item label="材质">
+              <el-form-item :label='uiText("材质")'>
                 <el-input v-model="basicInfoForm.material" />
               </el-form-item>
-              <el-form-item label="包装方式">
+              <el-form-item :label='uiText("包装方式")'>
                 <el-input v-model="basicInfoForm.packageType" />
               </el-form-item>
-              <el-form-item label="表面工艺">
+              <el-form-item :label='uiText("表面工艺")'>
                 <el-input v-model="basicInfoForm.surfaceProcess" />
               </el-form-item>
-              <el-form-item label="预计发布时间">
+              <el-form-item :label='uiText("预计发布时间")'>
                 <el-date-picker v-model="basicInfoForm.expectedReleaseDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
               </el-form-item>
-              <el-form-item label="预计到达时间">
+              <el-form-item :label='uiText("预计到达时间")'>
                 <el-date-picker v-model="basicInfoForm.expectedArrivalAt" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" style="width: 100%" />
               </el-form-item>
-              <el-form-item label="实际到达时间">
+              <el-form-item :label='uiText("实际到达时间")'>
                 <el-date-picker v-model="basicInfoForm.actualArrivalAt" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" style="width: 100%" />
               </el-form-item>
               <template v-if="detailTarget.productType === 'model_variant'">
                 <el-form-item label="4G/5G">
                   <el-input v-model="basicInfoForm.networkType" />
                 </el-form-item>
-                <el-form-item label="大孔或精孔">
+                <el-form-item :label='uiText("大孔或精孔")'>
                   <el-input v-model="basicInfoForm.holeType" />
                 </el-form-item>
-                <el-form-item label="Tipo 类型">
+                <el-form-item :label='uiText("Tipo 类型")'>
                   <el-input v-model="basicInfoForm.tipo" />
                 </el-form-item>
-                <el-form-item label="紧急度">
+                <el-form-item :label='uiText("紧急度")'>
                   <el-input v-model="basicInfoForm.priority" />
                 </el-form-item>
-                <el-form-item label="制造地">
+                <el-form-item :label='uiText("制造地")'>
                   <el-input v-model="basicInfoForm.manufacturingLocation" />
                 </el-form-item>
-                <el-form-item label="模具印字">
+                <el-form-item :label='uiText("模具印字")'>
                   <el-input v-model="basicInfoForm.moldMarking" />
                 </el-form-item>
-                <el-form-item label="订单类型">
+                <el-form-item :label='uiText("订单类型")'>
                   <el-select v-model="basicInfoForm.requirementType" clearable style="width: 100%">
-                    <el-option label="客户订单" value="customer_requirement" />
-                    <el-option label="市场需求" value="market_requirement" />
+                    <el-option :label='uiText("客户订单")' value="customer_requirement" />
+                    <el-option :label='uiText("市场需求")' value="market_requirement" />
                   </el-select>
                 </el-form-item>
-                <el-form-item label="钉钉链接">
+                <el-form-item :label='uiText("钉钉链接")'>
                   <el-input v-model="basicInfoForm.referenceUrl" />
                 </el-form-item>
-                <el-form-item label="手机功能">
+                <el-form-item :label='uiText("手机功能")'>
                   <el-input v-model="basicInfoForm.mobileFunction" type="textarea" :rows="3" />
                 </el-form-item>
-                <el-form-item label="客户要求">
+                <el-form-item :label='uiText("客户要求")'>
                   <el-input v-model="basicInfoForm.customerRequirement" type="textarea" :rows="3" />
                 </el-form-item>
               </template>
-              <el-form-item label="核心工艺">
+              <el-form-item :label='uiText("核心工艺")'>
                 <el-input v-model="basicInfoForm.coreProcess" type="textarea" :rows="3" />
               </el-form-item>
-              <el-form-item label="组成说明">
+              <el-form-item :label='uiText("组成说明")'>
                 <el-input v-model="basicInfoForm.composition" type="textarea" :rows="3" />
               </el-form-item>
             </div>
           </el-form>
 
           <div v-else class="detail-grid">
-            <div class="info-card"><span class="subtle-text">{{ detailObjectLabel }}编码</span><strong>{{ getDetailDisplayCode(detailTarget) }}</strong></div>
-            <div class="info-card"><span class="subtle-text">{{ detailObjectLabel }}名称</span><strong>{{ detailTarget.productName }}</strong></div>
-            <div v-if="detailTarget.productType === 'sku'" class="info-card"><span class="subtle-text">Product 编码</span><strong>{{ detailTarget.productCode }}</strong></div>
-            <div class="info-card"><span class="subtle-text">系列</span><strong>{{ detailTarget.seriesName }}</strong></div>
-            <div v-if="isProductDetailDialog" class="info-card"><span class="subtle-text">产品类型</span><strong>{{ getProjectTypeLabel(detailTarget) }}</strong></div>
-            <div v-if="detailTarget.productType === 'model_variant' || detailTarget.productType === 'sku'" class="info-card"><span class="subtle-text">产品特定编码</span><strong>{{ detailTarget.productSpecificCode || '--' }}</strong></div>
-            <div v-if="detailTarget.productType === 'model_variant' || detailTarget.productType === 'sku'" class="info-card"><span class="subtle-text">手机型号编码</span><strong>{{ detailTarget.phoneModelCode || '--' }}</strong></div>
-            <div v-if="detailTarget.productType === 'model_variant' || detailTarget.productType === 'sku'" class="info-card"><span class="subtle-text">颜色编码</span><strong>{{ detailTarget.colorCode || '--' }}</strong></div>
-            <div class="info-card"><span class="subtle-text">版本</span><strong>{{ detailTarget.versionNo }}</strong></div>
-            <div class="info-card"><span class="subtle-text">型号</span><strong>{{ detailTarget.model || '--' }}</strong></div>
-            <div v-if="detailTarget.productType === 'model_variant'" class="info-card"><span class="subtle-text">模具编码</span><strong>{{ detailTarget.moldCodes || '--' }}</strong></div>
-            <div v-if="detailTarget.productType === 'model_variant'" class="info-card"><span class="subtle-text">运模时间</span><strong>{{ detailTarget.moldTransferAt ? formatDate(detailTarget.moldTransferAt, 'YYYY-MM-DD HH:mm') : '--' }}</strong></div>
-            <div v-if="detailTarget.productType === 'model_variant'" class="info-card"><span class="subtle-text">预计到达时间</span><strong>{{ detailTarget.expectedArrivalAt ? formatDate(detailTarget.expectedArrivalAt, 'YYYY-MM-DD HH:mm') : '--' }}</strong></div>
-            <div v-if="detailTarget.productType === 'model_variant'" class="info-card"><span class="subtle-text">实际到达时间</span><strong>{{ detailTarget.actualArrivalAt ? formatDate(detailTarget.actualArrivalAt, 'YYYY-MM-DD HH:mm') : '--' }}</strong></div>
-            <div class="info-card"><span class="subtle-text">颜色</span><strong>{{ formatScalarOrArray(detailTarget.color) }}</strong></div>
-            <div v-if="isProductDetailDialog" class="info-card"><span class="subtle-text">材质</span><strong>{{ formatScalarOrArray(detailTarget.material) }}</strong></div>
-            <div v-if="isProductDetailDialog" class="info-card"><span class="subtle-text">客户来源</span><strong>{{ detailTarget.customerName || '内部立项' }}</strong></div>
-            <div v-if="isProductDetailDialog" class="info-card"><span class="subtle-text">负责人</span><strong>{{ formatOwnerName(detailTarget.ownerUserName) }}</strong></div>
-            <div class="info-card"><span class="subtle-text">状态</span><StatusTag :status="detailTarget.status" object-type="product" /></div>
-            <div class="info-card"><span class="subtle-text">当前阶段</span><strong>{{ detailTarget.currentStage }}</strong></div>
-            <div v-if="isProductDetailDialog" class="info-card"><span class="subtle-text">资料完整率</span><strong>{{ Math.round(detailTarget.completionRate * 100) }}%</strong></div>
-            <div v-if="isProductDetailDialog && user.hasPermission('finance:read')" class="info-card"><span class="subtle-text">预算与费用</span><el-button link @click="activeDetailSection='cost'">按原币核对</el-button></div>
+            <div class="info-card"><span class="subtle-text">{{ detailObjectLabel }}{{ uiText("编码") }}</span><strong>{{ getDetailDisplayCode(detailTarget) }}</strong></div>
+            <div class="info-card"><span class="subtle-text">{{ detailObjectLabel }}{{ uiText("名称") }}</span><strong>{{ detailTarget.productName }}</strong></div>
+            <div v-if="detailTarget.productType === 'sku'" class="info-card"><span class="subtle-text">{{ uiText("Product 编码") }}</span><strong>{{ detailTarget.productCode }}</strong></div>
+            <div class="info-card"><span class="subtle-text">{{ uiText("系列") }}</span><strong>{{ detailTarget.seriesName }}</strong></div>
+            <div v-if="isProductDetailDialog" class="info-card"><span class="subtle-text">{{ uiText("产品类型") }}</span><strong>{{ uiText(String((getProjectTypeLabel(detailTarget)) ?? '')) }}</strong></div>
+            <div v-if="detailTarget.productType === 'model_variant' || detailTarget.productType === 'sku'" class="info-card"><span class="subtle-text">{{ uiText("产品特定编码") }}</span><strong>{{ detailTarget.productSpecificCode || '--' }}</strong></div>
+            <div v-if="detailTarget.productType === 'model_variant' || detailTarget.productType === 'sku'" class="info-card"><span class="subtle-text">{{ uiText("手机型号编码") }}</span><strong>{{ detailTarget.phoneModelCode || '--' }}</strong></div>
+            <div v-if="detailTarget.productType === 'model_variant' || detailTarget.productType === 'sku'" class="info-card"><span class="subtle-text">{{ uiText("颜色编码") }}</span><strong>{{ detailTarget.colorCode || '--' }}</strong></div>
+            <div class="info-card"><span class="subtle-text">{{ uiText("版本") }}</span><strong>{{ detailTarget.versionNo }}</strong></div>
+            <div class="info-card"><span class="subtle-text">{{ uiText("型号") }}</span><strong>{{ detailTarget.model || '--' }}</strong></div>
+            <div v-if="detailTarget.productType === 'model_variant'" class="info-card"><span class="subtle-text">{{ uiText("模具编码") }}</span><strong>{{ detailTarget.moldCodes || '--' }}</strong></div>
+            <div v-if="detailTarget.productType === 'model_variant'" class="info-card"><span class="subtle-text">{{ uiText("运模时间") }}</span><strong>{{ detailTarget.moldTransferAt ? formatDate(detailTarget.moldTransferAt, 'YYYY-MM-DD HH:mm') : '--' }}</strong></div>
+            <div v-if="detailTarget.productType === 'model_variant'" class="info-card"><span class="subtle-text">{{ uiText("预计到达时间") }}</span><strong>{{ detailTarget.expectedArrivalAt ? formatDate(detailTarget.expectedArrivalAt, 'YYYY-MM-DD HH:mm') : '--' }}</strong></div>
+            <div v-if="detailTarget.productType === 'model_variant'" class="info-card"><span class="subtle-text">{{ uiText("实际到达时间") }}</span><strong>{{ detailTarget.actualArrivalAt ? formatDate(detailTarget.actualArrivalAt, 'YYYY-MM-DD HH:mm') : '--' }}</strong></div>
+            <div class="info-card"><span class="subtle-text">{{ uiText("颜色") }}</span><strong>{{ formatScalarOrArray(detailTarget.color) }}</strong></div>
+            <div v-if="isProductDetailDialog" class="info-card"><span class="subtle-text">{{ uiText("材质") }}</span><strong>{{ formatScalarOrArray(detailTarget.material) }}</strong></div>
+            <div v-if="isProductDetailDialog" class="info-card"><span class="subtle-text">{{ uiText("客户来源") }}</span><strong>{{ detailTarget.customerName || uiText('内部立项') }}</strong></div>
+            <div v-if="isProductDetailDialog" class="info-card"><span class="subtle-text">{{ uiText("负责人") }}</span><strong>{{ formatOwnerName(detailTarget.ownerUserName) }}</strong></div>
+            <div class="info-card"><span class="subtle-text">{{ uiText("状态") }}</span><StatusTag :status="detailTarget.status" object-type="product" /></div>
+            <div class="info-card"><span class="subtle-text">{{ uiText("当前阶段") }}</span><strong>{{ detailTarget.currentStage }}</strong></div>
+            <div v-if="isProductDetailDialog" class="info-card"><span class="subtle-text">{{ uiText("资料完整率") }}</span><strong>{{ Math.round(detailTarget.completionRate * 100) }}%</strong></div>
+            <div v-if="isProductDetailDialog && user.hasPermission('finance:read')" class="info-card"><span class="subtle-text">{{ uiText("预算与费用") }}</span><el-button link @click="activeDetailSection='cost'">{{ uiText("按原币核对") }}</el-button></div>
             <template v-if="detailTarget.productType === 'model_variant' && basicInfoExtra">
               <div class="info-card"><span class="subtle-text">4G/5G</span><strong>{{ basicInfoExtra.networkType || '--' }}</strong></div>
-              <div class="info-card"><span class="subtle-text">大孔或精孔</span><strong>{{ basicInfoExtra.holeType || '--' }}</strong></div>
-              <div class="info-card"><span class="subtle-text">Tipo 类型</span><strong>{{ basicInfoExtra.tipo || '--' }}</strong></div>
-              <div class="info-card"><span class="subtle-text">紧急度</span><strong>{{ basicInfoExtra.priority || '--' }}</strong></div>
-              <div class="info-card"><span class="subtle-text">制造地</span><strong>{{ basicInfoExtra.manufacturingLocation || '--' }}</strong></div>
-              <div class="info-card"><span class="subtle-text">模具印字</span><strong>{{ basicInfoExtra.moldMarking || '--' }}</strong></div>
-              <div class="info-card"><span class="subtle-text">客户要求</span><strong>{{ basicInfoExtra.customerRequirement || '--' }}</strong></div>
+              <div class="info-card"><span class="subtle-text">{{ uiText("大孔或精孔") }}</span><strong>{{ basicInfoExtra.holeType || '--' }}</strong></div>
+              <div class="info-card"><span class="subtle-text">{{ uiText("Tipo 类型") }}</span><strong>{{ basicInfoExtra.tipo || '--' }}</strong></div>
+              <div class="info-card"><span class="subtle-text">{{ uiText("紧急度") }}</span><strong>{{ basicInfoExtra.priority || '--' }}</strong></div>
+              <div class="info-card"><span class="subtle-text">{{ uiText("制造地") }}</span><strong>{{ basicInfoExtra.manufacturingLocation || '--' }}</strong></div>
+              <div class="info-card"><span class="subtle-text">{{ uiText("模具印字") }}</span><strong>{{ basicInfoExtra.moldMarking || '--' }}</strong></div>
+              <div class="info-card"><span class="subtle-text">{{ uiText("客户要求") }}</span><strong>{{ basicInfoExtra.customerRequirement || '--' }}</strong></div>
             </template>
           </div>
 
           <section v-if="hasDetailColorSummary" class="product-color-summary">
             <div class="detail-section__head">
               <div>
-                <h4 class="section-title">颜色归档</h4>
-                <p class="page-panel-desc">按真实产品线汇总 SKU 实际颜色与 BOM/生产决策颜色。</p>
+                <h4 class="section-title">{{ uiText("颜色归档") }}</h4>
+                <p class="page-panel-desc">{{ uiText("按真实产品线汇总 SKU 实际颜色与 BOM/生产决策颜色。") }}</p>
               </div>
             </div>
             <div class="product-color-summary__groups">
               <div class="product-color-summary__group">
-                <span class="subtle-text">SKU 实际颜色 {{ detailTarget.colorSummary?.skuColorCount || 0 }} 个</span>
+                <span class="subtle-text">{{ uiText("SKU 实际颜色 ") }}{{ detailTarget.colorSummary?.skuColorCount || 0 }}{{ uiText(" 个") }}</span>
                 <div class="product-color-tags">
                   <el-tag
                     v-for="color in detailTarget.colorSummary?.skuColors || []"
                     :key="`sku-${color.colorCode || color.colorName}`"
                     effect="light"
                   >
-                    {{ getColorUsageLabel(color) }} · {{ color.skuCount }} SKU
+                    {{ uiText(String((getColorUsageLabel(color)) ?? '')) }} · {{ color.skuCount }} SKU
                   </el-tag>
                 </div>
               </div>
               <div class="product-color-summary__group">
-                <span class="subtle-text">BOM/生产决策颜色 {{ detailTarget.colorSummary?.productionColorCount || 0 }} 个</span>
+                <span class="subtle-text">{{ uiText("BOM/生产决策颜色 ") }}{{ detailTarget.colorSummary?.productionColorCount || 0 }}{{ uiText(" 个") }}</span>
                 <div class="product-color-tags">
                   <el-tag
                     v-for="color in detailTarget.colorSummary?.productionColors || []"
@@ -2124,7 +2114,7 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
                     type="success"
                     effect="light"
                   >
-                    {{ getColorUsageLabel(color) }}
+                    {{ uiText(String((getColorUsageLabel(color)) ?? '')) }}
                   </el-tag>
                 </div>
               </div>
@@ -2135,7 +2125,7 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
               type="warning"
               show-icon
               :closable="false"
-              :title="`颜色差异：仅 SKU 层 ${detailTarget.colorSummary?.skuOnlyColors?.map(getColorUsageLabel).join('、') || '无'}；仅 BOM/生产决策层 ${detailTarget.colorSummary?.productionOnlyColors?.map(getColorUsageLabel).join('、') || '无'}`"
+              :title="uiText('颜色差异：仅 SKU 层 {value0}；仅 BOM/生产决策层 {value1}',{value0:(detailTarget.colorSummary?.skuOnlyColors?.map(getColorUsageLabel).join('、') || '无'),value1:(detailTarget.colorSummary?.productionOnlyColors?.map(getColorUsageLabel).join('、') || '无')})"
             />
           </section>
         </section>
@@ -2143,8 +2133,8 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
         <section v-if="isProductDetailDialog && activeDetailSection === 'project_flow' && timelineStarted !== false" class="detail-section">
           <div class="detail-section__head">
             <div>
-              <h4 class="section-title">项目流程</h4>
-              <p class="page-panel-desc">展示每个环节经历了什么、由谁接收、由谁推动以及推动时间。</p>
+              <h4 class="section-title">{{ uiText("项目流程") }}</h4>
+              <p class="page-panel-desc">{{ uiText("展示每个环节经历了什么、由谁接收、由谁推动以及推动时间。") }}</p>
             </div>
           </div>
           <section class="product-flow-board">
@@ -2160,7 +2150,7 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
                 <span class="flow-stage-card__name">{{ stage.stageName }}</span>
                 <span class="flow-stage-card__phase">{{ stage.phaseName }}</span>
                 <el-tag size="small" effect="light" :type="getFlowStatusType(stage.status)">
-                  {{ getFlowStatusLabel(stage.status) }}
+                  {{ uiText(String((getFlowStatusLabel(stage.status)) ?? '')) }}
                 </el-tag>
               </button>
             </aside>
@@ -2172,47 +2162,45 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
                   <p>{{ activeProductFlowStage.summary }}</p>
                 </div>
                 <el-tag :type="getFlowStatusType(activeProductFlowStage.status)" effect="light">
-                  {{ getFlowStatusLabel(activeProductFlowStage.status) }}
+                  {{ uiText(String((getFlowStatusLabel(activeProductFlowStage.status)) ?? '')) }}
                 </el-tag>
               </div>
 
               <div class="flow-stage-meta-grid">
                 <div class="info-card">
-                  <span class="subtle-text">责任角色</span>
+                  <span class="subtle-text">{{ uiText("责任角色") }}</span>
                   <strong>{{ activeProductFlowStage.receiverRole || '--' }}</strong>
                 </div>
                 <div class="info-card">
-                  <span class="subtle-text">接收人 / 时间</span>
+                  <span class="subtle-text">{{ uiText("接收人 / 时间") }}</span>
                   <strong>{{ activeProductFlowStage.receiverUserName || '--' }}</strong>
                   <span class="subtle-text">{{ activeProductFlowStage.receivedAt || '--' }}</span>
                 </div>
                 <div class="info-card">
-                  <span class="subtle-text">推动人 / 时间</span>
+                  <span class="subtle-text">{{ uiText("推动人 / 时间") }}</span>
                   <strong>{{ activeProductFlowStage.promoterUserName || activeProductFlowStage.promoterRole || '--' }}</strong>
                   <span class="subtle-text">{{ activeProductFlowStage.promotedAt || '--' }}</span>
                 </div>
                 <div class="info-card">
-                  <span class="subtle-text">下一步</span>
+                  <span class="subtle-text">{{ uiText("下一步") }}</span>
                   <strong>{{ activeProductFlowStage.nextAction || '--' }}</strong>
                 </div>
                 <div class="info-card">
-                  <span class="subtle-text">风险提示</span>
-                  <strong>{{ activeProductFlowStage.riskNote || '暂无风险' }}</strong>
+                  <span class="subtle-text">{{ uiText("风险提示") }}</span>
+                  <strong>{{ activeProductFlowStage.riskNote || uiText('暂无风险') }}</strong>
                 </div>
               </div>
 
               <div class="flow-child-node-list">
                 <div v-for="node in activeProductFlowStage.childNodes" :key="node.nodeKey" class="flow-child-node">
-                  <strong>第 {{ node.stepNo }} 步：{{ node.nodeName }}</strong>
+                  <strong>{{ uiText("第 ") }}{{ node.stepNo }}{{ uiText(" 步：") }}{{ node.nodeName }}</strong>
                   <div>
-                    <span v-if="node.actionLabel" class="subtle-text">{{ node.actionLabel }}</span>
-                    <el-button v-if="node.processConfirmation || isProcessConfirmationNode(node)" size="small" type="primary" plain @click="openProductionConfirmation('operations')">敲定投产工序</el-button>
-                    <el-button v-if="node.nodeKey === 'PRODUCT_LINE_PRODUCTION_DECISION_STEP'" size="small" type="primary" @click="openProductionConfirmation('colors')">确认批量投产颜色</el-button>
-                    <el-tag v-if="node.documentCount" size="small" type="success" effect="light">
-                      已上传 {{ node.documentCount }} 个
-                    </el-tag>
+                    <span v-if="node.actionLabel" class="subtle-text">{{ uiText(String((node.actionLabel) ?? '')) }}</span>
+                    <el-button v-if="node.processConfirmation || isProcessConfirmationNode(node)" size="small" type="primary" plain @click="openProductionConfirmation('operations')">{{ uiText("敲定投产工序") }}</el-button>
+                    <el-button v-if="node.nodeKey === 'PRODUCT_LINE_PRODUCTION_DECISION_STEP'" size="small" type="primary" @click="openProductionConfirmation('colors')">{{ uiText("确认批量投产颜色") }}</el-button>
+                    <el-tag v-if="node.documentCount" size="small" type="success" effect="light">{{ uiText(" 已上传 ") }}{{ node.documentCount }}{{ uiText(" 个 ") }}</el-tag>
                     <el-tag size="small" effect="light" :type="getFlowStatusType(node.status)">
-                      {{ getFlowStatusLabel(node.status) }}
+                      {{ uiText(String((getFlowStatusLabel(node.status)) ?? '')) }}
                     </el-tag>
                   </div>
                 </div>
@@ -2248,26 +2236,26 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
         </section>
 
         <section v-if="isProductDetailDialog && activeDetailSection === 'business'" class="detail-section">
-          <h4 class="section-title">商务区</h4>
-          <el-button v-if="user.hasPermission('finance:read')" @click="activeDetailSection='cost'">打开统一费用归集（按原币，不混加）</el-button>
+          <h4 class="section-title">{{ uiText("商务区") }}</h4>
+          <el-button v-if="user.hasPermission('finance:read')" @click="activeDetailSection='cost'">{{ uiText("打开统一费用归集（按原币，不混加）") }}</el-button>
           <el-table :data="detailPresentation?.suppliers || []" border stripe size="small">
-            <el-table-column prop="supplierName" label="供应商" min-width="160" />
-            <el-table-column prop="role" label="角色" width="140" />
-            <el-table-column prop="statusLabel" label="状态" width="120" />
-            <el-table-column prop="note" label="说明" min-width="220" />
+            <el-table-column prop="supplierName" :label='uiText("供应商")' min-width="160" />
+            <el-table-column prop="role" :label='uiText("角色")' width="140" />
+            <el-table-column prop="statusLabel" :label='uiText("状态")' width="120" />
+            <el-table-column prop="note" :label='uiText("说明")' min-width="220" />
           </el-table>
         </section>
 
         <section v-if="isProductDetailDialog && activeDetailSection === 'quality'" class="detail-section">
-          <h4 class="section-title">质量区</h4>
+          <h4 class="section-title">{{ uiText("质量区") }}</h4>
           <el-table :data="detailPresentation?.qualityRecords || []" border stripe size="small">
-            <el-table-column prop="testItem" label="测试项目" min-width="150" />
-            <el-table-column prop="resultLabel" label="测试结果" width="120" />
-            <el-table-column prop="owner" label="负责人" width="140" />
-            <el-table-column prop="testedAt" label="测试时间" width="130" />
-            <el-table-column prop="note" label="结论说明" min-width="260" />
+            <el-table-column prop="testItem" :label='uiText("测试项目")' min-width="150" />
+            <el-table-column prop="resultLabel" :label='uiText("测试结果")' width="120" />
+            <el-table-column prop="owner" :label='uiText("负责人")' width="140" />
+            <el-table-column prop="testedAt" :label='uiText("测试时间")' width="130" />
+            <el-table-column prop="note" :label='uiText("结论说明")' min-width="260" />
           </el-table>
-          <el-empty v-if="!detailPresentation?.qualityRecords?.length" description="暂无质量记录" />
+          <el-empty v-if="!detailPresentation?.qualityRecords?.length" :description='uiText("暂无质量记录")' />
         </section>
 
         <section v-if="activeDetailSection === 'cost' && user.hasPermission('finance:read')" class="detail-section">
@@ -2296,8 +2284,8 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
         <section v-if="!isProductDetailDialog && activeDetailSection === 'project_flow' && timelineStarted !== false" class="detail-section">
           <div class="detail-section__head">
             <div>
-              <h4 class="section-title">项目流程</h4>
-              <p class="page-panel-desc">SKU 对应新型号线流程，展示差异扩展从需求确认到版本发布的接收、推动与时间记录。</p>
+              <h4 class="section-title">{{ uiText("项目流程") }}</h4>
+              <p class="page-panel-desc">{{ uiText("SKU 对应新型号线流程，展示差异扩展从需求确认到版本发布的接收、推动与时间记录。") }}</p>
             </div>
           </div>
 
@@ -2314,7 +2302,7 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
                 <span class="flow-stage-card__name">{{ stage.stageName }}</span>
                 <span class="flow-stage-card__phase">{{ stage.phaseName }}</span>
                 <el-tag size="small" effect="light" :type="getFlowStatusType(stage.status)">
-                  {{ getFlowStatusLabel(stage.status) }}
+                  {{ uiText(String((getFlowStatusLabel(stage.status)) ?? '')) }}
                 </el-tag>
               </button>
             </aside>
@@ -2326,47 +2314,45 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
                   <p>{{ activeSkuFlowStage.summary }}</p>
                 </div>
                 <el-tag :type="getFlowStatusType(activeSkuFlowStage.status)" effect="light">
-                  {{ getFlowStatusLabel(activeSkuFlowStage.status) }}
+                  {{ uiText(String((getFlowStatusLabel(activeSkuFlowStage.status)) ?? '')) }}
                 </el-tag>
               </div>
 
               <div class="flow-stage-meta-grid">
                 <div class="info-card">
-                  <span class="subtle-text">责任角色</span>
+                  <span class="subtle-text">{{ uiText("责任角色") }}</span>
                   <strong>{{ activeSkuFlowStage.receiverRole || '--' }}</strong>
                 </div>
                 <div class="info-card">
-                  <span class="subtle-text">接收人 / 时间</span>
+                  <span class="subtle-text">{{ uiText("接收人 / 时间") }}</span>
                   <strong>{{ activeSkuFlowStage.receiverUserName || '--' }}</strong>
                   <span class="subtle-text">{{ activeSkuFlowStage.receivedAt || '--' }}</span>
                 </div>
                 <div class="info-card">
-                  <span class="subtle-text">推动人 / 时间</span>
+                  <span class="subtle-text">{{ uiText("推动人 / 时间") }}</span>
                   <strong>{{ activeSkuFlowStage.promoterUserName || activeSkuFlowStage.promoterRole || '--' }}</strong>
                   <span class="subtle-text">{{ activeSkuFlowStage.promotedAt || '--' }}</span>
                 </div>
                 <div class="info-card">
-                  <span class="subtle-text">下一步</span>
+                  <span class="subtle-text">{{ uiText("下一步") }}</span>
                   <strong>{{ activeSkuFlowStage.nextAction || '--' }}</strong>
                 </div>
                 <div class="info-card">
-                  <span class="subtle-text">风险提示</span>
-                  <strong>{{ activeSkuFlowStage.riskNote || '暂无风险' }}</strong>
+                  <span class="subtle-text">{{ uiText("风险提示") }}</span>
+                  <strong>{{ activeSkuFlowStage.riskNote || uiText('暂无风险') }}</strong>
                 </div>
               </div>
 
               <div class="flow-child-node-list">
                 <div v-for="node in activeSkuFlowStage.childNodes" :key="node.nodeKey" class="flow-child-node">
-                  <strong>第 {{ node.stepNo }} 步：{{ node.nodeName }}</strong>
+                  <strong>{{ uiText("第 ") }}{{ node.stepNo }}{{ uiText(" 步：") }}{{ node.nodeName }}</strong>
                   <div>
-                    <span v-if="node.actionLabel" class="subtle-text">{{ node.actionLabel }}</span>
-                    <el-button v-if="node.processConfirmation || isProcessConfirmationNode(node)" size="small" type="primary" plain @click="openProductionConfirmation('operations')">敲定投产工序</el-button>
-                    <el-button v-if="node.nodeKey === 'MODEL_VARIANT_MOLD_TRANSFER'" size="small" type="primary" @click="openProductionConfirmation('colors')">确认批量投产并创建 SKU</el-button>
-                    <el-tag v-if="node.documentCount" size="small" type="success" effect="light">
-                      已上传 {{ node.documentCount }} 个
-                    </el-tag>
+                    <span v-if="node.actionLabel" class="subtle-text">{{ uiText(String((node.actionLabel) ?? '')) }}</span>
+                    <el-button v-if="node.processConfirmation || isProcessConfirmationNode(node)" size="small" type="primary" plain @click="openProductionConfirmation('operations')">{{ uiText("敲定投产工序") }}</el-button>
+                    <el-button v-if="node.nodeKey === 'MODEL_VARIANT_MOLD_TRANSFER'" size="small" type="primary" @click="openProductionConfirmation('colors')">{{ uiText("确认批量投产并创建 SKU") }}</el-button>
+                    <el-tag v-if="node.documentCount" size="small" type="success" effect="light">{{ uiText(" 已上传 ") }}{{ node.documentCount }}{{ uiText(" 个 ") }}</el-tag>
                     <el-tag size="small" effect="light" :type="getFlowStatusType(node.status)">
-                      {{ getFlowStatusLabel(node.status) }}
+                      {{ uiText(String((getFlowStatusLabel(node.status)) ?? '')) }}
                     </el-tag>
                   </div>
                 </div>
@@ -2375,37 +2361,37 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
               <el-collapse v-model="skuFlowTableExpanded" class="sku-flow-table-collapse">
                 <el-collapse-item name="detail">
                   <template #title>
-                    <span>查看明细记录（{{ skuProjectFlowRows.length }} 条）</span>
+                    <span>{{ uiText("查看明细记录（") }}{{ skuProjectFlowRows.length }}{{ uiText(" 条）") }}</span>
                   </template>
                   <el-table :data="skuProjectFlowRows" border stripe size="small">
-                    <el-table-column prop="seqNo" label="顺序" width="70" />
-                    <el-table-column prop="stageName" label="新型号线阶段" min-width="140" />
-                    <el-table-column prop="nodeName" label="环节" min-width="140" />
-                    <el-table-column prop="phaseName" label="阶段" min-width="110" />
-                    <el-table-column prop="experienceSummary" label="经历内容" min-width="200" />
-                    <el-table-column label="接收人" width="110">
+                    <el-table-column prop="seqNo" :label='uiText("顺序")' width="70" />
+                    <el-table-column prop="stageName" :label='uiText("新型号线阶段")' min-width="140" />
+                    <el-table-column prop="nodeName" :label='uiText("环节")' min-width="140" />
+                    <el-table-column prop="phaseName" :label='uiText("阶段")' min-width="110" />
+                    <el-table-column prop="experienceSummary" :label='uiText("经历内容")' min-width="200" />
+                    <el-table-column :label='uiText("接收人")' width="110">
                       <template #default="{ row }">{{ row.receiverUserName || row.receiverRole || '--' }}</template>
                     </el-table-column>
-                    <el-table-column label="接收时间" width="110">
+                    <el-table-column :label='uiText("接收时间")' width="110">
                       <template #default="{ row }">{{ row.receivedAt || '--' }}</template>
                     </el-table-column>
-                    <el-table-column label="推动人" width="110">
+                    <el-table-column :label='uiText("推动人")' width="110">
                       <template #default="{ row }">{{ row.promoterUserName || row.promoterRole || '--' }}</template>
                     </el-table-column>
-                    <el-table-column label="推动时间" width="110">
+                    <el-table-column :label='uiText("推动时间")' width="110">
                       <template #default="{ row }">{{ row.promotedAt || '--' }}</template>
                     </el-table-column>
-                    <el-table-column label="状态" width="100">
+                    <el-table-column :label='uiText("状态")' width="100">
                       <template #default="{ row }">
                         <el-tag :type="getFlowStatusType(row.status)" effect="light" size="small">
-                          {{ getFlowStatusLabel(row.status) }}
+                          {{ uiText(String((getFlowStatusLabel(row.status)) ?? '')) }}
                         </el-tag>
                       </template>
                     </el-table-column>
-                    <el-table-column label="下一步" min-width="160">
+                    <el-table-column :label='uiText("下一步")' min-width="160">
                       <template #default="{ row }">{{ row.nextAction || '--' }}</template>
                     </el-table-column>
-                    <el-table-column label="资料数" width="80">
+                    <el-table-column :label='uiText("资料数")' width="80">
                       <template #default="{ row }">{{ row.documentCount ?? 0 }}</template>
                     </el-table-column>
                   </el-table>
@@ -2413,7 +2399,7 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
               </el-collapse>
             </main>
           </section>
-          <el-empty v-else description="暂无项目流程" />
+          <el-empty v-else :description='uiText("暂无项目流程")' />
         </section>
 
         <section v-if="!isProductDetailDialog && activeDetailSection === 'production_docs'" class="detail-section">
@@ -2424,7 +2410,7 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
         </section>
       </div>
       <template #footer>
-        <el-button @click="detailVisible = false">关闭</el-button>
+        <el-button @click="detailVisible = false">{{ uiText("关闭") }}</el-button>
       </template>
 
       <!-- 生产资料预览 -->
@@ -2444,11 +2430,11 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
 
     <el-dialog
       v-model="importVisible"
-      :title="importType === 'product' ? '导入产品数据' : '导入 SKU 数据'"
+      :title="importType === 'product' ? uiText('导入产品数据') : uiText('导入 SKU 数据')"
       width="640px"
       @closed="resetArchiveImportState"
     >
-      <el-alert type="info" show-icon :closable="false" title="用于导入历史归档数据，导入后仍按 Product 对象保存和追溯。" />
+      <el-alert type="info" show-icon :closable="false" :title='uiText("用于导入历史归档数据，导入后仍按 Product 对象保存和追溯。")' />
       <div class="archive-upload">
         <input
           :key="archiveImportInputKey"
@@ -2458,7 +2444,7 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
           :disabled="archiveImportLoading"
           @change="handleArchiveImportFileChange"
         />
-        <div class="el-upload__tip">支持 xlsx / xls / csv；SKU 导入仍按 Product 主数据导入，文件需包含 SKU 类型字段。</div>
+        <div class="el-upload__tip">{{ uiText("支持 xlsx / xls / csv；SKU 导入仍按 Product 主数据导入，文件需包含 SKU 类型字段。") }}</div>
       </div>
       <el-alert
         v-if="archiveImportPreview"
@@ -2466,11 +2452,11 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
         :type="archiveImportPreview.failCount > 0 ? 'warning' : 'success'"
         show-icon
         :closable="false"
-        :title="`预览结果：共 ${archiveImportPreview.totalCount} 条，成功 ${archiveImportPreview.successCount} 条，失败 ${archiveImportPreview.failCount} 条`"
+        :title="uiText('预览结果：共 {value0} 条，成功 {value1} 条，失败 {value2} 条',{value0:(archiveImportPreview.totalCount),value1:(archiveImportPreview.successCount),value2:(archiveImportPreview.failCount)})"
       />
       <template #footer>
-        <el-button :disabled="archiveImportLoading" @click="closeArchiveImport">取消</el-button>
-        <el-button type="primary" :loading="archiveImportLoading" @click="submitArchiveImport">开始导入</el-button>
+        <el-button :disabled="archiveImportLoading" @click="closeArchiveImport">{{ uiText("取消") }}</el-button>
+        <el-button type="primary" :loading="archiveImportLoading" @click="submitArchiveImport">{{ uiText("开始导入") }}</el-button>
       </template>
     </el-dialog>
     <MetadataDialog v-model="productionEditor" kind="product" :items="productionTargets" @saved="selectedProductionRows=[];loadData()"/>

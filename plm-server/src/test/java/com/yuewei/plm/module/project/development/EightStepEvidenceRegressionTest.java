@@ -28,8 +28,9 @@ class EightStepEvidenceRegressionTest {
     final PhoneModelReferenceService phones=mock(PhoneModelReferenceService.class);
     final LaunchReviewWorkflow reviews=new LaunchReviewWorkflow(jdbc,access,store);
     final LaunchDevelopmentWorkflow flow=new LaunchDevelopmentWorkflow(jdbc,new ObjectMapper(),access,store,molds,mock(DevelopmentFinanceService.class),reviews,phones);
+    final com.yuewei.plm.module.attachment.repository.AttachmentRepository attachments=mock(com.yuewei.plm.module.attachment.repository.AttachmentRepository.class);
     final ProductDevelopmentService service=spy(new ProductDevelopmentService(jdbc,new ObjectMapper(),access,products,
-        mock(com.yuewei.plm.module.attachment.repository.AttachmentRepository.class),
+        attachments,
         mock(com.yuewei.plm.module.operationlog.service.OperationLogService.class),store,
         mock(com.yuewei.plm.module.inventory.service.InventorySupplierService.class),flow,reviews,mock(DevelopmentUnitCostWorkflow.class)));
 
@@ -44,7 +45,7 @@ class EightStepEvidenceRegressionTest {
         when(phones.members(List.of(10L),true)).thenReturn(Map.of(10L,member));
         when(phones.requireEnabledModels(List.of(10L))).thenReturn(Map.of(10L,member));
     }
-    Map<String,Object> drawing(long id){return Map.of("type","file","id",id,"familyId",11L,"category","drawing","versionNo","V"+id);}
+    Map<String,Object> drawing(long id){return Map.of("type","file","id",id,"familyId",11L,"category","drawing","fileExt","step","versionNo","V"+id);}
     DevelopmentModels.RoundInput receipt(String result,List<DevelopmentModels.MaterialReference> refs){
         return new DevelopmentModels.RoundInput("sample",LocalDate.now(),"3D样到货",result,"","","",refs,true);
     }
@@ -328,6 +329,7 @@ class EightStepEvidenceRegressionTest {
             "details",Map.of("samplePurpose","prototype_3d","phoneModelIds",List.of(10L),"requirementVersion",1L));
     }
     Map<String,Object> photo(){return Map.of("type","file","id",91L,"category","sample_image");}
+    Map<String,Object> render(long id){return Map.of("type","file","id",100L+id,"familyId",101L,"category","render_3d","fileExt","png","versionNo","V"+id);}
 
     @Test void returningToPrototypeRequiresANewReceiptAndKeepsTheSupersededStepEvidenceInTheReturnEvent(){
         var state=state();var original=receivedPrototype(11L,List.of(drawing(1L),photo()));
@@ -361,13 +363,104 @@ class EightStepEvidenceRegressionTest {
             .isInstanceOf(com.yuewei.plm.common.exception.BusinessException.class).hasMessageContaining("版本缺失");
     }
 
-    @Test void aLegacyPrototypeWithNoDrawingBasisPointsBackToDrawingWithoutManufacturingThatEvidence(){
+    @Test void aLater3dFileUsesTheActualSampleReferencesWithoutRewritingTheConfirmedDrawingStep(){
         var state=state();state.put("prototypeRoundId",11L);
-        doReturn(List.of(receivedPrototype(11L,List.of(drawing(1L),photo())))).when(service).allRounds(42L);
+        var actual=receivedPrototype(11L,List.of(drawing(1L),photo()));doReturn(List.of(actual)).when(service).allRounds(42L);
         var checks=flow.stageChecks(42L,3,state,service);
-        assertThat(checks).hasSize(1);assertThat(checks.get(0).code()).isEqualTo("PROTOTYPE_DRAWING");
-        assertThat(checks.get(0).target()).isEqualTo("previous-stage");assertThat(checks.get(0).complete()).isFalse();
-        assertThatThrownBy(()->flow.currentPrototype(42L,state,service)).isInstanceOf(com.yuewei.plm.common.exception.BusinessException.class).hasMessageContaining("返回画3D产品图");
+        assertThat(checks).extracting(DevelopmentRules.ReadinessCheck::code).containsExactly("PROTOTYPE_RECEIPT","PROTOTYPE_DRAWING");
+        assertThat(checks).allMatch(DevelopmentRules.ReadinessCheck::complete);assertThat(check(checks,"PROTOTYPE_DRAWING").blocking()).isFalse();
+        assertThat(flow.currentPrototype(42L,state,service)).isSameAs(actual);flow.confirmStage(42L,3,state,service);
+        assertThat(DevelopmentWorkflowStore.map(state.get("stage3Basis"))).containsEntry("sample",actual);
         assertThat(state).doesNotContainKey("stage2Basis");verifyNoInteractions(molds);
+    }
+
+    @Test void anImageIsNotA3dDrawingAndARealReceiptCanProceedWithTheSameTechnicalImageStillAdopted(){
+        var state=state();var image=Map.<String,Object>of("type","file","id",31L,"familyId",31L,"category","drawing","fileExt","png","versionNo","V1");
+        var original=Map.<String,Object>of("references",List.of(image));state.put("stage2Basis",original);
+        var actual=receivedPrototype(11L,List.of(image,photo()));doReturn(List.of(actual)).when(service).allRounds(42L);
+        var checks=flow.stageChecks(42L,3,state,service);assertThat(check(checks,"PROTOTYPE_RECEIPT").complete()).isTrue();
+        var reminder=check(checks,"PROTOTYPE_DRAWING");assertThat(reminder.complete()).isFalse();assertThat(reminder.satisfied()).isTrue();assertThat(reminder.message()).contains("可后补");
+        flow.confirmStage(42L,3,state,service);assertThat(state.get("stage2Basis")).isSameAs(original);
+    }
+
+    @Test void first3dSupplementKeepsEveryExisting2dAndBomVersionExact(){
+        var state=state();var image=Map.<String,Object>of("type","file","id",31L,"familyId",31L,"category","drawing","fileExt","pdf","versionNo","V1");
+        var bom=Map.<String,Object>of("type","bom","id",41L,"versionNo","V1","content",Map.of("material","PC"));
+        var original=Map.<String,Object>of("references",List.of(image,bom));state.put("stage2Basis",original);
+        var actual=receivedPrototype(11L,List.of(image,bom,drawing(1L),photo()));doReturn(List.of(actual)).when(service).allRounds(42L);
+        assertThat(flow.currentPrototype(42L,state,service)).isSameAs(actual);
+        var changedImage=new LinkedHashMap<>(image);changedImage.put("versionNo","V2");
+        doReturn(List.of(receivedPrototype(11L,List.of(changedImage,bom,drawing(1L),photo())))).when(service).allRounds(42L);
+        assertThatThrownBy(()->flow.currentPrototype(42L,state,service)).hasMessageContaining("版本或内容与来源验证不同");
+        var changedBom=new LinkedHashMap<>(bom);changedBom.put("content",Map.of("material","TPU"));
+        doReturn(List.of(receivedPrototype(11L,List.of(image,changedBom,drawing(1L),photo())))).when(service).allRounds(42L);
+        assertThatThrownBy(()->flow.currentPrototype(42L,state,service)).hasMessageContaining("版本或内容与来源验证不同");
+        assertThat(state.get("stage2Basis")).isSameAs(original);
+    }
+
+    @Test void alreadyAdopted3dCannotBeReplacedAndMissingDrawingDoesNotAuthorizeANewBom(){
+        var state=state();state.put("stage2Basis",Map.of("references",List.of(drawing(1L))));
+        doReturn(List.of(receivedPrototype(11L,List.of(drawing(2L),photo())))).when(service).allRounds(42L);
+        assertThatThrownBy(()->flow.currentPrototype(42L,state,service)).hasMessageContaining("版本或内容与来源验证不同");
+        state.remove("stage2Basis");var bom=Map.<String,Object>of("type","bom","id",41L,"versionNo","V1");
+        doReturn(List.of(receivedPrototype(11L,List.of(bom,drawing(1L),photo())))).when(service).allRounds(42L);
+        assertThatThrownBy(()->flow.currentPrototype(42L,state,service)).hasMessageContaining("版本或内容与来源验证不同");
+        assertThat(state).doesNotContainKeys("stage2Basis","stage3Basis");
+    }
+
+    @Test void missing3dDoesNotPermitAStaleRequirementOrAnUncoveredRepresentativePhone(){
+        var state=state();state.put("requirementVersion",2L);
+        doReturn(List.of(receivedPrototype(11L,List.of(photo())))).when(service).allRounds(42L);
+        assertThatThrownBy(()->flow.currentPrototype(42L,state,service)).hasMessageContaining("需求已变化");
+        state.put("requirementVersion",1L);state.put("plan",Map.of("phoneModelIds",List.of(10L,12L)));
+        assertThatThrownBy(()->flow.currentPrototype(42L,state,service)).hasMessageContaining("未覆盖本次开发型号");
+        assertThat(state).doesNotContainKeys("stage2Basis","stage3Basis");
+    }
+
+    @Test void sourceAndRenderCanEachBeFirstSupplementedButExistingVersionsOfEitherKindRemainExact(){
+        var state=state();state.put("stage2Basis",Map.of("references",List.of(drawing(1L))));
+        var firstRender=receivedPrototype(11L,List.of(drawing(1L),render(1L),photo()));doReturn(List.of(firstRender)).when(service).allRounds(42L);
+        assertThat(flow.currentPrototype(42L,state,service)).isSameAs(firstRender);
+        doReturn(List.of(receivedPrototype(11L,List.of(drawing(2L),render(1L),photo())))).when(service).allRounds(42L);
+        assertThatThrownBy(()->flow.currentPrototype(42L,state,service)).hasMessageContaining("版本或内容与来源验证不同");
+        state.put("stage2Basis",Map.of("references",List.of(render(1L))));
+        var firstSource=receivedPrototype(11L,List.of(render(1L),drawing(1L),photo()));doReturn(List.of(firstSource)).when(service).allRounds(42L);
+        assertThat(flow.currentPrototype(42L,state,service)).isSameAs(firstSource);
+        doReturn(List.of(receivedPrototype(11L,List.of(render(2L),drawing(1L),photo())))).when(service).allRounds(42L);
+        assertThatThrownBy(()->flow.currentPrototype(42L,state,service)).hasMessageContaining("版本或内容与来源验证不同");
+    }
+
+    @Test void aFirstExplicitRenderCanCompleteTheReminderButCannotReplaceTheActualSamplePhoto(){
+        var state=state();var actual=receivedPrototype(11L,List.of(render(1L),photo()));
+        doReturn(List.of(actual)).when(service).allRounds(42L);var checks=flow.stageChecks(42L,3,state,service);
+        assertThat(checks).allMatch(DevelopmentRules.ReadinessCheck::complete);assertThat(check(checks,"PROTOTYPE_DRAWING").blocking()).isFalse();
+        flow.confirmStage(42L,3,state,service);assertThat(state).doesNotContainKey("stage2Basis");
+        doReturn(List.of(receivedPrototype(11L,List.of(render(1L))))).when(service).allRounds(42L);
+        assertThatThrownBy(()->flow.currentPrototype(42L,state,service)).hasMessageContaining("实际收样照片");
+    }
+
+    @Test void aFirstRenderDoesNotPermitChangingOrAddingOtherTechnicalVersions(){
+        var state=state();var bom=Map.<String,Object>of("type","bom","id",41L,"versionNo","V1","content",Map.of("material","PC"));
+        var image=Map.<String,Object>of("type","file","id",51L,"category","drawing","fileExt","pdf","versionNo","V1");
+        state.put("stage2Basis",Map.of("references",List.of(bom,image)));
+        var actual=receivedPrototype(11L,List.of(bom,image,render(1L),photo()));doReturn(List.of(actual)).when(service).allRounds(42L);
+        assertThat(flow.currentPrototype(42L,state,service)).isSameAs(actual);
+        var changedBom=new LinkedHashMap<>(bom);changedBom.put("content",Map.of("material","TPU"));
+        doReturn(List.of(receivedPrototype(11L,List.of(changedBom,image,render(1L),photo())))).when(service).allRounds(42L);
+        assertThatThrownBy(()->flow.currentPrototype(42L,state,service)).hasMessageContaining("版本或内容与来源验证不同");
+        state.remove("stage2Basis");doReturn(List.of(actual)).when(service).allRounds(42L);
+        assertThatThrownBy(()->flow.currentPrototype(42L,state,service)).hasMessageContaining("版本或内容与来源验证不同");
+    }
+
+    @Test void late3dAdoptionStillUsesTheOriginalProjectScopeFilePermissionAndExactVersionIds(){
+        var selected=drawing(1L);var next=drawing(2L);doReturn(List.of(selected,next)).when(service).materialOptions(42L);
+        var file=new com.yuewei.plm.module.attachment.entity.Attachment();file.setFileExt("step");file.setChecksum("selected-version-checksum");file.setDeletedFlag(0);
+        when(attachments.selectById(1L)).thenReturn(file);
+        var refs=List.of(new DevelopmentModels.MaterialReference("file",1L));var snapshots=service.snapshotReferences(42L,refs);
+        assertThat(snapshots).hasSize(1);assertThat(snapshots.get(0)).containsEntry("id",1L).containsEntry("versionNo","V1").containsEntry("checksum","selected-version-checksum");
+        verify(access).requireFile(1L);verify(attachments,never()).selectById(2L);
+        assertThatThrownBy(()->service.snapshotReferences(42L,List.of(new DevelopmentModels.MaterialReference("file",999L)))).hasMessageContaining("未关联本项目或没有访问权限");
+        doThrow(DevelopmentWorkflowStore.invalid("没有此文件权限")).when(access).requireFile(1L);
+        assertThatThrownBy(()->service.snapshotReferences(42L,refs)).hasMessageContaining("没有此文件权限");
     }
 }

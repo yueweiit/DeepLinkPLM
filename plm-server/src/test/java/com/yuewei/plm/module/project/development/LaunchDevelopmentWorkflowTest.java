@@ -6,11 +6,13 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 class LaunchDevelopmentWorkflowTest {
-    @Test void initiationAllowsUnknownPhonesButDrawingRequiresRepresentativeScopeAndAnActual3dFile(){
+    @Test void initiationAllowsUnknownPhonesButDrawingRequiresRepresentativeScopeWhileThe3dFileMayFollow(){
         var state=new HashMap<String,Object>();state.put("planDraft",Map.of("phoneModelIds",List.of(),"pendingReason","等待新机","method","supplier","needsMold",true));
         assertThat(policy.planChecks(state)).allMatch(DevelopmentRules.ReadinessCheck::complete);
         var gaps=policy.stageChecks(1,2,state,mock(ProductDevelopmentService.class)).stream().filter(c->!c.complete()).toList();
         assertThat(gaps).extracting(DevelopmentRules.ReadinessCheck::code).containsExactly("REPRESENTATIVE_PHONES","PRODUCT_3D_DRAWING");
+        assertThat(gaps).extracting(DevelopmentRules.ReadinessCheck::blocking).containsExactly(true,false);
+        assertThatThrownBy(()->DevelopmentRules.requireChecks(gaps)).hasMessageContaining("开发型号");
         assertThat(state).doesNotContainKeys("plan","reviewRecords","engineeringBasis");
     }
     final LaunchDevelopmentWorkflow policy=new LaunchDevelopmentWorkflow(mock(org.springframework.jdbc.core.JdbcTemplate.class),new ObjectMapper(),mock(com.yuewei.plm.module.pilot.PilotAccessService.class),mock(DevelopmentWorkflowStore.class),mock(com.yuewei.plm.module.collaboration.MoldScheduleService.class),mock(com.yuewei.plm.module.development.DevelopmentFinanceService.class),mock(LaunchReviewWorkflow.class),mock(com.yuewei.plm.module.moldreference.PhoneModelReferenceService.class));

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { ArrowRight, Refresh, Search, Upload } from '@element-plus/icons-vue'
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { getBomProductPage, getProductBomPage, getBomSkus, getBomWorkbench } from '@/api/modules/bom'
@@ -150,68 +152,68 @@ onUnmounted(() => clearTimeout(searchTimer))
   <section v-if="masterDataStatus?.ready&&!legacy" class="bom-ledger"><CurrentProductCatalog mode="bom" :administrator="masterDataStatus.administrator" @history="legacy=true"/></section>
   <main v-else ref="root" class="bom-ledger" v-loading="loading">
     <header class="page-head">
-      <div><h2>BOM 管理</h2><p>先选择产品，再查看产品线及旗下型号的正式 BOM。</p></div>
-      <div class="page-actions"><el-button v-if="masterDataStatus?.ready" size="small" @click="legacy=false">返回本期 BOM</el-button><el-button data-test="historical-bom-import" type="primary" :icon="Upload" @click="historicalImportVisible = true">批量导入历史 BOM</el-button><el-button :icon="Refresh" circle title="刷新" @click="refresh" /></div>
+      <div><h2>{{ uiText("BOM 管理") }}</h2><p>{{ uiText("先选择产品，再查看产品线及旗下型号的正式 BOM。") }}</p></div>
+      <div class="page-actions"><el-button v-if="masterDataStatus?.ready" size="small" @click="legacy=false">{{ uiText("返回本期 BOM") }}</el-button><el-button data-test="historical-bom-import" type="primary" :icon="Upload" @click="historicalImportVisible = true">{{ uiText("批量导入历史 BOM") }}</el-button><el-button :icon="Refresh" circle :title='uiText("刷新")' @click="refresh" /></div>
     </header>
 
     <div v-if="selectedProduct" class="product-context">
-      <el-button data-test="bom-back" @click="backToProducts">返回产品列表</el-button>
+      <el-button data-test="bom-back" @click="backToProducts">{{ uiText("返回产品列表") }}</el-button>
       <strong>{{ selectedProduct.productName }}</strong><code>{{ selectedProduct.productCode }}</code>
     </div>
     <div class="filter-bar">
       <el-input v-model="keyword" :prefix-icon="Search" clearable
-        :placeholder="selectedProduct ? 'BOM、产品或型号编码 / 名称' : '产品名称 / 编码、BOM 编码 / 手机型号'" />
-      <span>共 {{ total }} {{ selectedProduct ? '条正式 BOM' : '条产品线' }}</span>
+        :placeholder="selectedProduct ? uiText('BOM、产品或型号编码 / 名称') : uiText('产品名称 / 编码、BOM 编码 / 手机型号')" />
+      <span>{{ uiText("共 ") }}{{ total }} {{ selectedProduct ? uiText('条正式 BOM') : uiText('条产品线') }}</span>
     </div>
 
     <el-alert v-if="error" type="error" :title="error" show-icon :closable="false" />
     <el-alert v-if="operationError" type="error" :title="operationError" show-icon :closable="false" />
     <div v-if="!selectedProduct" class="table-shell">
       <table>
-        <thead><tr><th>产品编码</th><th>产品名称</th><th>正式 BOM 数量</th><th>最近更新时间</th><th>操作</th></tr></thead>
+        <thead><tr><th>{{ uiText("产品编码") }}</th><th>{{ uiText("产品名称") }}</th><th>{{ uiText("正式 BOM 数量") }}</th><th>{{ uiText("最近更新时间") }}</th><th>{{ uiText("操作") }}</th></tr></thead>
         <tbody><tr v-for="product in products" :key="product.productId">
           <td><code>{{ product.productCode }}</code></td>
           <td><el-button link type="primary" @click="openProduct(product)">{{ product.productName }}</el-button></td>
           <td>{{ product.bomCount }}</td>
           <td>{{ product.updatedAt ? product.updatedAt.slice(0, 16).replace('T', ' ') : '--' }}</td>
-          <td><el-button data-test="bom-product" link type="primary" @click="openProduct(product)">查看 BOM</el-button></td>
+          <td><el-button data-test="bom-product" link type="primary" @click="openProduct(product)">{{ uiText("查看 BOM") }}</el-button></td>
         </tr></tbody>
       </table>
-      <el-empty v-if="!products.length && !loading" description="暂无匹配产品" />
+      <el-empty v-if="!products.length && !loading" :description='uiText("暂无匹配产品")' />
     </div>
     <div v-else class="table-shell">
       <table>
-        <thead><tr><th>BOM 编码</th><th>产品 / 型号</th><th>版本</th><th>路线数</th><th>关联 SKU</th><th>状态</th><th>来源</th><th>更新时间</th><th>操作</th></tr></thead>
+        <thead><tr><th>{{ uiText("BOM 编码") }}</th><th>{{ uiText("产品 / 型号") }}</th><th>{{ uiText("版本") }}</th><th>{{ uiText("路线数") }}</th><th>{{ uiText("关联 SKU") }}</th><th>{{ uiText("状态") }}</th><th>{{ uiText("来源") }}</th><th>{{ uiText("更新时间") }}</th><th>{{ uiText("操作") }}</th></tr></thead>
         <tbody>
           <tr v-for="row in filteredRows" :key="row.productBomId">
             <td><code>{{ row.bomCode }}</code></td>
             <td><strong>{{ row.productName }}</strong><small>{{ row.productCode }}{{ row.model ? ` · ${row.model}` : '' }}</small></td>
             <td>{{ row.versionNo }}</td><td>{{ row.routeCount }}</td>
-            <td><el-button data-test="bom-skus" :loading="skuLoading === row.productBomId" link type="primary" @click="openSkus(row)">{{ row.skuCount }} 个关联 SKU</el-button></td>
+            <td><el-button data-test="bom-skus" :loading="skuLoading === row.productBomId" link type="primary" @click="openSkus(row)">{{ row.skuCount }}{{ uiText(" 个关联 SKU") }}</el-button></td>
             <td><el-tag size="small" effect="light">{{ row.status }}</el-tag></td><td>{{ row.sourceType }}</td>
             <td>{{ row.updatedAt ? row.updatedAt.slice(0, 16).replace('T', ' ') : '--' }}</td>
-            <td class="row-actions"><el-button data-test="bom-detail" :loading="detailLoading === row.productBomId" link type="primary" @click="openDetail(row)">详情</el-button><el-button link :icon="ArrowRight" @click="goWorkbench(row)">工作台</el-button></td>
+            <td class="row-actions"><el-button data-test="bom-detail" :loading="detailLoading === row.productBomId" link type="primary" @click="openDetail(row)">{{ uiText("详情") }}</el-button><el-button link :icon="ArrowRight" @click="goWorkbench(row)">{{ uiText("工作台") }}</el-button></td>
           </tr>
         </tbody>
       </table>
-      <el-empty v-if="!filteredRows.length && !loading" description="暂无正式 BOM" />
+      <el-empty v-if="!filteredRows.length && !loading" :description='uiText("暂无正式 BOM")' />
     </div>
 
     <el-pagination v-model:page-size="size" :current-page="page" :page-sizes="[20, 50, 100]"
       :total="total" layout="total, sizes, prev, pager, next, jumper" @current-change="changePage" />
 
-    <el-drawer v-model="detailVisible" :title="`BOM 详情：${detail?.bomCode || ''}`" size="min(980px, 96vw)">
+    <el-drawer v-model="detailVisible" :title="uiText('BOM 详情：{value0}',{value0:(detail?.bomCode || '')})" size="min(980px, 96vw)">
       <el-tabs v-if="detail" v-model="activeTab">
-        <el-tab-pane label="基本信息" name="basic"><dl class="facts"><div><dt>名称</dt><dd>{{ detail.bomName }}</dd></div><div><dt>版本</dt><dd>{{ detail.versionNo }}</dd></div><div><dt>状态</dt><dd>{{ detail.status }}</dd></div><div><dt>路线数</dt><dd>{{ detail.routes.length }}</dd></div></dl></el-tab-pane>
-        <el-tab-pane label="BOM 明细" name="items"><div class="route-selector"><el-select v-model="selectedRouteId"><el-option v-for="route in detail.routes" :key="route.productBomRouteId" :label="route.routeName" :value="route.productBomRouteId" /></el-select></div><table class="inner-table"><thead><tr><th>行号</th><th>物料编码</th><th>物料名称</th><th>用量</th><th>单位</th><th>损耗率</th></tr></thead><tbody><tr v-for="item in selectedRoute?.items || []" :key="item.productBomItemId || item.lineNo"><td>{{ item.lineNo }}</td><td>{{ item.itemCode || '--' }}</td><td>{{ item.itemName }}</td><td>{{ item.quantity }}</td><td>{{ item.unit }}</td><td>{{ item.lossRate || 0 }}</td></tr></tbody></table></el-tab-pane>
-        <el-tab-pane label="工艺路线" name="routes"><div class="route-detail" v-for="route in detail.routes" :key="route.routeCode"><div><strong>{{ route.routeName }}</strong><code>{{ route.routeCode }}</code></div><div class="tags"><el-tag v-for="color in route.colors" :key="color" size="small">{{ color }}</el-tag></div><span>{{ route.items.length }} 项物料</span></div></el-tab-pane>
-        <el-tab-pane label="路线成本" name="cost"><div v-if="selectedRoute?.costSnapshot" class="cost-grid"><div><span>物料</span><strong>{{ selectedRoute.costSnapshot.materialCost }}</strong></div><div><span>损耗</span><strong>{{ selectedRoute.costSnapshot.lossCost }}</strong></div><div><span>工艺</span><strong>{{ selectedRoute.costSnapshot.processCost }}</strong></div><div><span>路线总成本</span><strong>{{ selectedRoute.costSnapshot.currencyCode }} {{ selectedRoute.costSnapshot.totalCost }}</strong></div></div><el-empty v-else description="当前路线尚无成本快照" /></el-tab-pane>
-        <el-tab-pane label="版本记录" name="versions"><el-empty description="当前显示所选正式版本，其他版本请从主列表查看" /></el-tab-pane>
+        <el-tab-pane :label='uiText("基本信息")' name="basic"><dl class="facts"><div><dt>{{ uiText("名称") }}</dt><dd>{{ detail.bomName }}</dd></div><div><dt>{{ uiText("版本") }}</dt><dd>{{ detail.versionNo }}</dd></div><div><dt>{{ uiText("状态") }}</dt><dd>{{ detail.status }}</dd></div><div><dt>{{ uiText("路线数") }}</dt><dd>{{ detail.routes.length }}</dd></div></dl></el-tab-pane>
+        <el-tab-pane :label='uiText("BOM 明细")' name="items"><div class="route-selector"><el-select v-model="selectedRouteId"><el-option v-for="route in detail.routes" :key="route.productBomRouteId" :label="route.routeName" :value="route.productBomRouteId" /></el-select></div><table class="inner-table"><thead><tr><th>{{ uiText("行号") }}</th><th>{{ uiText("物料编码") }}</th><th>{{ uiText("物料名称") }}</th><th>{{ uiText("用量") }}</th><th>{{ uiText("单位") }}</th><th>{{ uiText("损耗率") }}</th></tr></thead><tbody><tr v-for="item in selectedRoute?.items || []" :key="item.productBomItemId || item.lineNo"><td>{{ item.lineNo }}</td><td>{{ item.itemCode || '--' }}</td><td>{{ item.itemName }}</td><td>{{ item.quantity }}</td><td>{{ item.unit }}</td><td>{{ item.lossRate || 0 }}</td></tr></tbody></table></el-tab-pane>
+        <el-tab-pane :label='uiText("工艺路线")' name="routes"><div class="route-detail" v-for="route in detail.routes" :key="route.routeCode"><div><strong>{{ route.routeName }}</strong><code>{{ route.routeCode }}</code></div><div class="tags"><el-tag v-for="color in route.colors" :key="color" size="small">{{ color }}</el-tag></div><span>{{ route.items.length }}{{ uiText(" 项物料") }}</span></div></el-tab-pane>
+        <el-tab-pane :label='uiText("路线成本")' name="cost"><div v-if="selectedRoute?.costSnapshot" class="cost-grid"><div><span>{{ uiText("物料") }}</span><strong>{{ selectedRoute.costSnapshot.materialCost }}</strong></div><div><span>{{ uiText("损耗") }}</span><strong>{{ selectedRoute.costSnapshot.lossCost }}</strong></div><div><span>{{ uiText("工艺") }}</span><strong>{{ selectedRoute.costSnapshot.processCost }}</strong></div><div><span>{{ uiText("路线总成本") }}</span><strong>{{ selectedRoute.costSnapshot.currencyCode }} {{ selectedRoute.costSnapshot.totalCost }}</strong></div></div><el-empty v-else :description='uiText("当前路线尚无成本快照")' /></el-tab-pane>
+        <el-tab-pane :label='uiText("版本记录")' name="versions"><el-empty :description='uiText("当前显示所选正式版本，其他版本请从主列表查看")' /></el-tab-pane>
       </el-tabs>
     </el-drawer>
 
-    <el-dialog v-model="skuVisible" title="关联 SKU" width="min(860px, 94vw)">
-      <table class="inner-table"><thead><tr><th>SKU 编码</th><th>产品</th><th>手机型号</th><th>颜色</th><th>状态</th><th>路线</th></tr></thead><tbody><tr v-for="sku in pagedSkus" :key="sku.productId"><td><code>{{ sku.skuCode }}</code></td><td>{{ sku.productName }}</td><td>{{ sku.phoneModel }}</td><td>{{ sku.color }}</td><td>{{ sku.status }}</td><td>{{ sku.routeCode || '暂无适用路线' }}</td></tr></tbody></table>
+    <el-dialog v-model="skuVisible" :title='uiText("关联 SKU")' width="min(860px, 94vw)">
+      <table class="inner-table"><thead><tr><th>{{ uiText("SKU 编码") }}</th><th>{{ uiText("产品") }}</th><th>{{ uiText("手机型号") }}</th><th>{{ uiText("颜色") }}</th><th>{{ uiText("状态") }}</th><th>{{ uiText("路线") }}</th></tr></thead><tbody><tr v-for="sku in pagedSkus" :key="sku.productId"><td><code>{{ sku.skuCode }}</code></td><td>{{ sku.productName }}</td><td>{{ sku.phoneModel }}</td><td>{{ sku.color }}</td><td>{{ sku.status }}</td><td>{{ sku.routeCode || uiText('暂无适用路线') }}</td></tr></tbody></table>
       <el-pagination v-if="skus.length > skuPageSize" v-model:current-page="skuPage" :page-size="skuPageSize" :total="skus.length" layout="prev, pager, next" />
     </el-dialog>
     <HistoricalBomImportDialog v-model="historicalImportVisible" @committed="importCommitted" />

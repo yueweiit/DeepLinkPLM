@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { ArrowRight, Document, Plus, Promotion, Tickets } from '@element-plus/icons-vue'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -689,7 +691,7 @@ function handleProgressAction(action: ProgressAction) {
     void returnCurrentProgressNode()
     return
   }
-  ElMessage.warning('强制推进需要后端权限和审计闭环，后续接入')
+  ElMessage.warning(uiText('强制推进需要后端权限和审计闭环，后续接入'))
 }
 
 function getErrorMessage(error: unknown) {
@@ -704,11 +706,11 @@ function getErrorMessage(error: unknown) {
 function requireProgressActionContext() {
   const currentStep = currentProgressStep.value
   if (!activeProgressProject.value || !selectedProgressNode.value || !currentStep) {
-    ElMessage.warning('请先选择项目和当前节点')
+    ElMessage.warning(uiText('请先选择项目和当前节点'))
     return null
   }
   if (selectedProgressNode.value.status !== 'current') {
-    ElMessage.warning('只能操作当前推进中的节点')
+    ElMessage.warning(uiText('只能操作当前推进中的节点'))
     return null
   }
   return {
@@ -721,15 +723,15 @@ async function confirmCurrentProgressNode() {
   const context = requireProgressActionContext()
   if (!context || progressActionLoading.value) return
   try {
-    const { value } = await ElMessageBox.prompt('可填写当前节点确认备注，留空则只确认节点。', '确认当前节点', {
-      confirmButtonText: '确认',
-      cancelButtonText: '取消',
-      inputPlaceholder: '例如：资料已确认，可以进入下一环节'
+    const { value } = await ElMessageBox.prompt(uiText('可填写当前节点确认备注，留空则只确认节点。'), uiText('确认当前节点'), {
+      confirmButtonText: uiText('确认'),
+      cancelButtonText: uiText('取消'),
+      inputPlaceholder: uiText('例如：资料已确认，可以进入下一环节')
     })
     progressActionLoading.value = 'confirm'
     await confirmTimelineNode(context.project.productId, context.node.nodeKey, String(value || ''))
     await refreshActiveProgressProject()
-    ElMessage.success('当前节点已确认')
+    ElMessage.success(uiText('当前节点已确认'))
   } catch (error) {
     if (error !== 'cancel' && error !== 'close') ElMessage.error(getErrorMessage(error))
   } finally {
@@ -741,15 +743,15 @@ async function returnCurrentProgressNode() {
   const context = requireProgressActionContext()
   if (!context || progressActionLoading.value) return
   try {
-    const { value } = await ElMessageBox.prompt('请输入返回上一步原因，系统会写入项目时间轴操作记录。', '返回上一步', {
-      confirmButtonText: '返回上一步',
-      cancelButtonText: '取消',
-      inputPlaceholder: '例如：资料缺失，需要补充后重新确认'
+    const { value } = await ElMessageBox.prompt(uiText('请输入返回上一步原因，系统会写入项目时间轴操作记录。'), uiText('返回上一步'), {
+      confirmButtonText: uiText('返回上一步'),
+      cancelButtonText: uiText('取消'),
+      inputPlaceholder: uiText('例如：资料缺失，需要补充后重新确认')
     })
     progressActionLoading.value = 'return'
     await returnTimelineNode(context.project.productId, context.node.nodeKey, String(value || ''), true)
     await refreshActiveProgressProject()
-    ElMessage.success('已返回上一步')
+    ElMessage.success(uiText('已返回上一步'))
   } catch (error) {
     if (error !== 'cancel' && error !== 'close') ElMessage.error(getErrorMessage(error))
   } finally {
@@ -775,11 +777,11 @@ async function submitProgressUpload() {
   const context = requireProgressActionContext()
   if (!context || progressActionLoading.value) return
   if (!progressUploadFile.value) {
-    ElMessage.warning('请先选择要上传的资料')
+    ElMessage.warning(uiText('请先选择要上传的资料'))
     return
   }
   if (!progressUploadStepKey.value) {
-    ElMessage.warning('请选择资料归属步骤')
+    ElMessage.warning(uiText('请选择资料归属步骤'))
     return
   }
   try {
@@ -791,7 +793,7 @@ async function submitProgressUpload() {
     progressUploadVisible.value = false
     await refreshActiveProgressProject()
     activeProgressNodeKey.value = attachment.timelineStageCode || selectedProgressNode.value?.stageCode || activeProgressNodeKey.value
-    ElMessage.success('资料已上传')
+    ElMessage.success(uiText('资料已上传'))
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   } finally {
@@ -848,7 +850,7 @@ async function loadInheritedColorPreview(parentProductId: number | null) {
     inheritedColorPreview.value = await getProductProductionColors(parentProductId)
   } catch (error) {
     inheritedColorPreview.value = []
-    ElMessage.warning(error instanceof Error ? error.message : '对应产品敲定颜色读取失败')
+    ElMessage.warning(error instanceof Error ? error.message : uiText('对应产品敲定颜色读取失败'))
   } finally {
     inheritedColorLoading.value = false
   }
@@ -890,7 +892,7 @@ async function submitCreateProject() {
   createProjectSubmitting.value = true
   try {
     const result = await createProduct(buildCreateProjectPayload())
-    ElMessage.success(`项目已创建：${result.productCode}`)
+    ElMessage.success(uiText('项目已创建：{value0}',{value0:(result.productCode)}))
     createProjectVisible.value = false
     await loadInProgressProjects()
     router.push({ path: '/projects', query: { tab: 'in_progress', productId: String(result.productId) } })
@@ -925,24 +927,24 @@ onMounted(loadInProgressProjects)
 </script>
 
 <template>
-  <PageContainer title="工作台">
+  <PageContainer :title='uiText("工作台")'>
     <section class="page-panel dashboard-toolbar-panel">
       <div class="dashboard-toolbar dashboard-toolbar--with-tabs">
-        <nav class="dashboard-segment-bar" aria-label="工作台视图"><button v-for="metric in topMetrics" :key="metric.key" class="dashboard-segment-btn" :class="{ 'is-active': activeMetricView === metric.key }" type="button" @click="selectMetricView(metric.key)">{{ metric.label }}<span v-if="metric.value" class="dashboard-segment-count">{{ metric.value }}</span></button></nav>
-        <div class="dashboard-toolbar__actions"><button v-for="action in quickActions" :key="action.label" class="quick-action-inline" type="button" @click="handleQuickAction(action)"><span class="quick-action-inline__label">{{ action.label }}</span></button></div>
+        <nav class="dashboard-segment-bar" :aria-label='uiText("工作台视图")'><button v-for="metric in topMetrics" :key="metric.key" class="dashboard-segment-btn" :class="{ 'is-active': activeMetricView === metric.key }" type="button" @click="selectMetricView(metric.key)">{{ uiText(metric.label) }}<span v-if="metric.value" class="dashboard-segment-count">{{ metric.value }}</span></button></nav>
+        <div class="dashboard-toolbar__actions"><button v-for="action in quickActions" :key="action.label" class="quick-action-inline" type="button" @click="handleQuickAction(action)"><span class="quick-action-inline__label">{{ uiText(action.label) }}</span></button></div>
       </div>
     </section>
 
     <section class="page-panel dashboard-content-panel">
       <div class="toolbar-row">
         <div>
-          <h3 class="section-title">{{ activeSectionTitle }}</h3>
-          <p class="page-panel-desc">{{ activeSectionDesc }}</p>
+          <h3 class="section-title">{{ uiText(activeSectionTitle) }}</h3>
+          <p class="page-panel-desc">{{ uiText(activeSectionDesc) }}</p>
         </div>
         <div class="dashboard-content-panel__meta">
-          <el-tag effect="light">{{ activeMetric.label }}</el-tag>
+          <el-tag effect="light">{{ uiText(activeMetric.label) }}</el-tag>
           <el-button text type="primary" @click="open(activeSectionActionPath)">
-            {{ activeSectionActionLabel }}
+            {{ uiText(activeSectionActionLabel) }}
           </el-button>
         </div>
       </div>
@@ -985,11 +987,11 @@ onMounted(loadInProgressProjects)
         >
           <div class="toolbar-row">
             <strong>{{ task.nodeName }}</strong>
-            <el-tag type="warning" effect="light">待处理</el-tag>
+            <el-tag type="warning" effect="light">{{ uiText("待处理") }}</el-tag>
           </div>
           <p class="page-panel-desc">{{ task.objectName }}</p>
           <div class="card-footer">
-            <span class="subtle-text">{{ task.initiator }} 发起 / 截止 {{ task.dueDate }}</span>
+            <span class="subtle-text">{{ task.initiator }}{{ uiText(" 发起 / 截止 ") }}{{ task.dueDate }}</span>
             <el-icon><ArrowRight /></el-icon>
           </div>
         </button>
@@ -1005,16 +1007,14 @@ onMounted(loadInProgressProjects)
         >
           <div class="toolbar-row">
             <strong>{{ risk.title }}</strong>
-            <el-tag :type="risk.overdueDays >= 3 ? 'danger' : 'warning'" effect="light">
-              已逾期 {{ risk.overdueDays }} 天
-            </el-tag>
+            <el-tag :type="risk.overdueDays >= 3 ? 'danger' : 'warning'" effect="light">{{ uiText(" 已逾期 ") }}{{ risk.overdueDays }}{{ uiText(" 天 ") }}</el-tag>
           </div>
           <div class="risk-meta">
             <span class="subtle-text">{{ risk.stage }}</span>
-            <span class="subtle-text">计划完成：{{ risk.plannedDate }}</span>
+            <span class="subtle-text">{{ uiText("计划完成：") }}{{ risk.plannedDate }}</span>
           </div>
           <div class="card-footer">
-            <span class="subtle-text">责任人：{{ risk.owner }}</span>
+            <span class="subtle-text">{{ uiText("责任人：") }}{{ risk.owner }}</span>
             <el-icon><ArrowRight /></el-icon>
           </div>
         </button>
@@ -1031,25 +1031,25 @@ onMounted(loadInProgressProjects)
           <div class="toolbar-row">
             <div class="cell-stack">
               <strong>{{ item.productName }}</strong>
-              <span class="subtle-text">版本 {{ item.versionNo }}</span>
+              <span class="subtle-text">{{ uiText("版本 ") }}{{ item.versionNo }}</span>
             </div>
-            <el-tag type="danger" effect="light">待冻结</el-tag>
+            <el-tag type="danger" effect="light">{{ uiText("待冻结") }}</el-tag>
           </div>
-          <p class="page-panel-desc">缺失资料：{{ item.missingItems.join('、') }}</p>
+          <p class="page-panel-desc">{{ uiText("缺失资料：") }}{{ item.missingItems.join('、') }}</p>
           <div class="card-footer">
-            <span class="subtle-text">{{ item.ownerUserName }} / 截止 {{ item.dueDate }}</span>
+            <span class="subtle-text">{{ item.ownerUserName }}{{ uiText(" / 截止 ") }}{{ item.dueDate }}</span>
             <el-icon><ArrowRight /></el-icon>
           </div>
         </button>
       </div>
     </section>
-    <el-dialog v-model="projectProgressVisible" title="项目进度" width="1100px" destroy-on-close>
+    <el-dialog v-model="projectProgressVisible" :title='uiText("项目进度")' width="1100px" destroy-on-close>
       <div v-if="activeProgressProject" class="project-progress-dialog">
         <header class="project-progress-dialog__head">
           <div><h3>{{ activeProgressProject.productName }}</h3><p class="subtle-text">{{ activeProgressProject.productCode || '--' }} / {{ activeProgressProject.seriesName || '--' }}</p></div>
           <div class="project-progress-dialog__head-actions">
             <StatusTag v-if="activeProgressProject.status" :status="activeProgressProject.status" object-type="product" />
-            <el-button type="primary" plain @click="openActiveProjectDetail">项目详情</el-button>
+            <el-button type="primary" plain @click="openActiveProjectDetail">{{ uiText("项目详情") }}</el-button>
           </div>
         </header>
         <ModelVariantRequirementForm
@@ -1063,27 +1063,27 @@ onMounted(loadInProgressProjects)
           type="info"
           :closable="false"
           show-icon
-          :title="activeProgressTimeline?.startBlockReason || '请先完成新型号项目信息完善表，确认后进入项目时间轴。'"
+          :title="activeProgressTimeline?.startBlockReason || uiText('请先完成新型号项目信息完善表，确认后进入项目时间轴。')"
         />
         <section v-else class="project-progress-layout">
           <aside class="project-progress-node-list">
             <button v-for="node in dashboardProgressNodes" :key="node.nodeKey" class="project-progress-node-card" :class="[`is-${node.status}`, { 'is-selected': selectedProgressNode?.nodeKey === node.nodeKey }]" type="button" @click="activeProgressNodeKey = node.nodeKey">
-              <div class="project-progress-node-card__title"><strong>{{ node.title }}</strong><el-tag size="small" effect="light" :type="getProgressNodeTagType(node.status)">{{ getProgressNodeStatusText(node.status) }}</el-tag></div>
+              <div class="project-progress-node-card__title"><strong>{{ uiText(String((node.title) ?? '')) }}</strong><el-tag size="small" effect="light" :type="getProgressNodeTagType(node.status)">{{ uiText(String((getProgressNodeStatusText(node.status)) ?? '')) }}</el-tag></div>
               <span class="subtle-text">{{ node.phase }}</span><span class="subtle-text">{{ node.date || '--' }}</span>
             </button>
           </aside>
           <section class="project-progress-node-detail" v-if="selectedProgressNode">
-            <div class="project-progress-node-detail__head"><div><h4>{{ selectedProgressNode.title }}</h4><p class="page-panel-desc">{{ selectedProgressNode.hint }}</p></div><el-tag effect="light" :type="getProgressNodeTagType(selectedProgressNode.status)">{{ getProgressNodeStatusText(selectedProgressNode.status) }}</el-tag></div>
+            <div class="project-progress-node-detail__head"><div><h4>{{ uiText(selectedProgressNode.title) }}</h4><p class="page-panel-desc">{{ uiText(selectedProgressNode.hint) }}</p></div><el-tag effect="light" :type="getProgressNodeTagType(selectedProgressNode.status)">{{ uiText(getProgressNodeStatusText(selectedProgressNode.status)) }}</el-tag></div>
             <div class="project-progress-info-grid">
-              <div><span class="subtle-text">责任角色</span><strong>{{ selectedProgressNode.ownerRole || '--' }}</strong></div>
-              <div data-test="dashboard-current-step-summary"><span class="subtle-text">当前小节点</span><strong>第 {{ currentProgressStepNo }} 步：{{ currentProgressStepTitle }}</strong></div>
-              <div><span class="subtle-text">下一步动作</span><strong>{{ selectedProgressNode.nextAction || '--' }}</strong></div>
-              <div><span class="subtle-text">风险提示</span><strong>{{ selectedProgressNode.riskText || '暂无风险' }}</strong></div>
-              <div><span class="subtle-text">节点资料</span><strong>{{ selectedProgressNode.documentCount || 0 }} 个附件</strong></div>
-              <div><span class="subtle-text">确认状态</span><strong>{{ selectedProgressNodeConfirmed ? '已确认' : '未确认' }}</strong></div>
+              <div><span class="subtle-text">{{ uiText("责任角色") }}</span><strong>{{ selectedProgressNode.ownerRole || '--' }}</strong></div>
+              <div data-test="dashboard-current-step-summary"><span class="subtle-text">{{ uiText("当前小节点") }}</span><strong>{{ uiText("第 ") }}{{ currentProgressStepNo }}{{ uiText(" 步：") }}{{ uiText(currentProgressStepTitle) }}</strong></div>
+              <div><span class="subtle-text">{{ uiText("下一步动作") }}</span><strong>{{ selectedProgressNode.nextAction || '--' }}</strong></div>
+              <div><span class="subtle-text">{{ uiText("风险提示") }}</span><strong>{{ selectedProgressNode.riskText || uiText('暂无风险') }}</strong></div>
+              <div><span class="subtle-text">{{ uiText("节点资料") }}</span><strong>{{ selectedProgressNode.documentCount || 0 }}{{ uiText(" 个附件") }}</strong></div>
+              <div><span class="subtle-text">{{ uiText("确认状态") }}</span><strong>{{ selectedProgressNodeConfirmed ? uiText('已确认') : uiText('未确认') }}</strong></div>
             </div>
             <section class="project-progress-child-steps">
-              <h5>包含的小节点</h5>
+              <h5>{{ uiText("包含的小节点") }}</h5>
               <div class="project-progress-child-step-list">
                 <article
                   v-for="step in selectedProgressChildSteps"
@@ -1092,25 +1092,25 @@ onMounted(loadInProgressProjects)
                   :class="`is-${step.visualStatus}`"
                   :data-test="`dashboard-child-step-${step.stepNo}`"
                 >
-                  <div><strong>第 {{ step.stepNo }} 步：{{ step.title }}</strong><p v-if="step.uploadLabel" class="subtle-text">{{ step.uploadLabel }}</p></div>
+                  <div><strong>{{ uiText("第 ") }}{{ step.stepNo }}{{ uiText(" 步：") }}{{ uiText(step.title) }}</strong><p v-if="step.uploadLabel" class="subtle-text">{{ uiText(step.uploadLabel) }}</p></div>
                   <div class="project-progress-child-step__tags">
-                    <el-tag v-if="step.isCurrent" size="small" type="primary" effect="light">当前步骤</el-tag>
-                    <el-tag v-if="step.isConfirmed" size="small" type="success" effect="light">已确认</el-tag>
-                    <el-tag v-if="step.requireUpload && step.hasUploaded" size="small" type="success" effect="light">已上传 {{ step.uploadCount }} 个</el-tag>
-                    <el-tag v-else-if="step.requireUpload" size="small" type="warning" effect="light">待上传</el-tag>
-                    <el-tag v-if="step.requireApproval" size="small" type="info" effect="light">审批</el-tag>
+                    <el-tag v-if="step.isCurrent" size="small" type="primary" effect="light">{{ uiText("当前步骤") }}</el-tag>
+                    <el-tag v-if="step.isConfirmed" size="small" type="success" effect="light">{{ uiText("已确认") }}</el-tag>
+                    <el-tag v-if="step.requireUpload && step.hasUploaded" size="small" type="success" effect="light">{{ uiText("已上传 ") }}{{ step.uploadCount }}{{ uiText(" 个") }}</el-tag>
+                    <el-tag v-else-if="step.requireUpload" size="small" type="warning" effect="light">{{ uiText("待上传") }}</el-tag>
+                    <el-tag v-if="step.requireApproval" size="small" type="info" effect="light">{{ uiText("审批") }}</el-tag>
                   </div>
                 </article>
               </div>
             </section>
             <footer class="project-progress-node-actions" v-if="selectedProgressNode.status === 'current' && canOperateProgressTimeline">
-              <el-button data-test="dashboard-progress-confirm" plain :loading="progressActionLoading === 'confirm'" @click="handleProgressAction('confirm')">确认当前节点</el-button>
-              <el-button data-test="dashboard-progress-return" type="danger" plain :loading="progressActionLoading === 'return'" @click="handleProgressAction('return')">返回上一步</el-button>
-              <el-button type="warning" plain @click="handleProgressAction('force')">强制推进</el-button>
-              <el-button v-if="isCurrentProcessConfirmationStep" data-test="dashboard-production-confirmation-open" type="primary" plain @click="openProductionConfirmationFromDashboard('operations')">敲定投产工序</el-button>
-              <el-button v-if="isCurrentProductionColorStep" data-test="dashboard-production-colors-open" type="primary" plain @click="openProductionConfirmationFromDashboard('colors')">确认投产颜色</el-button>
-              <el-button v-if="isCurrentProcessRouteCreateStep" data-test="dashboard-process-route-create" type="primary" :icon="Plus" @click="openProcessRouteCreateFromDashboard">新建工艺路线</el-button>
-              <el-button data-test="dashboard-progress-upload-open" plain :loading="progressActionLoading === 'upload'" @click="openProgressUpload">上传节点资料</el-button>
+              <el-button data-test="dashboard-progress-confirm" plain :loading="progressActionLoading === 'confirm'" @click="handleProgressAction('confirm')">{{ uiText("确认当前节点") }}</el-button>
+              <el-button data-test="dashboard-progress-return" type="danger" plain :loading="progressActionLoading === 'return'" @click="handleProgressAction('return')">{{ uiText("返回上一步") }}</el-button>
+              <el-button type="warning" plain @click="handleProgressAction('force')">{{ uiText("强制推进") }}</el-button>
+              <el-button v-if="isCurrentProcessConfirmationStep" data-test="dashboard-production-confirmation-open" type="primary" plain @click="openProductionConfirmationFromDashboard('operations')">{{ uiText("敲定投产工序") }}</el-button>
+              <el-button v-if="isCurrentProductionColorStep" data-test="dashboard-production-colors-open" type="primary" plain @click="openProductionConfirmationFromDashboard('colors')">{{ uiText("确认投产颜色") }}</el-button>
+              <el-button v-if="isCurrentProcessRouteCreateStep" data-test="dashboard-process-route-create" type="primary" :icon="Plus" @click="openProcessRouteCreateFromDashboard">{{ uiText("新建工艺路线") }}</el-button>
+              <el-button data-test="dashboard-progress-upload-open" plain :loading="progressActionLoading === 'upload'" @click="openProgressUpload">{{ uiText("上传节点资料") }}</el-button>
             </footer>
           </section>
         </section>
@@ -1125,48 +1125,48 @@ onMounted(loadInProgressProjects)
       @confirmed="handleProductionConfirmationConfirmedFromDashboard"
     />
 
-    <el-dialog v-model="progressUploadVisible" title="上传节点资料" width="520px" destroy-on-close>
+    <el-dialog v-model="progressUploadVisible" :title='uiText("上传节点资料")' width="520px" destroy-on-close>
       <div class="project-progress-upload-form">
         <label>
-          <span class="subtle-text">资料归属步骤</span>
+          <span class="subtle-text">{{ uiText("资料归属步骤") }}</span>
           <select v-model="progressUploadStepKey" data-test="dashboard-progress-upload-step">
             <option v-for="option in progressUploadStepOptions" :key="option.nodeKey" :value="option.nodeKey">
-              {{ getProgressUploadOptionLabel(option) }}
+              {{ uiText(String((getProgressUploadOptionLabel(option)) ?? '')) }}
             </option>
           </select>
         </label>
         <label>
-          <span class="subtle-text">资料类别</span>
+          <span class="subtle-text">{{ uiText("资料类别") }}</span>
           <select v-model="progressUploadCategory" data-test="dashboard-progress-upload-category">
             <option v-for="option in progressUploadCategoryOptions" :key="option.value" :value="option.value">
-              {{ option.label }}
+              {{ uiText(String((option.label) ?? '')) }}
             </option>
           </select>
         </label>
         <label>
-          <span class="subtle-text">选择文件</span>
+          <span class="subtle-text">{{ uiText("选择文件") }}</span>
           <input data-test="dashboard-progress-upload-file" type="file" @change="handleProgressUploadFileChange" />
         </label>
         <label>
-          <span class="subtle-text">备注</span>
+          <span class="subtle-text">{{ uiText("备注") }}</span>
           <textarea v-model="progressUploadRemark" data-test="dashboard-progress-upload-remark" rows="3" maxlength="255" placeholder="填写资料说明、版本来源或线下档案位置" />
         </label>
-        <p class="page-panel-desc">资料会上传到当前大节点内选择的小步骤，文件中心和阶段门禁读取同一份后端数据。</p>
+        <p class="page-panel-desc">{{ uiText("资料会上传到当前大节点内选择的小步骤，文件中心和阶段门禁读取同一份后端数据。") }}</p>
       </div>
       <template #footer>
-        <el-button @click="progressUploadVisible = false">取消</el-button>
-        <el-button data-test="dashboard-progress-upload-submit" type="primary" :loading="progressActionLoading === 'upload'" @click="submitProgressUpload">上传</el-button>
+        <el-button @click="progressUploadVisible = false">{{ uiText("取消") }}</el-button>
+        <el-button data-test="dashboard-progress-upload-submit" type="primary" :loading="progressActionLoading === 'upload'" @click="submitProgressUpload">{{ uiText("上传") }}</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="createProjectVisible" title="新建项目" width="760px" destroy-on-close>
+    <el-dialog v-model="createProjectVisible" :title='uiText("新建项目")' width="760px" destroy-on-close>
       <el-form label-width="110px" class="create-project-form">
-        <el-form-item label="关联订单">
+        <el-form-item :label='uiText("关联订单")'>
           <el-select
             v-model="createProjectForm.relatedOrderCode"
             clearable
             filterable
-            placeholder="选择需求订单（可选）"
+            :placeholder='uiText("选择需求订单（可选）")'
             @change="handleRelatedOrderChange"
           >
             <el-option
@@ -1178,11 +1178,11 @@ onMounted(loadInProgressProjects)
           </el-select>
         </el-form-item>
 
-        <el-form-item label="钉钉审批号">
-          <el-input v-model="createProjectForm.dingTalkApprovalNo" disabled placeholder="由钉钉审批自动关联" />
+        <el-form-item :label='uiText("钉钉审批号")'>
+          <el-input v-model="createProjectForm.dingTalkApprovalNo" disabled :placeholder='uiText("由钉钉审批自动关联")' />
         </el-form-item>
 
-        <el-form-item label="项目类型" required>
+        <el-form-item :label='uiText("项目类型")' required>
           <el-segmented
             v-model="createProjectForm.projectType"
             :options="[
@@ -1192,15 +1192,15 @@ onMounted(loadInProgressProjects)
           />
         </el-form-item>
 
-        <el-form-item label="项目名称" required>
-          <el-input v-model="createProjectForm.productName" placeholder="填写项目 / 产品名称" />
+        <el-form-item :label='uiText("项目名称")' required>
+          <el-input v-model="createProjectForm.productName" :placeholder='uiText("填写项目 / 产品名称")' />
         </el-form-item>
 
-        <el-form-item v-if="createProjectForm.projectType === 'model_variant'" label="对应产品" required>
+        <el-form-item v-if="createProjectForm.projectType === 'model_variant'" :label='uiText("对应产品")' required>
           <el-select
             v-model="createProjectForm.parentProductId"
             filterable
-            placeholder="选择已发布产品线"
+            :placeholder='uiText("选择已发布产品线")'
             popper-class="product-line-select-popper"
           >
             <el-option
@@ -1217,7 +1217,7 @@ onMounted(loadInProgressProjects)
           </el-select>
         </el-form-item>
 
-        <el-form-item v-if="createProjectForm.projectType === 'model_variant'" label="继承颜色" required>
+        <el-form-item v-if="createProjectForm.projectType === 'model_variant'" :label='uiText("继承颜色")' required>
           <div v-loading="inheritedColorLoading" class="inherited-color-list">
             <el-tag
               v-for="color in inheritedColorPreview"
@@ -1226,30 +1226,30 @@ onMounted(loadInProgressProjects)
             >
               {{ color.colorName }}
             </el-tag>
-            <span v-if="!inheritedColorPreview.length" class="subtle-text">选择对应产品后自动继承已敲定颜色</span>
+            <span v-if="!inheritedColorPreview.length" class="subtle-text">{{ uiText("选择对应产品后自动继承已敲定颜色") }}</span>
           </div>
         </el-form-item>
 
-        <el-form-item v-if="createProjectForm.projectType === 'model_variant'" label="机型" required>
-          <el-input v-model="createProjectForm.model" placeholder="例如 iPhone18" />
+        <el-form-item v-if="createProjectForm.projectType === 'model_variant'" :label='uiText("机型")' required>
+          <el-input v-model="createProjectForm.model" :placeholder='uiText("例如 iPhone18")' />
         </el-form-item>
 
-        <el-form-item label="项目负责人" required>
-          <el-input v-model="createProjectForm.ownerUserName" placeholder="填写负责人" />
+        <el-form-item :label='uiText("项目负责人")' required>
+          <el-input v-model="createProjectForm.ownerUserName" :placeholder='uiText("填写负责人")' />
         </el-form-item>
 
-        <el-form-item label="预期发布时间" required>
-          <el-date-picker v-model="createProjectForm.expectedReleaseDate" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" />
+        <el-form-item :label='uiText("预期发布时间")' required>
+          <el-date-picker v-model="createProjectForm.expectedReleaseDate" type="date" value-format="YYYY-MM-DD" :placeholder='uiText("选择日期")' />
         </el-form-item>
 
-        <el-form-item label="项目说明" required>
-          <el-input v-model="createProjectForm.projectSummary" type="textarea" :rows="3" placeholder="填写立项说明、目标和风险点" />
+        <el-form-item :label='uiText("项目说明")' required>
+          <el-input v-model="createProjectForm.projectSummary" type="textarea" :rows="3" :placeholder='uiText("填写立项说明、目标和风险点")' />
         </el-form-item>
       </el-form>
 
       <template #footer>
-        <el-button @click="createProjectVisible = false">取消</el-button>
-        <el-button type="primary" :loading="createProjectSubmitting" @click="submitCreateProject">创建项目</el-button>
+        <el-button @click="createProjectVisible = false">{{ uiText("取消") }}</el-button>
+        <el-button type="primary" :loading="createProjectSubmitting" @click="submitCreateProject">{{ uiText("创建项目") }}</el-button>
       </template>
     </el-dialog>
   </PageContainer>

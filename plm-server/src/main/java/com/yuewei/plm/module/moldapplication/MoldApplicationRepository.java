@@ -50,7 +50,7 @@ public class MoldApplicationRepository {
               originator_user_id,originator_name,department_id,department_name,source_created_at,source_finished_at,last_synced_at,created_by,updated_by)
             values('dingtalk',?,?,?,?,?,?,?,?::jsonb,?,?,?, ?,?,?::jsonb,?::jsonb,?,?,?,?,?,?,now(),'dingtalk-sync','dingtalk-sync')
             on conflict(process_code,external_instance_id) where external_instance_id is not null do update set
-              approval_no=excluded.approval_no,title=excluded.title,model=excluded.model,tipo=excluded.tipo,generated_codes=excluded.generated_codes,
+              approval_no=excluded.approval_no,title=excluded.title,model=excluded.model,tipo=excluded.tipo,generated_codes=case when plm_mold_application.source_snapshot_json->'researchSubmission'->>'mode'='research' and plm_mold_application.mold_set_id is not null and plm_mold_application.execution_resolution_json->'researchCoding'->'m'->'codes' is not null then plm_mold_application.generated_codes else excluded.generated_codes end,
               form_data=excluded.form_data,remote_status=excluded.remote_status,remote_result=excluded.remote_result,
               status=case when plm_mold_application.status='converted' then 'converted' else excluded.status end,
               approval_granted=excluded.approval_granted,raw_snapshot=excluded.raw_snapshot,originator_user_id=excluded.originator_user_id,

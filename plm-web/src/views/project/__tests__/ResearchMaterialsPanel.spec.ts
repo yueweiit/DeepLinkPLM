@@ -3,6 +3,7 @@ import ElementPlus from 'element-plus';
 import {afterEach,expect,it,vi} from 'vitest';
 import ResearchMaterialsPanel from '../components/ResearchMaterialsPanel.vue';
 import {type DevelopmentMaterial} from '@/api/modules/productResearch';
+import {product3dKind} from '@/utils/product3dMaterials';
 let wrapper:VueWrapper;
 afterEach(()=>wrapper?.unmount());
 const file=(id:number,status='draft'):DevelopmentMaterial=>({id,type:'file',name:`完整工程图片-000${id}.png`,versionNo:'D'+id,status,category:'sample_image',attachment:{attachmentId:id,fileExt:'png',fileSize:1024,originalFileName:`完整工程图片-000${id}.png`} as any});
@@ -49,4 +50,8 @@ it('prevents file navigation and uploading on a readonly or busy panel while off
 
 it('retains full long file identities and original write restrictions in the unified project panel',async()=>{
  start();const item={...file(1),name:'供应商确认的完整设计名称_不得截断_包含代表型号及变更原因.png'};await wrapper.setProps({materials:[item],editable:false,selectable:false});expect(wrapper.get('.material-row').text()).toContain(item.name+' · D1');expect(wrapper.get('.image-caption').text()).toContain(item.name);expect(wrapper.find('.material-drop-zone').exists()).toBe(false);expect(wrapper.text()).toContain('下载');expect(wrapper.text()).not.toContain('上传新版');expect(wrapper.text()).not.toContain('删除草稿');
+});
+
+it('keeps a legacy attachment with null extension visible as an ordinary file without guessing 3D use from its filename',async()=>{
+ const legacy:DevelopmentMaterial={...file(9),name:'历史产品图.step',category:'drawing',attachment:{...file(9).attachment,fileExt:null} as any};expect(product3dKind(legacy)).toBeNull();start();await wrapper.setProps({materials:[legacy]});expect(wrapper.get('.material-row').text()).toContain('历史产品图.step · D9');expect(wrapper.find('.image-gallery').exists()).toBe(false);expect(wrapper.get('.image-placeholder').text()).toBe('暂无图片');await wrapper.get('.material-row').findAll('button').find(button=>button.text()==='下载')!.trigger('click');expect(wrapper.emitted('download')).toEqual([[legacy]]);expect(wrapper.emitted('update:selected')).toBeUndefined();
 });

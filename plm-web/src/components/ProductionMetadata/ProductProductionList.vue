@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import {computed,ref,watch} from 'vue'
 import FixedTableViewport from '@/components/FixedTableViewport/index.vue'
 import StatusTag from '@/components/StatusTag/index.vue'
@@ -16,16 +18,16 @@ function selectAll(){const on=!allSelected.value;selected.value=new Set(on?props
 watch(()=>props.rows,()=>{selected.value=new Set();emit('selectionChange',[])})
 </script>
 <template>
-  <FixedTableViewport fill :refresh-key="rows"><div class="product-record-list" role="table" :aria-label="sku?'SKU 生产状态列表':'产品生产状态列表'">
-    <div class="record-header record-row" role="row"><span><input v-if="selectable" type="checkbox" aria-label="选择本页产品" :checked="allSelected" @change="selectAll"/></span><span>名称 / 编码</span><span>{{sku?'型号 / 颜色 / 来源':'系列 / 负责人 / 版本'}}</span><span>开发 / 生产状态</span><span>操作</span></div>
+  <FixedTableViewport fill :refresh-key="rows"><div class="product-record-list" role="table" :aria-label="sku?uiText('SKU 生产状态列表'):uiText('产品生产状态列表')">
+    <div class="record-header record-row" role="row"><span><input v-if="selectable" type="checkbox" :aria-label='uiText("选择本页产品")' :checked="allSelected" @change="selectAll"/></span><span>{{ uiText("名称 / 编码") }}</span><span>{{sku?uiText('型号 / 颜色 / 来源'):uiText('系列 / 负责人 / 版本')}}</span><span>{{ uiText("开发 / 生产状态") }}</span><span>{{ uiText("操作") }}</span></div>
     <div class="record-body" role="rowgroup" tabindex="0">
       <div v-for="r in rows" :key="r.productId" class="record-row" role="row">
-        <div class="record-check" role="cell"><input v-if="selectable" type="checkbox" :aria-label="`选择产品 ${r.productName}`" :checked="selected.has(r.productId)" @change="select(r.productId,($event.target as HTMLInputElement).checked)"/></div>
+        <div class="record-check" role="cell"><input v-if="selectable" type="checkbox" :aria-label="uiText('选择产品 {value0}',{value0:(r.productName)})" :checked="selected.has(r.productId)" @change="select(r.productId,($event.target as HTMLInputElement).checked)"/></div>
         <div class="record-name" role="cell"><slot name="image" :row="r"/><strong>{{r.productName}}</strong><span>{{code?code(r):r.displaySkuCode||r.productCode}}</span></div>
-        <div class="record-meta" role="cell"><template v-if="sku"><span>型号：{{r.model||'--'}} · 颜色：{{r.color||'--'}}</span><span>单位：{{r.stockUom||'pcs'}} · 来源：{{r.projectSource||'历史归档'}}</span></template><template v-else><span>{{r.seriesName||'--'}} · 负责人：{{r.ownerUserName||'--'}}</span><span>BOM：{{r.activeBomVersion||'--'}} · 完整率：{{r.completionRate===undefined?'--':Math.round(r.completionRate*100)+'%'}}</span></template><span>版本：{{r.versionNo||'--'}}<template v-if="r.updatedAt||r.lastActiveAt"> · 更新：{{formatDate(r.updatedAt||r.lastActiveAt)}}</template></span></div>
+        <div class="record-meta" role="cell"><template v-if="sku"><span>{{ uiText("型号：") }}{{r.model||'--'}}{{ uiText(" · 颜色：") }}{{r.color||'--'}}</span><span>{{ uiText("单位：") }}{{r.stockUom||'pcs'}}{{ uiText(" · 来源：") }}{{r.projectSource||uiText('历史归档')}}</span></template><template v-else><span>{{r.seriesName||'--'}}{{ uiText(" · 负责人：") }}{{r.ownerUserName||'--'}}</span><span>BOM：{{r.activeBomVersion||'--'}}{{ uiText(" · 完整率：") }}{{r.completionRate===undefined?'--':Math.round(r.completionRate*100)+'%'}}</span></template><span>{{ uiText("版本：") }}{{r.versionNo||'--'}}<template v-if="r.updatedAt||r.lastActiveAt">{{ uiText(" · 更新：") }}{{formatDate(r.updatedAt||r.lastActiveAt)}}</template></span></div>
         <div class="record-state" role="cell"><StatusTag :status="r.status" object-type="product"/><ProductProductionControl :product-id="r.productId" :model-value="r.productionStatus||'unknown'" :label="r.productName" @update:model-value="r.productionStatus=$event" @changed="emit('changed')"/></div>
-        <div class="record-action" role="cell"><el-button size="small" link type="primary" @click="emit('detail',r)">详情</el-button></div>
-      </div><el-empty v-if="!rows.length" description="暂无符合条件的记录" :image-size="60"/>
+        <div class="record-action" role="cell"><el-button size="small" link type="primary" @click="emit('detail',r)">{{ uiText("详情") }}</el-button></div>
+      </div><el-empty v-if="!rows.length" :description='uiText("暂无符合条件的记录")' :image-size="60"/>
     </div>
   </div></FixedTableViewport>
 </template>

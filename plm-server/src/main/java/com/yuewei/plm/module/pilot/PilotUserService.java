@@ -33,7 +33,7 @@ public class PilotUserService {
   Map<Long,List<String>> groups=new HashMap<>();
   for(var row:jdbc.queryForList("select user_id,field_group from plm_collaboration_assignment order by user_id,field_group"))groups.computeIfAbsent(((Number)row.get("user_id")).longValue(),k->new ArrayList<>()).add(row.get("field_group").toString());
   List<Map<String,Object>> result=new ArrayList<>();
-  for(var row:jdbc.queryForList("select u.user_id \"userId\",u.username,u.display_name \"displayName\",u.department_name \"departmentName\",u.status,u.all_permissions \"allPermissions\",p.role_code \"roleCode\",p.all_objects \"allObjects\",p.dingtalk_user_id \"dingtalkUserId\",p.permissions::text \"permissionsJson\",p.version_no \"version\" from sys_user u left join plm_pilot_account p on p.user_id=u.user_id where u.deleted_flag=0 order by u.user_id")){
+  for(var row:jdbc.queryForList("select u.user_id \"userId\",u.username,u.display_name \"displayName\",u.department_name \"departmentName\",u.status,u.preferred_language \"preferredLanguage\",u.all_permissions \"allPermissions\",p.role_code \"roleCode\",p.all_objects \"allObjects\",p.dingtalk_user_id \"dingtalkUserId\",p.permissions::text \"permissionsJson\",p.version_no \"version\" from sys_user u left join plm_pilot_account p on p.user_id=u.user_id where u.deleted_flag=0 order by u.user_id")){
    long id=((Number)row.get("userId")).longValue();row.put("permissions",readList(Objects.toString(row.remove("permissionsJson"),"[]")));row.put("scopes",scopes.getOrDefault(id,List.of()));row.put("fieldGroups",groups.getOrDefault(id,List.of()));result.add(row);
   }return result;
  }

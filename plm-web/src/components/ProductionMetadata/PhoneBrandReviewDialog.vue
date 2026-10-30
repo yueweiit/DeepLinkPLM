@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import {computed,onBeforeUnmount,ref,watch} from 'vue'
 import {applyPhoneBrandReview,getPhoneBrandReview} from '@/api/modules/productionMetadata'
 import {useUserStore} from '@/stores/user'
@@ -35,22 +37,22 @@ watch([()=>user.token,()=>props.editable],()=>{generation++;preview.value=undefi
 onBeforeUnmount(()=>generation++)
 </script>
 <template>
-  <el-dialog v-model="visible" append-to-body title="一键核对品牌" width="min(1040px,96vw)" top="6vh" :close-on-click-modal="false" :close-on-press-escape="!busy" :show-close="!busy" class="phone-brand-review">
+  <el-dialog v-model="visible" append-to-body :title='uiText("一键核对品牌")' width="min(1040px,96vw)" top="6vh" :close-on-click-modal="false" :close-on-press-escape="!busy" :show-close="!busy" class="phone-brand-review">
     <section class="brand-review-content" v-loading="loading">
-      <p class="brand-review-scope">核对全库未归类编码组，包含其他分页和当前筛选以外的记录。仅保存品牌；型号原文、手机编码、生产状态及模具适配分别维护。</p>
+      <p class="brand-review-scope">{{ uiText("核对全库未归类编码组，包含其他分页和当前筛选以外的记录。仅保存品牌；型号原文、手机编码、生产状态及模具适配分别维护。") }}</p>
       <el-alert v-if="success" :title="success" type="success" :closable="false"/>
-      <el-alert v-if="error" :title="error" type="error" :closable="false"><el-button link :disabled="busy" @click="load">重新核对</el-button></el-alert>
+      <el-alert v-if="error" :title="error" type="error" :closable="false"><el-button link :disabled="busy" @click="load">{{ uiText("重新核对") }}</el-button></el-alert>
       <template v-if="preview">
-        <div class="brand-review-summary"><strong>未归类 {{preview.total}} 个 · 可确认 {{preview.candidateCount}} 个 · 保留未归类 {{preview.unresolvedCount}} 个</strong><el-button size="small" :disabled="loading||busy" @click="load">重新核对</el-button></div>
+        <div class="brand-review-summary"><strong>{{ uiText("未归类 ") }}{{preview.total}}{{ uiText(" 个 · 可确认 ") }}{{preview.candidateCount}}{{ uiText(" 个 · 保留未归类 ") }}{{preview.unresolvedCount}}{{ uiText(" 个") }}</strong><el-button size="small" :disabled="loading||busy" @click="load">{{ uiText("重新核对") }}</el-button></div>
         <p v-if="distribution" class="brand-review-distribution">{{distribution}}</p>
-        <div class="brand-review-tools"><el-radio-group v-model="tab" size="small" aria-label="品牌核对结果"><el-radio-button value="ready">可一键确认 ({{preview.candidateCount}})</el-radio-button><el-radio-button value="unresolved">保留未归类 ({{preview.unresolvedCount}})</el-radio-button></el-radio-group><el-input v-model="keyword" size="small" clearable placeholder="查编码、原型号、品牌或原因" aria-label="品牌核对搜索"/></div>
-        <p v-if="tab==='unresolved'&&preview.unresolvedCount" class="brand-review-scope">通用配件、结构件或服务可保持品牌空白，无需逐条确认；需要按具体手机查询时，再集中补适用设备或来源规格。确需补充品牌时，可在手机编码 → 品牌维护别名或前缀，或点“定位编码”后在“维护”中指定品牌。</p>
-        <div class="brand-review-records" role="table" aria-label="品牌核对预览"><div class="brand-review-heading brand-review-row" role="row"><span role="columnheader">编码</span><span role="columnheader">原型号名称</span><span role="columnheader">品牌</span><span role="columnheader">{{tab==='ready'?'核对依据':'保留原因／补充位置'}}</span></div><div class="brand-review-body" role="rowgroup"><div v-for="item in records" :key="item.id" class="brand-review-row" role="row"><strong role="cell">{{item.codeValue}}</strong><span role="cell">{{item.codeName}}</span><span role="cell">{{item.brandNames.join(' / ')||'未归类'}}</span><span role="cell">{{[item.reason,...item.evidence].filter(Boolean).join('；')}}<el-button v-if="item.state==='unresolved'" link size="small" :disabled="busy" @click="emit('locate',item.codeValue)">定位编码</el-button></span></div><el-empty v-if="!records.length" :description="keyword?'没有符合搜索的记录':tab==='ready'?'没有需要批量确认的品牌':'没有保留未归类的记录'" :image-size="48"/></div></div>
+        <div class="brand-review-tools"><el-radio-group v-model="tab" size="small" :aria-label='uiText("品牌核对结果")'><el-radio-button value="ready">{{ uiText("可一键确认 (") }}{{preview.candidateCount}})</el-radio-button><el-radio-button value="unresolved">{{ uiText("保留未归类 (") }}{{preview.unresolvedCount}})</el-radio-button></el-radio-group><el-input v-model="keyword" size="small" clearable :placeholder='uiText("查编码、原型号、品牌或原因")' :aria-label='uiText("品牌核对搜索")'/></div>
+        <p v-if="tab==='unresolved'&&preview.unresolvedCount" class="brand-review-scope">{{ uiText("通用配件、结构件或服务可保持品牌空白，无需逐条确认；需要按具体手机查询时，再集中补适用设备或来源规格。确需补充品牌时，可在手机编码 → 品牌维护别名或前缀，或点“定位编码”后在“维护”中指定品牌。") }}</p>
+        <div class="brand-review-records" role="table" :aria-label='uiText("品牌核对预览")'><div class="brand-review-heading brand-review-row" role="row"><span role="columnheader">{{ uiText("编码") }}</span><span role="columnheader">{{ uiText("原型号名称") }}</span><span role="columnheader">{{ uiText("品牌") }}</span><span role="columnheader">{{tab==='ready'?uiText('核对依据'):uiText('保留原因／补充位置')}}</span></div><div class="brand-review-body" role="rowgroup"><div v-for="item in records" :key="item.id" class="brand-review-row" role="row"><strong role="cell">{{item.codeValue}}</strong><span role="cell">{{item.codeName}}</span><span role="cell">{{item.brandNames.join(' / ')||uiText('未归类')}}</span><span role="cell">{{[item.reason,...item.evidence].filter(Boolean).join('；')}}<el-button v-if="item.state==='unresolved'" link size="small" :disabled="busy" @click="emit('locate',item.codeValue)">{{ uiText("定位编码") }}</el-button></span></div><el-empty v-if="!records.length" :description="keyword?uiText('没有符合搜索的记录'):tab==='ready'?uiText('没有需要批量确认的品牌'):uiText('没有保留未归类的记录')" :image-size="48"/></div></div>
         <el-pagination v-model:current-page="page" size="small" :page-size="50" :total="filtered.length" :pager-count="5" layout="total,prev,pager,next"/>
-        <el-input v-if="candidates.length" v-model="reason" size="small" aria-label="批量品牌核对原因" maxlength="1000" placeholder="核对原因（已按本次依据填写，可修改）" :disabled="busy"/>
+        <el-input v-if="candidates.length" v-model="reason" size="small" :aria-label='uiText("批量品牌核对原因")' maxlength="1000" :placeholder='uiText("核对原因（已按本次依据填写，可修改）")' :disabled="busy"/>
       </template>
     </section>
-    <template #footer><el-button size="small" :disabled="busy" @click="visible=false">关闭</el-button><el-button size="small" type="primary" :loading="busy" :disabled="!canApply" @click="apply">一键确认全部明确品牌{{candidates.length?` (${candidates.length})`:''}}</el-button></template>
+    <template #footer><el-button size="small" :disabled="busy" @click="visible=false">{{ uiText("关闭") }}</el-button><el-button size="small" type="primary" :loading="busy" :disabled="!canApply" @click="apply">{{ uiText("一键确认全部明确品牌") }}{{candidates.length?` (${candidates.length})`:''}}</el-button></template>
   </el-dialog>
 </template>
 <style>

@@ -20,7 +20,7 @@ import static org.mockito.Mockito.*;
 import static com.yuewei.plm.module.partner.PartnerValues.*;
 
 /** Real local PostgreSQL, isolated schema; QA fixtures never enter the user's cloned or production data. */
-@EnabledIfEnvironmentVariable(named="PLM_CATALOG_LIFECYCLE_TEST_URL",matches="(?:jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/plm_three_catalog_tests|jdbc:postgresql://127\\.0\\.0\\.1:15483/plm_foundation_crud_it\\?currentSchema=plm)")
+@EnabledIfEnvironmentVariable(named="PLM_CATALOG_LIFECYCLE_TEST_URL",matches="(?:jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/plm_three_catalog_tests|jdbc:postgresql://127\\.0\\.0\\.1:15504/catalog_nonempty_filter_tests|jdbc:postgresql://127\\.0\\.0\\.1:15483/plm_foundation_crud_it\\?currentSchema=plm)")
 class PartnerCatalogLifecycleLocalIntegrationTest {
  private JdbcTemplate admin,jdbc;private String schema;private TransactionTemplate tx;private PartnerStore store;private PartnerSampleService samples;private PartnerOperationsService operations;private PartnerListingService listings;private OperationLogService audit;private PilotAccessService access;private Map<String,Object> snapshot;
  private Map<String,Object> values(Object... pairs){var d=new LinkedHashMap<String,Object>();for(int i=0;i<pairs.length;i+=2)d.put(text(pairs[i]),pairs[i+1]);return d;}
@@ -32,6 +32,8 @@ class PartnerCatalogLifecycleLocalIntegrationTest {
    create table plm_partner_revision(revision_id bigserial,record_id bigint,revision bigint,data jsonb,created_by text,created_at timestamptz default now());
    create table plm_partner_event(event_id bigserial,record_id bigint,supplier_code text,action text,data jsonb,request_id text,created_by text,actor_id bigint,created_at timestamptz default now(),unique(record_id,request_id));
    create table plm_partner_selection_row(row_id uuid primary key,record_id bigint,row_version bigint default 4,sort_order bigint default 1,data jsonb,confirmed boolean default true);
+   create table plm_partner_quote_line(record_id bigint,line_id uuid,row_version bigint,sort_order bigint,data jsonb);
+   create table plm_partner_catalog_style_source(source_kind text,record_id bigint,row_id uuid,style_id bigint,fields jsonb default '{}');
    insert into plm_partner_record(record_id,kind,code,name,version,data) values(900,'selection','SL-000900','QA已选样',3,'{"purpose":"my_selection"}');
    insert into plm_partner_selection_row(row_id,record_id,data) values('00000000-0000-0000-0000-000000000090',900,'{}');
    create table plm_attachment(attachment_id bigserial primary key,file_name text,version_no text,content_type text,file_size bigint,checksum text,created_at timestamp default clock_timestamp(),deleted_flag int default 0);

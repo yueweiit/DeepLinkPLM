@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -8,8 +10,8 @@ const router = useRouter()
   <div class="error-shell">
     <section class="page-panel error-panel">
       <h1>404</h1>
-      <p>页面不存在，可能已经被移动或路径输入有误。</p>
-      <el-button type="primary" @click="router.push('/dashboard')">返回工作台</el-button>
+      <p>{{ uiText("页面不存在，可能已经被移动或路径输入有误。") }}</p>
+      <el-button type="primary" @click="router.push('/dashboard')">{{ uiText("返回工作台") }}</el-button>
     </section>
   </div>
 </template>

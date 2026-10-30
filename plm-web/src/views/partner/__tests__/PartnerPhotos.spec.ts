@@ -2,6 +2,7 @@ import {flushPromises,mount,type VueWrapper} from '@vue/test-utils'
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
 import {defineComponent} from 'vue'
 import PartnerPhoto from '../PartnerPhoto.vue'
+import PartnerFilePreview from '../PartnerFilePreview.vue'
 import SelectionImportPhoto from '../selection/SelectionImportPhoto.vue'
 import {authorizedBlobs} from '@/utils/authorizedBlobQueue'
 const api=vi.hoisted(()=>({fileBlob:vi.fn(),selectionImportImage:vi.fn(),catalogImportImage:vi.fn()}))
@@ -18,6 +19,7 @@ afterEach(async()=>{for(const wrapper of wrappers.splice(0))if(wrapper.exists())
 function startPhoto(id=7,allowRetry=true){const wrapper=mount(PartnerPhoto,{props:{id,allowRetry}});wrappers.push(wrapper);return wrapper}
 
 describe('real authenticated photo states',()=>{
+ it('opens the shared authorised gallery directly from a thumbnail and releases each previous image on navigation',async()=>{const wrapper=mount(PartnerPhoto,{props:{id:7,previewable:true,previewFiles:[{id:7,name:'第一张'},{id:8,name:'第二张'}]},global:{stubs:{ElEmpty:true,ElDialog:{props:['modelValue','title'],template:'<section v-if="modelValue"><h2>{{title}}</h2><slot/></section>'},ElButton:{template:'<button><slot/></button>'}}}});wrappers.push(wrapper);await flushPromises();await wrapper.get('[aria-label="预览产品图片"]').trigger('click');await flushPromises();expect(wrapper.findComponent(PartnerFilePreview).exists()).toBe(true);expect(wrapper.text()).toContain('第一张');expect(api.fileBlob).toHaveBeenCalledTimes(1);const previous=wrapper.get('.preview-image').attributes('src');await wrapper.findAll('button').find(button=>button.text()==='下一张')!.trigger('click');await flushPromises();expect(wrapper.text()).toContain('第二张');expect(api.fileBlob).toHaveBeenLastCalledWith(8,true,{signal:expect.any(AbortSignal)});expect(revoke).toHaveBeenCalledWith(previous)})
  it('keeps sized loading placeholders and downloads a shared file once for two mounted photos',async()=>{
   const pending=deferred();api.fileBlob.mockReturnValue(pending.promise)
   const a=startPhoto(),b=startPhoto();expect(a.get('.partner-photo').attributes('aria-busy')).toBe('true');expect(a.text()).toContain('加载中')

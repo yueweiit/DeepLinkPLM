@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import {computed,ref,watch,onMounted} from 'vue'
 import {useProductionMetadataStore} from '@/stores/productionMetadata'
 import {useUserStore} from '@/stores/user'
@@ -15,5 +17,5 @@ watch(()=>[props.productId,props.modelValue,user.token] as const,async([id,value
 onMounted(()=>void permissions.ensure())
 function saved(rows:ProductionMetadataResult[]){const row=rows[0];if(row){generation++;current.value=row.productionStatus;emit('update:modelValue',row.productionStatus);emit('changed',row)}}
 </script>
-<template><span class="production-control"><el-tag size="small" :type="productionStatusType(current)">生产：{{productionStatusName(current)}}</el-tag><el-button v-if="permissions.canMaintain&&productId>0" size="small" link aria-label="维护产品生产状态" @click.stop="editor=true">维护</el-button><MetadataDialog v-model="editor" kind="product" :items="items" @saved="saved"/></span></template>
+<template><span class="production-control"><el-tag size="small" :type="productionStatusType(current)">{{ uiText("生产：") }}{{productionStatusName(current)}}</el-tag><el-button v-if="permissions.canMaintain&&productId>0" size="small" link :aria-label='uiText("维护产品生产状态")' @click.stop="editor=true">{{ uiText("维护") }}</el-button><MetadataDialog v-model="editor" kind="product" :items="items" @saved="saved"/></span></template>
 <style scoped>.production-control{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;max-width:100%}</style>

@@ -48,6 +48,7 @@ export type ProductLifecycle =
 export type MoldAction = 'modify' | 'new' | 'none'
 
 export interface UserProfile {
+  preferredLanguage?: import('@/locales/language').Language
   canMaintainEngineeringData?: boolean
   userId: number
   userName: string

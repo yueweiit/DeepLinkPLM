@@ -282,6 +282,52 @@ public class ProductServiceImpl implements ProductService {
             && ProductStatusConstants.RELEASED.equals(product.getStatus());
     }
 
+    @Override
+    @Transactional
+    public String ensureResearchProductSpecificCode(Long productId, String operator) {
+        Product product = productRepository.selectIdentityForUpdate(productId);
+        if (product == null || !com.yuewei.plm.module.project.development.ProductDevelopmentService.isLaunch(product))
+            throw new BusinessException(40001, "自动登记编码仅用于原新品项目");
+        if (java.util.Set.of("archived", "abandoned").contains(java.util.Objects.toString(product.getStatus(), ""))
+            || java.util.Set.of("frozen", "abandoned").contains(java.util.Objects.toString(product.getLockStatus(), "")))
+            throw new BusinessException(40001, "已停用或冻结的新品不能自动登记编码");
+        if (StringUtils.hasText(product.getProductSpecificCode())) return product.getProductSpecificCode();
+        if (masterDataJdbc == null) throw new BusinessException(50301, "产品编码登记服务暂不可用");
+        // The product table and imported code sources reserve identities; no second allocation ledger is needed.
+        masterDataJdbc.queryForObject("select pg_advisory_xact_lock(hashtextextended(?,0))", Object.class, "product-specific:auto");
+        var occupied = new java.util.HashSet<>(masterDataJdbc.queryForList("""
+            select upper(btrim(value)) from (
+              select product_specific_code value from plm_product
+              union all select regexp_replace(upper(btrim(product_code_prefix)),'^[MN](?=[A-Z]{2}$)','') from plm_product
+              union all select substring(upper(mold_code_prefix) from '^M([A-Z]{2})') from plm_product
+              union all select substring(upper(product_code) from '^[MN]([A-Z]{2})[0-9]') from plm_product
+              union all select substring(upper(finished_product_code) from '^N([A-Z]{2})[0-9]') from plm_product
+              union all select product_specific_code from plm_product_mold_code
+              union all select substring(upper(mold_code) from '^M([A-Z]{2})') from plm_product_mold_code
+              union all select product_specific_code from plm_mold_code_source
+              union all select substring(upper(mold_code) from '^[MN]([A-Z]{2})') from plm_mold_code_source
+              union all select substring(upper(inventory_code) from '^[MN]([A-Z]{2})[0-9]') from plm_inventory
+              union all select (regexp_matches(upper(generated_codes),'M([A-Z]{2})[0-9]{6}','g'))[1] from plm_mold_application
+            ) codes where value is not null
+            """, String.class));
+        for (char first = 'A'; first <= 'Z'; first++) for (char second = 'A'; second <= 'Z'; second++) {
+            String candidate = "" + first + second;
+            if (occupied.contains(candidate)) continue;
+            masterDataJdbc.queryForObject("select pg_advisory_xact_lock(hashtextextended(?,0))", Object.class, "product-specific:" + candidate);
+            if (masterDataJdbc.queryForObject("select count(*) from plm_product where product_specific_code=?", Long.class, candidate) > 0) continue;
+            product.setProductSpecificCode(candidate);
+            product.setProductCodePrefix(candidate);
+            product.setMoldCodePrefix("M" + candidate);
+            product.setUpdatedAt(LocalDateTime.now());
+            product.setUpdatedBy(operator);
+            ensureProductBusinessCodeAvailable(product, productId);
+            productRepository.updateById(product);
+            auditInitialResearchCode(product, null);
+            return candidate;
+        }
+        throw new BusinessException(ErrorCodeConstants.CODE_CONFLICT, "两位产品编码已用尽，请核对现有编码范围");
+    }
+
     /** Identity-only completion cannot reopen a released technical version or resave its requirements. */
     private ProductVO assignReleasedResearchIdentity(Long id, ProductUpdateDTO dto) {
         if(pilotAccessService==null)throw new BusinessException(40001,"工程授权暂不可用，请稍后重试");
@@ -929,6 +975,8 @@ public class ProductServiceImpl implements ProductService {
 
     private void ensureProductBusinessCodeAvailable(Product product, Long excludedProductId) {
         if (StringUtils.hasText(product.getProductSpecificCode()) && "product_line".equals(product.getProductType())) {
+            if (masterDataJdbc != null && org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive())
+                masterDataJdbc.queryForObject("select pg_advisory_xact_lock(hashtextextended(?,0))", Object.class, "product-specific:" + product.getProductSpecificCode());
             ensureProductFieldAvailable(Product::getProductSpecificCode, product.getProductSpecificCode(), excludedProductId,
                 "productSpecificCode already exists: " + product.getProductSpecificCode());
         }

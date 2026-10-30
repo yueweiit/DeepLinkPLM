@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, defineAsyncComponent, ref, watch } from "vue";
 import PhoneObjectIdSelect from '@/components/PhoneObjectSelect/IdSelect.vue'
 import { getResearchReferencePage, getResearchReferencePhones } from '@/api/modules/productResearch'
@@ -103,42 +105,41 @@ watch(
   <ProjectWorkspace v-if="selected" />
   <section v-else class="business-page" v-loading="loading">
     <header class="toolbar">
-      <h2>{{ business.title }}</h2>
+      <h2>{{ uiText(String((business.title) ?? '')) }}</h2>
       <el-button @click="router.push('/product-research')"
-        >返回新品研发</el-button
+        >{{ uiText("返回新品研发") }}</el-button
       >
     </header>
     <div class="filters">
       <el-input
         v-model="keyword"
         clearable
-        placeholder="搜索新品名称、编码或业务内容"
+        :placeholder='uiText("搜索新品名称、编码或业务内容")'
         @keyup.enter="reset"
         @clear="reset"
       />
       <el-select
         v-if="business.kind !== 'cost'"
         v-model="status"
-        aria-label="业务状态"
+        :aria-label='uiText("业务状态")'
         @change="reset"
-        ><el-option label="全部状态" value="all" /><el-option
+        ><el-option :label='uiText("全部状态")' value="all" /><el-option
           v-for="s in stateOptions"
           :key="s"
           :value="s"
           :label="statuses[s]"
       /></el-select>
-      <el-button @click="reset">搜索</el-button>
-      <PhoneObjectIdSelect :model-value="null" :provider="projectProvider" :phone-first="false" type="product" label="选择新品项目" placeholder="选择新品项目，查看或登记" @update:model-value="$event && open($event)"/>
+      <el-button @click="reset">{{ uiText("搜索") }}</el-button>
+      <PhoneObjectIdSelect :model-value="null" :provider="projectProvider" :phone-first="false" type="product" :label='uiText("选择新品项目")' :placeholder='uiText("选择新品项目，查看或登记")' @update:model-value="$event && open($event)"/>
     </div>
     <div class="summary">
-      {{ summary.projectCount }} 个项目 · {{ total }}
-      {{ business.kind === "cost" ? "个成本档案" : "条记录"
-      }}<span v-if="business.kind === 'presale'">
-        · 有效 {{ summary.quantity }} 件（不含已取消）</span
+      {{ summary.projectCount }}{{ uiText(" 个项目 · ") }}{{ total }}
+      {{ business.kind === "cost" ? uiText('个成本档案') : uiText('条记录')
+      }}<span v-if="business.kind === 'presale'">{{ uiText(" · 有效 ") }}{{ summary.quantity }}{{ uiText(" 件（不含已取消）") }}</span
       ><span class="muted">{{
         business.kind === "cost"
-          ? "单件核算沿用BOM成本；预算和费用来自原台账，按币种分别显示。"
-          : "记录与新品项目共用数据；进入项目可办理、查看资料和历史。"
+          ? uiText('单件核算沿用BOM成本；预算和费用来自原台账，按币种分别显示。')
+          : uiText('记录与新品项目共用数据；进入项目可办理、查看资料和历史。')
       }}</span>
     </div>
     <div class="records">
@@ -164,26 +165,24 @@ watch(
             {{
               PRODUCT_RESEARCH_STAGES[(r.currentStepNo || 1) - 1]?.name
             }}</span
-          ><span v-if="r.launchDate">计划上市 {{ r.launchDate }}</span>
+          ><span v-if="r.launchDate">{{ uiText("计划上市 ") }}{{ r.launchDate }}</span>
         </div>
         <div v-if="business.kind === 'cost'" class="facts">
-          <span>单件核算：{{r.hasUnitCostDraft?'有草稿':'未录草稿'}} · 已确认 {{r.unitCostVersionCount||0}} 版</span>
+          <span>{{ uiText("单件核算：") }}{{r.hasUnitCostDraft?uiText('有草稿'):uiText('未录草稿')}}{{ uiText(" · 已确认 ") }}{{r.unitCostVersionCount||0}}{{ uiText(" 版") }}</span>
           <span
-            >原预算 {{ r.budgetCount }} 笔 · 原费用
-            {{ r.expenseCount }} 笔</span
+            >{{ uiText("原预算 ") }}{{ r.budgetCount }}{{ uiText(" 笔 · 原费用 ") }}{{ r.expenseCount }}{{ uiText(" 笔") }}</span
           >
           <span
             v-for="g in r.budgets?.currencyGroups"
             :key="`b${g.currencyCode}${g.budgetKind}`"
             >{{ g.currencyCode }}
-            {{ g.budgetKind === "platform" ? "项目总预算" : "模具分项预算" }}
-            {{ g.budgetTotal ?? "待定" }}</span
+            {{ g.budgetKind === "platform" ? uiText('项目总预算') : uiText('模具分项预算') }}
+            {{ g.budgetTotal ?? uiText('待定') }}</span
           >
           <span
             v-for="g in r.expenses?.currencyGroups"
             :key="`e${g.currencyCode}`"
-            >{{ g.currencyCode }} · 确认申报 {{ g.declaredTotal ?? "待定" }} ·
-            ERP净额 {{ g.erpPostedNet ?? "待定" }}</span
+            >{{ g.currencyCode }}{{ uiText(" · 确认申报 ") }}{{ g.declaredTotal ?? uiText('待定') }}{{ uiText(" · ERP净额 ") }}{{ g.erpPostedNet ?? uiText('待定') }}</span
           >
         </div>
         <div v-else-if="r.record" class="facts">
@@ -192,34 +191,32 @@ watch(
             {{ r.record.target }}</strong
           >
           <template v-if="business.kind === 'promotion'"
-            ><span>{{ r.record.action }} · 计划 {{ r.record.plannedDate }}</span
+            ><span>{{ r.record.action }}{{ uiText(" · 计划 ") }}{{ r.record.plannedDate }}</span
             ><span
               v-if="
                 user.hasPermission('finance:read') &&
                 (r.record.budgetId || r.record.expenseId)
               "
-              >关联{{ r.record.budgetId ? `预算 #${r.record.budgetId}` : "" }}
+              >{{ uiText("关联") }}{{ r.record.budgetId ? uiText('预算 #{value0}',{value0:(r.record.budgetId)}) : "" }}
               {{
-                r.record.expenseId ? `费用 #${r.record.expenseId}` : ""
+                r.record.expenseId ? uiText('费用 #{value0}',{value0:(r.record.expenseId)}) : ""
               }}</span
             ></template
           >
           <template v-else
             ><span
               >{{
-                r.record.phoneSnapshot?.modelName || r.model || "待核对机型"
+                r.record.phoneSnapshot?.modelName || r.model || uiText('待核对机型')
               }}
-              · {{ r.record.quantity }} 件 · 承诺
-              {{ r.record.promisedDate }}</span
+              · {{ r.record.quantity }}{{ uiText(" 件 · 承诺 ") }}{{ r.record.promisedDate }}</span
             ></template
           >
           <span
-            >{{ statuses[r.record.status] || r.record.status }} · 记录版本
-            {{ r.record.recordVersion }}</span
+            >{{ statuses[r.record.status] || r.record.status }}{{ uiText(" · 记录版本 ") }}{{ r.record.recordVersion }}</span
           ><el-tag
             v-if="r.record.planVersion !== r.currentPlanVersion"
             type="warning"
-            >计划已调整，需核对</el-tag
+            >{{ uiText("计划已调整，需核对") }}</el-tag
           >
         </div>
         <div class="actions">
@@ -228,7 +225,7 @@ watch(
             link
             @click="open(r.productId, r.currentStepNo)"
             >{{
-              business.kind === "cost" ? "查看成本与来源" : "查看／办理"
+              business.kind === "cost" ? uiText('查看成本与来源') : uiText('查看／办理')
             }}</el-button
           >
         </div>
@@ -237,8 +234,8 @@ watch(
         v-if="!loading && !error && !rows.length"
         :description="
           keyword || status !== 'all'
-            ? '没有符合条件的记录'
-            : '暂无记录。选择已有新品项目后登记；没有项目时先到需求立项新建。'
+            ? uiText('没有符合条件的记录')
+            : uiText('暂无记录。选择已有新品项目后登记；没有项目时先到需求立项新建。')
         "
       />
     </div>

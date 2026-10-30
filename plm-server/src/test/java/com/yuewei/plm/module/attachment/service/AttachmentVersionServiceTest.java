@@ -24,6 +24,20 @@ class AttachmentVersionServiceTest {
     final AttachmentVersionService service=new AttachmentVersionService(storage,files,jdbc,access,logs,new ObjectMapper().findAndRegisterModules());
     Attachment file(long id,String ext){var a=new Attachment();a.setAttachmentId(id);a.setOwnerObjectId(10L);a.setOwnerObjectType("Product");a.setFileExt(ext);a.setVersionNo("V1");a.setDeletedFlag(0);a.setStatus("draft");a.setCreatedAt(LocalDateTime.now());when(files.selectById(id)).thenReturn(a);return a;}
     void actor(){when(access.actor()).thenReturn(new CurrentUser(3L,"engineer","真实工程账号",false));when(access.actorId()).thenReturn(3L);}
+    @Test void renderRevisionKeepsItsPurposeAndFamilyThroughTheExistingVersionWriter(){
+        var old=file(1,"png");old.setFamilyId(1L);old.setFileCategory("render_3d");
+        var created=file(2,"pdf");created.setFamilyId(1L);created.setFileCategory("render_3d");created.setVersionNo("V2");
+        when(storage.uploadProjectAttachment(eq(10L),isNull(),eq("render_3d"),eq("V2"),eq("更新效果图标注"),isNull())).thenReturn(com.yuewei.plm.module.attachment.vo.AttachmentVO.from(created));
+        var result=service.upload(1L,null,"V2","更新效果图标注",null);
+        assertThat(result.getFileCategory()).isEqualTo("render_3d");assertThat(result.getFamilyId()).isEqualTo(1L);assertThat(result.getVersionNo()).isEqualTo("V2");
+        assertThat(old.getVersionNo()).isEqualTo("V1");assertThat(old.getFileCategory()).isEqualTo("render_3d");verify(access).requirePermission("documents:write");verify(access).requireFile(1L);
+    }
+    @Test void aRenderPdfCanPublishAsItselfButCannotBeBoundAsACadManufacturingDerivative(){
+        actor();var cad=file(1,"step");cad.setFileCategory("drawing");var render=file(2,"pdf");render.setFileCategory("render_3d");
+        assertThat(service.publish(2L,new AttachmentVersionService.Publication("效果图版本确认",null,null,null),null).getFileCategory()).isEqualTo("render_3d");
+        assertThatThrownBy(()->service.publish(1L,new AttachmentVersionService.Publication("源文件正式发布",null,null,2L),null)).hasMessageContaining("3D效果图不能作为CAD源文件");
+        verify(files,never()).updateById(cad);assertThat(cad.getDerivedPdfAttachmentId()).isNull();assertThat(cad.getStatus()).isEqualTo("draft");
+    }
     @Test void publicationRetainsImmutableVersionAndRealPublisherWithoutCopyingBinary() {
         actor();var a=file(1,"pdf");var dto=new AttachmentVersionService.Publication("完成核对",null,null,null);
         assertThat(service.publish(1,dto,null).getReleasedBy()).isEqualTo("engineer");

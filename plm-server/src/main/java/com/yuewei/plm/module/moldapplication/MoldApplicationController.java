@@ -36,6 +36,7 @@ public class MoldApplicationController {
     @PostMapping("/from-research") public ResponseVO<?> fromResearch(@RequestBody MoldApplicationService.ResearchDraft body,HttpServletRequest r){return ok(service.startFromResearch(body,r),r);}
     @PostMapping("/from-phone") public ResponseVO<?> fromPhone(@RequestBody MoldApplicationService.SourceDraft body,HttpServletRequest r){return ok(service.startFromPhone(body,r),r);}
     @PostMapping("/{id}/provision-targets") public ResponseVO<?> targets(@PathVariable @Positive long id,@RequestBody MoldApplicationService.TargetCorrection body,HttpServletRequest r){return ok(service.correctTargets(id,body,r),r);}
+    @PostMapping("/{id}/research-coding") public ResponseVO<?> researchCoding(@PathVariable @Positive long id,@RequestBody MoldApplicationService.ResearchCoding body,HttpServletRequest r){return ok(service.saveResearchCoding(id,body,r),r);}
     @PostMapping("/{id}/provision-retry") public ResponseVO<?> retry(@PathVariable @Positive long id,@Valid @RequestBody Version body,HttpServletRequest r){return ok(service.retryProvision(id,body.version(),r),r);}
     @PostMapping("/{id}/execution-resolution") public ResponseVO<?> resolve(@PathVariable @Positive long id,@RequestBody MoldApplicationService.Resolution body,HttpServletRequest r){return ok(service.resolve(id,body,r),r);}
     @PostMapping public ResponseVO<?> create(@RequestBody MoldApplicationService.Draft body,HttpServletRequest r){return ok(service.save(null,body,r),r);}
@@ -54,6 +55,7 @@ public class MoldApplicationController {
     @PostMapping("/{id}/historical-association") public ResponseVO<?> historyAssociate(@PathVariable @Positive long id,@RequestBody MoldApplicationConversion.Association selection,HttpServletRequest r){return ok(conversion.associateHistory(id,selection,r),r);}
     @PostMapping(value="/{id}/files",consumes=MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseVO<?> upload(@PathVariable @Positive long id,@RequestParam String category,@RequestParam MultipartFile file,@RequestParam(required=false) String selectionId,HttpServletRequest r){return ok(service.upload(id,category,file,selectionId,r),r);}
+    @PostMapping("/{id}/files/archive") public ResponseVO<?> archiveFiles(@PathVariable @Positive long id,HttpServletRequest r){return ok(service.archiveFiles(id,r),r);}
     @PostMapping("/{id}/file-selections") public ResponseVO<?> select(@PathVariable @Positive long id,@RequestBody List<MoldApplicationMedia.Selection> s,HttpServletRequest r){return ok(service.selectFiles(id,s,r),r);}
     @PostMapping("/{id}/files/{attachmentId}/discard-selection") public ResponseVO<?> discard(@PathVariable @Positive long id,@PathVariable @Positive long attachmentId,HttpServletRequest r){return ok(service.discardSelection(id,attachmentId,r),r);}
     @GetMapping("/{id}/files/{attachmentId}") public ResponseEntity<byte[]> file(@PathVariable @Positive long id,@PathVariable @Positive long attachmentId){

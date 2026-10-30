@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
@@ -271,7 +273,7 @@ function handleSampleUploadFileChange(event: Event) {
 async function submitSampleImageUpload() {
   if (!detailSku.value) return
   if (!sampleUploadFile.value) {
-    ElMessage.warning('请选择要上传的示例照片')
+    ElMessage.warning(uiText('请选择要上传的示例照片'))
     return
   }
   sampleUploadLoading.value = true
@@ -283,23 +285,23 @@ async function submitSampleImageUpload() {
     sampleUploadFile.value = null
     sampleUploadRemark.value = ''
     await refreshSkuSampleImages(detailSku.value.productId)
-    ElMessage.success('示例照片已上传')
+    ElMessage.success(uiText('示例照片已上传'))
   } finally {
     sampleUploadLoading.value = false
   }
 }
 
 async function removeSampleImage(attachment: AttachmentVO) {
-  await ElMessageBox.confirm(`确认删除“${attachment.originalFileName || attachment.fileName}”吗？`, '删除示例照片', {
-    confirmButtonText: '删除',
-    cancelButtonText: '取消',
+  await ElMessageBox.confirm(uiText('确认删除“{value0}”吗？',{value0:(attachment.originalFileName || attachment.fileName)}), uiText('删除示例照片'), {
+    confirmButtonText: uiText('删除'),
+    cancelButtonText: uiText('取消'),
     type: 'warning'
   })
   sampleDeleteLoading.value = attachment.attachmentId
   try {
     await deleteAttachment(attachment.attachmentId)
     await refreshSkuSampleImages(attachment.ownerObjectId)
-    ElMessage.success('示例照片已删除')
+    ElMessage.success(uiText('示例照片已删除'))
   } finally {
     sampleDeleteLoading.value = null
   }
@@ -409,16 +411,16 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
 <template>
   <PageContainer
     class="production-sku-page"
-    title="SKU 管理"
-    description="先按产品卡片定位，再进入该产品下的 SKU 列表进行管理。"
+    :title='uiText("SKU 管理")'
+    :description='uiText("先按产品卡片定位，再进入该产品下的 SKU 列表进行管理。")'
   >
     <section v-if="pageStage === 'product-home'" class="page-panel sku-product-home">
       <div class="toolbar-row sku-product-home__head">
         <div>
-          <h3 class="section-title">产品入口</h3>
-          <p class="page-panel-desc">SKU 作为 Product 的型号、颜色和版本视图展示，不作为独立根对象。</p>
+          <h3 class="section-title">{{ uiText("产品入口") }}</h3>
+          <p class="page-panel-desc">{{ uiText("SKU 作为 Product 的型号、颜色和版本视图展示，不作为独立根对象。") }}</p>
         </div>
-        <el-button type="primary" @click="router.push(toInProgressProjectRoute())">新项目</el-button>
+        <el-button type="primary" @click="router.push(toInProgressProjectRoute())">{{ uiText("新项目") }}</el-button>
       </div>
 
       <div class="sku-product-grid" v-loading="loading">
@@ -434,13 +436,13 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
           </div>
           <div class="toolbar-row">
             <strong>{{ product.productName }}</strong>
-            <StatusTag :status="product.status" object-type="product" /><el-tag size="small">生产：{{productionStatusName(product.productionStatus)}}</el-tag>
+            <StatusTag :status="product.status" object-type="product" /><el-tag size="small">{{ uiText("生产：") }}{{productionStatusName(product.productionStatus)}}</el-tag>
           </div>
           <p class="subtle-text">{{ product.displayProductLineCode }}</p>
           <p class="sku-product-card__series">{{ product.seriesName }}</p>
           <div class="sku-product-card__meta">
-            <span>{{ getSkuCount(product) }} 个 SKU</span>
-            <span class="subtle-text">更新 {{ formatDate(product.lastActiveAt) }}</span>
+            <span>{{ getSkuCount(product) }}{{ uiText(" 个 SKU") }}</span>
+            <span class="subtle-text">{{ uiText("更新 ") }}{{ formatDate(product.lastActiveAt) }}</span>
           </div>
         </button>
       </div>
@@ -449,38 +451,36 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
     <section v-else class="page-panel sku-list-panel" v-loading="loading">
       <div class="toolbar-row sku-list-panel__head">
         <div>
-          <el-button link type="primary" @click="backToProductHome">返回产品卡片</el-button>
-          <h3 class="section-title">{{ activeProduct?.productName }} / SKU 列表</h3>
-          <p class="page-panel-desc">查看当前产品下的 SKU 信息、示例图、版本状态和详情资料。</p>
+          <el-button link type="primary" @click="backToProductHome">{{ uiText("返回产品卡片") }}</el-button>
+          <h3 class="section-title">{{ activeProduct?.productName }}{{ uiText(" / SKU 列表") }}</h3>
+          <p class="page-panel-desc">{{ uiText("查看当前产品下的 SKU 信息、示例图、版本状态和详情资料。") }}</p>
         </div>
 
         <div class="sku-list-panel__actions">
-          <ProductionStatusFilter v-model="productionFilter" @change="loadData"/><el-button v-if="productionPermissions.canMaintain" size="small" :disabled="!selectedSkuIds.length||selectedSkuIds.length>100" @click="editProductionBatch">批量维护 ({{selectedSkuIds.length}})</el-button>
+          <ProductionStatusFilter v-model="productionFilter" @change="loadData"/><el-button v-if="productionPermissions.canMaintain" size="small" :disabled="!selectedSkuIds.length||selectedSkuIds.length>100" @click="editProductionBatch">{{ uiText("批量维护 (") }}{{selectedSkuIds.length}})</el-button>
           <el-input
             v-model="keyword"
             clearable
             class="sku-list-panel__search"
-            placeholder="搜索编码 / 名称 / 型号 / 颜色"
+            :placeholder='uiText("搜索编码 / 名称 / 型号 / 颜色")'
           />
-          <el-button type="primary" @click="createSkuVisible = true">新增 SKU</el-button>
+          <el-button type="primary" @click="createSkuVisible = true">{{ uiText("新增 SKU") }}</el-button>
           <el-button
             type="danger"
             :disabled="!selectedSkuIds.length"
             :loading="deleteLoading"
             @click="deleteSelectedSkus"
-          >
-            删除 SKU
-          </el-button>
+          >{{ uiText(" 删除 SKU ") }}</el-button>
         </div>
       </div>
 
-      <ProductProductionList :rows="currentSkuRows" sku selectable @selection-change="handleSkuSelectionChange($event as SkuDisplayRow[])" @detail="openSkuDetail" @changed="loadData"><template #image="{row}"><div v-if="getSkuSampleImageUrl(row)" class="sku-image-cell"><el-image :src="getSkuSampleImageUrl(row)" fit="cover" style="width:40px;height:40px"/><el-button size="small" link @click="openPreview(getSkuSampleImageUrl(row))">查看示例图 ({{getSampleImageCount(row)}})</el-button></div></template></ProductProductionList>
+      <ProductProductionList :rows="currentSkuRows" sku selectable @selection-change="handleSkuSelectionChange($event as SkuDisplayRow[])" @detail="openSkuDetail" @changed="loadData"><template #image="{row}"><div v-if="getSkuSampleImageUrl(row)" class="sku-image-cell"><el-image :src="getSkuSampleImageUrl(row)" fit="cover" style="width:40px;height:40px"/><el-button size="small" link @click="openPreview(getSkuSampleImageUrl(row))">{{ uiText("查看示例图 (") }}{{getSampleImageCount(row)}})</el-button></div></template></ProductProductionList>
     </section>
 
-    <el-dialog v-model="detailVisible" title="SKU 详情" width="1080px" destroy-on-close>
+    <el-dialog v-model="detailVisible" :title='uiText("SKU 详情")' width="1080px" destroy-on-close>
       <div v-loading="detailLoading" class="sku-detail-dialog">
-        <nav class="sku-detail-breadcrumb" aria-label="SKU 详情导航">
-          <span class="sku-detail-breadcrumb__root">SKU 详情</span><el-button size="small" v-if="detailSku" @click="router.push({path:'/files',query:{referenceType:detailSku.productType === 'sku' ? 'sku' : 'product',referenceId:detailSku.productId,referenceName:detailSku.productName,referenceCode:detailSku.displaySkuCode}})">查看关联图纸</el-button>
+        <nav class="sku-detail-breadcrumb" :aria-label='uiText("SKU 详情导航")'>
+          <span class="sku-detail-breadcrumb__root">{{ uiText("SKU 详情") }}</span><el-button size="small" v-if="detailSku" @click="router.push({path:'/files',query:{referenceType:detailSku.productType === 'sku' ? 'sku' : 'product',referenceId:detailSku.productId,referenceName:detailSku.productName,referenceCode:detailSku.displaySkuCode}})">{{ uiText("查看关联图纸") }}</el-button>
           <template v-for="section in skuDetailSections" :key="section.key">
             <span class="sku-detail-breadcrumb__separator">/</span>
             <button
@@ -489,27 +489,27 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
               type="button"
               @click="activeDetailSection = section.key"
             >
-              {{ section.label }}
+              {{ uiText(String((section.label) ?? '')) }}
             </button>
           </template>
         </nav>
 
         <section v-show="activeDetailSection === 'basic'" class="sku-detail-section">
-          <h4 class="section-title">基础信息</h4>
+          <h4 class="section-title">{{ uiText("基础信息") }}</h4>
           <div class="sku-detail-grid">
-            <div class="info-card"><span class="subtle-text">SKU 编码</span><strong>{{ detailSku?.displaySkuCode }}</strong></div>
-            <div class="info-card"><span class="subtle-text">SKU 名称</span><strong>{{ detailSku?.productName }}</strong></div>
-            <div class="info-card"><span class="subtle-text">Product 编码</span><strong>{{ detailSku?.productCode }}</strong></div>
-            <div class="info-card"><span class="subtle-text">产品线</span><strong>{{ detailSku?.seriesName }}</strong></div>
-            <div class="info-card"><span class="subtle-text">型号</span><strong>{{ detailSku?.model }}</strong></div>
-            <div class="info-card"><span class="subtle-text">手机型号编码</span><strong>{{ detailSku?.phoneModelCode || '--' }}</strong></div>
-            <div class="info-card"><span class="subtle-text">单位</span><strong>{{ detailSku ? getSkuUnit(detailSku) : '--' }}</strong></div>
-            <div class="info-card"><span class="subtle-text">项目来源</span><strong>{{ detailSku ? getProjectSource(detailSku) : '--' }}</strong></div>
-            <div class="info-card"><span class="subtle-text">颜色</span><strong>{{ detailSku?.color }}</strong></div>
-            <div class="info-card"><span class="subtle-text">颜色编码</span><strong>{{ detailSku?.colorCode || '--' }}</strong></div>
-            <div class="info-card"><span class="subtle-text">版本</span><strong>{{ detailSku?.versionNo }}</strong></div>
+            <div class="info-card"><span class="subtle-text">{{ uiText("SKU 编码") }}</span><strong>{{ detailSku?.displaySkuCode }}</strong></div>
+            <div class="info-card"><span class="subtle-text">{{ uiText("SKU 名称") }}</span><strong>{{ detailSku?.productName }}</strong></div>
+            <div class="info-card"><span class="subtle-text">{{ uiText("Product 编码") }}</span><strong>{{ detailSku?.productCode }}</strong></div>
+            <div class="info-card"><span class="subtle-text">{{ uiText("产品线") }}</span><strong>{{ detailSku?.seriesName }}</strong></div>
+            <div class="info-card"><span class="subtle-text">{{ uiText("型号") }}</span><strong>{{ detailSku?.model }}</strong></div>
+            <div class="info-card"><span class="subtle-text">{{ uiText("手机型号编码") }}</span><strong>{{ detailSku?.phoneModelCode || '--' }}</strong></div>
+            <div class="info-card"><span class="subtle-text">{{ uiText("单位") }}</span><strong>{{ detailSku ? getSkuUnit(detailSku) : '--' }}</strong></div>
+            <div class="info-card"><span class="subtle-text">{{ uiText("项目来源") }}</span><strong>{{ detailSku ? getProjectSource(detailSku) : '--' }}</strong></div>
+            <div class="info-card"><span class="subtle-text">{{ uiText("颜色") }}</span><strong>{{ detailSku?.color }}</strong></div>
+            <div class="info-card"><span class="subtle-text">{{ uiText("颜色编码") }}</span><strong>{{ detailSku?.colorCode || '--' }}</strong></div>
+            <div class="info-card"><span class="subtle-text">{{ uiText("版本") }}</span><strong>{{ detailSku?.versionNo }}</strong></div>
             <div class="info-card">
-              <span class="subtle-text">状态</span>
+              <span class="subtle-text">{{ uiText("状态") }}</span>
               <StatusTag v-if="detailSku" :status="detailSku.status" object-type="product" /><ProductProductionControl v-if="detailSku" :product-id="detailSku.productId" :model-value="detailSku.productionStatus||'unknown'" :label="detailSku.productName" @update:model-value="detailSku.productionStatus=$event" @changed="loadData"/>
             </div>
           </div>
@@ -517,16 +517,16 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
           <div class="sku-sample-panel">
             <div class="sku-detail-section__head">
               <div>
-                <h5>示例照片</h5>
-                <p class="page-panel-desc">照片以 Product 附件保存，文件分类为 sample_image。</p>
+                <h5>{{ uiText("示例照片") }}</h5>
+                <p class="page-panel-desc">{{ uiText("照片以 Product 附件保存，文件分类为 sample_image。") }}</p>
               </div>
-              <el-tag effect="light">{{ getSampleImageCount(detailSku) }} 张</el-tag>
+              <el-tag effect="light">{{ getSampleImageCount(detailSku) }}{{ uiText(" 张") }}</el-tag>
             </div>
 
             <div class="sku-sample-upload">
               <input data-test="sku-sample-upload-file" type="file" accept="image/jpeg,image/png,image/webp" @change="handleSampleUploadFileChange" />
-              <el-input v-model="sampleUploadRemark" clearable maxlength="255" placeholder="照片备注" />
-              <el-button type="primary" :loading="sampleUploadLoading" @click="submitSampleImageUpload">上传照片</el-button>
+              <el-input v-model="sampleUploadRemark" clearable maxlength="255" :placeholder='uiText("照片备注")' />
+              <el-button type="primary" :loading="sampleUploadLoading" @click="submitSampleImageUpload">{{ uiText("上传照片") }}</el-button>
             </div>
 
             <div v-if="getSkuSampleImages(detailSku).length" class="sku-sample-gallery">
@@ -537,28 +537,28 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
                 </button>
                 <div class="sku-sample-gallery__meta">
                   <strong>{{ image.originalFileName || image.fileName }}</strong>
-                  <span class="subtle-text">{{ image.remark || '无备注' }}</span>
+                  <span class="subtle-text">{{ image.remark || uiText('无备注') }}</span>
                 </div>
-                <el-button link type="danger" :loading="sampleDeleteLoading === image.attachmentId" @click="removeSampleImage(image)">删除</el-button>
+                <el-button link type="danger" :loading="sampleDeleteLoading === image.attachmentId" @click="removeSampleImage(image)">{{ uiText("删除") }}</el-button>
               </article>
             </div>
-            <el-empty v-else description="暂无示例照片" />
+            <el-empty v-else :description='uiText("暂无示例照片")' />
           </div>
         </section>
 
         <section v-show="activeDetailSection === 'cost'" class="sku-detail-section">
-          <h4 class="section-title">成本</h4>
+          <h4 class="section-title">{{ uiText("成本") }}</h4>
           <div class="sku-detail-cost-grid">
             <div class="info-card">
-              <span class="subtle-text">实际成本</span>
+              <span class="subtle-text">{{ uiText("实际成本") }}</span>
               <strong>{{ formatAmount(detailPresentation?.costPanel.actualTotal || 0) }}</strong>
             </div>
             <div v-if="detailPresentation?.costPanel.showEstimated" class="info-card">
-              <span class="subtle-text">预计成本</span>
+              <span class="subtle-text">{{ uiText("预计成本") }}</span>
               <strong>{{ formatAmount(detailPresentation?.costPanel.estimatedTotal || 0) }}</strong>
             </div>
             <div class="info-card">
-              <span class="subtle-text">当前阶段</span>
+              <span class="subtle-text">{{ uiText("当前阶段") }}</span>
               <strong>{{ detailSku?.currentStage }}</strong>
             </div>
           </div>
@@ -568,12 +568,12 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
           <div class="sku-detail-section__head">
             <div>
               <div class="sku-detail-title-row">
-                <h4 class="section-title">当前版本 BOM</h4>
-                <el-tag v-if="detailBomIsDefaultVersion" type="success" effect="light" size="small">正式版本</el-tag>
+                <h4 class="section-title">{{ uiText("当前版本 BOM") }}</h4>
+                <el-tag v-if="detailBomIsDefaultVersion" type="success" effect="light" size="small">{{ uiText("正式版本") }}</el-tag>
               </div>
-              <p class="page-panel-desc">BOM 作为 Product 的版本化资料展示，不作为独立根对象。</p>
+              <p class="page-panel-desc">{{ uiText("BOM 作为 Product 的版本化资料展示，不作为独立根对象。") }}</p>
             </div>
-            <el-select v-model="detailBomVersion" class="sku-detail-version-select" placeholder="选择 BOM 版本">
+            <el-select v-model="detailBomVersion" class="sku-detail-version-select" :placeholder='uiText("选择 BOM 版本")'>
               <el-option
                 v-for="row in detailPresentation?.bomCompareRows || []"
                 :key="row.versionNo"
@@ -584,15 +584,15 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
           </div>
 
           <el-table :data="detailBomItems" border stripe>
-            <el-table-column prop="inventoryCode" label="物料编码" min-width="150" />
-            <el-table-column prop="inventoryName" label="物料名称" min-width="180" />
-            <el-table-column prop="quantity" label="用量" width="90" />
-            <el-table-column prop="stockUom" label="单位" width="90" />
-            <el-table-column prop="supplierName" label="供应商" min-width="150" />
-            <el-table-column label="备注 / 替代料提示" min-width="170">
+            <el-table-column prop="inventoryCode" :label='uiText("物料编码")' min-width="150" />
+            <el-table-column prop="inventoryName" :label='uiText("物料名称")' min-width="180" />
+            <el-table-column prop="quantity" :label='uiText("用量")' width="90" />
+            <el-table-column prop="stockUom" :label='uiText("单位")' width="90" />
+            <el-table-column prop="supplierName" :label='uiText("供应商")' min-width="150" />
+            <el-table-column :label='uiText("备注 / 替代料提示")' min-width="170">
               <template #default="{ row }">{{ getBomRemark(row) }}</template>
             </el-table-column>
-            <el-table-column label="成本" width="130">
+            <el-table-column :label='uiText("成本")' width="130">
               <template #default="{ row }">{{ formatAmount(getBomLineCost(row)) }}</template>
             </el-table-column>
           </el-table>
@@ -601,26 +601,26 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
         <section v-show="activeDetailSection === 'process'" class="sku-detail-section">
           <div class="sku-detail-section__head">
             <div>
-              <h4 class="section-title">工艺路线</h4>
-              <p class="page-panel-desc">工艺路线由 Process 承接，以工序明细表展示当前 SKU 的完整工序、关联模具和检验要求。</p>
+              <h4 class="section-title">{{ uiText("工艺路线") }}</h4>
+              <p class="page-panel-desc">{{ uiText("工艺路线由 Process 承接，以工序明细表展示当前 SKU 的完整工序、关联模具和检验要求。") }}</p>
             </div>
-            <el-tag type="primary" effect="light">共 {{ detailProcessRoutes.length }} 道工序</el-tag>
+            <el-tag type="primary" effect="light">{{ uiText("共 ") }}{{ detailProcessRoutes.length }}{{ uiText(" 道工序") }}</el-tag>
           </div>
 
           <el-table v-if="detailProcessRoutes.length" :data="detailProcessRoutes" border stripe size="small">
-            <el-table-column label="顺序" width="60">
+            <el-table-column :label='uiText("顺序")' width="60">
               <template #default="{ row }">{{ row.sequenceNo }}</template>
             </el-table-column>
-            <el-table-column prop="processCode" label="工序编码" min-width="150" />
-            <el-table-column prop="processName" label="工序名称" min-width="130" />
-            <el-table-column label="工序类型" width="110">
+            <el-table-column prop="processCode" :label='uiText("工序编码")' min-width="150" />
+            <el-table-column prop="processName" :label='uiText("工序名称")' min-width="130" />
+            <el-table-column :label='uiText("工序类型")' width="110">
               <template #default="{ row }">
                 <el-tag :type="row.processType === 'quality_gate' ? 'danger' : 'primary'" effect="light" size="small">
-                  {{ row.processType === 'quality_gate' ? '质量门禁' : '加工工序' }}
+                  {{ row.processType === 'quality_gate' ? uiText('质量门禁') : uiText('加工工序') }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="模具 / 治具" min-width="160">
+            <el-table-column :label='uiText("模具 / 治具")' min-width="160">
               <template #default="{ row }">
                 <template v-if="row.inventoryCode">
                   <div>{{ row.inventoryCode }}</div>
@@ -629,28 +629,28 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
                 <span v-else class="subtle-text">--</span>
               </template>
             </el-table-column>
-            <el-table-column label="执行位置" min-width="130">
+            <el-table-column :label='uiText("执行位置")' min-width="130">
               <template #default="{ row }">{{ row.workstationName || '--' }}</template>
             </el-table-column>
-            <el-table-column label="供应商" min-width="120">
+            <el-table-column :label='uiText("供应商")' min-width="120">
               <template #default="{ row }">{{ row.supplierName || '--' }}</template>
             </el-table-column>
-            <el-table-column label="质量要求" min-width="180">
+            <el-table-column :label='uiText("质量要求")' min-width="180">
               <template #default="{ row }">{{ row.qualityRequirement || '--' }}</template>
             </el-table-column>
-            <el-table-column label="产出类型" width="100">
+            <el-table-column :label='uiText("产出类型")' width="100">
               <template #default="{ row }">{{ row.outputType || '--' }}</template>
             </el-table-column>
-            <el-table-column prop="summary" label="说明" min-width="200" />
+            <el-table-column prop="summary" :label='uiText("说明")' min-width="200" />
           </el-table>
-          <el-empty v-else description="暂无工艺路线数据" />
+          <el-empty v-else :description='uiText("暂无工艺路线数据")' />
         </section>
 
         <section v-show="activeDetailSection === 'project_flow'" class="sku-detail-section">
           <div class="sku-detail-section__head">
             <div>
-              <h4 class="section-title">项目流程</h4>
-              <p class="page-panel-desc">展示当前 SKU 对应 Product 的项目流程节点、接收人与推动记录。</p>
+              <h4 class="section-title">{{ uiText("项目流程") }}</h4>
+              <p class="page-panel-desc">{{ uiText("展示当前 SKU 对应 Product 的项目流程节点、接收人与推动记录。") }}</p>
             </div>
           </div>
 
@@ -660,27 +660,27 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
             :compact="true"
             :max-nodes="8"
           />
-          <el-empty v-else description="暂无项目流程数据" />
+          <el-empty v-else :description='uiText("暂无项目流程数据")' />
         </section>
 
         <section v-show="activeDetailSection === 'production_docs'" class="sku-detail-section">
           <div class="sku-detail-section__head">
             <div>
-              <h4 class="section-title">生产资料</h4>
-              <p class="page-panel-desc">展示归档或当前版本关联的图纸、SOP、SIP、检验标准和客户确认件。</p>
+              <h4 class="section-title">{{ uiText("生产资料") }}</h4>
+              <p class="page-panel-desc">{{ uiText("展示归档或当前版本关联的图纸、SOP、SIP、检验标准和客户确认件。") }}</p>
             </div>
           </div>
 
           <el-table v-if="detailPresentation?.documents?.length" :data="detailPresentation.documents" border stripe size="small">
-            <el-table-column label="资料类型" width="120">
+            <el-table-column :label='uiText("资料类型")' width="120">
               <template #default="{ row }">{{ row.category }}</template>
             </el-table-column>
-            <el-table-column label="资料编码" width="140">
+            <el-table-column :label='uiText("资料编码")' width="140">
               <template #default="{ row }">{{ row.fileId || '--' }}</template>
             </el-table-column>
-            <el-table-column prop="fileName" label="资料名称" min-width="200" />
-            <el-table-column prop="versionNo" label="版本" width="90" />
-            <el-table-column label="状态" width="100">
+            <el-table-column prop="fileName" :label='uiText("资料名称")' min-width="200" />
+            <el-table-column prop="versionNo" :label='uiText("版本")' width="90" />
+            <el-table-column :label='uiText("状态")' width="100">
               <template #default="{ row }">
                 <el-tag v-if="row.status" size="small" effect="light" :type="row.status === '已冻结' ? 'success' : row.status === '已归档' ? 'info' : 'warning'">
                   {{ row.status }}
@@ -688,23 +688,23 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
                 <span v-else class="subtle-text">--</span>
               </template>
             </el-table-column>
-            <el-table-column label="负责人" width="110">
+            <el-table-column :label='uiText("负责人")' width="110">
               <template #default="{ row }">{{ row.owner || '--' }}</template>
             </el-table-column>
-            <el-table-column label="所属阶段" width="120">
+            <el-table-column :label='uiText("所属阶段")' width="120">
               <template #default="{ row }">{{ row.stageLabel || row.category }}</template>
             </el-table-column>
-            <el-table-column label="更新时间" width="130">
+            <el-table-column :label='uiText("更新时间")' width="130">
               <template #default="{ row }">{{ formatDate(row.updatedAt) }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="130" fixed="right">
+            <el-table-column :label='uiText("操作")' width="130" fixed="right">
               <template #default="{ row }">
-                <el-button link type="primary" size="small" @click="openProductionDocPreview(row)">预览</el-button>
-                <el-button link type="primary" size="small">下载</el-button>
+                <el-button link type="primary" size="small" @click="openProductionDocPreview(row)">{{ uiText("预览") }}</el-button>
+                <el-button link type="primary" size="small">{{ uiText("下载") }}</el-button>
               </template>
             </el-table-column>
           </el-table>
-          <el-empty v-else description="暂无生产资料" />
+          <el-empty v-else :description='uiText("暂无生产资料")' />
         </section>
       </div>
       <!-- 生产资料预览 -->
@@ -714,9 +714,9 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
       />
     </el-dialog>
 
-    <el-dialog v-model="previewImageVisible" title="SKU 示例图" width="640px">
+    <el-dialog v-model="previewImageVisible" :title='uiText("SKU 示例图")' width="640px">
       <el-image v-if="previewImageUrl" :src="previewImageUrl" fit="contain" class="sku-preview-image" />
-      <p v-else class="subtle-text empty-preview">暂无示例图</p>
+      <p v-else class="subtle-text empty-preview">{{ uiText("暂无示例图") }}</p>
     </el-dialog>
     <MetadataDialog v-model="productionEditor" kind="product" :items="productionTargets" @saved="selectedSkuIds=[];loadData()"/>
   </PageContainer>

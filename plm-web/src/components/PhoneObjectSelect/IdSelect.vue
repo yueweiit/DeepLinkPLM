@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import {t as uiText} from '@/locales'
+
 import { computed, ref, watch } from 'vue'
 import { useUserStore } from '@/stores/user'
 import PhoneObjectSelect from './index.vue'
@@ -13,4 +15,4 @@ const selected = computed(() => props.modelValue ? [props.options.find(r => r.id
 const local = localObjectProvider(() => props.options)
 function confirm(rows: PhoneObjectOption[]) { known.value = rows[0]; emit('update:modelValue',rows[0]?.id || null); emit('selected',rows[0]) }
 </script>
-<template><PhoneObjectSelect :model-value="selected" :provider="provider || local" :kinds="[{key:type,type,label,phoneFirst}]" :multiple="false" :disabled="disabled" :scope-key="scopeKey" :aria-label="label" :placeholder="placeholder || `请选择品牌、手机型号及${label}`" @update:model-value="confirm"/></template>
+<template><PhoneObjectSelect :model-value="selected" :provider="provider || local" :kinds="[{key:type,type,label,phoneFirst}]" :multiple="false" :disabled="disabled" :scope-key="scopeKey" :aria-label="label" :placeholder="placeholder || uiText('请选择品牌、手机型号及{value0}',{value0:(label)})" @update:model-value="confirm"/></template>

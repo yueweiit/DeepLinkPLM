@@ -60,6 +60,13 @@ public class MoldDingTalkClient {
     public JsonNode legacyWrite(String path,Object payload){return call("https://oapi.dingtalk.com"+path,payload,true,true);}
     public JsonNode modern(String path,Object payload){return call("https://api.dingtalk.com"+path,payload,false,false);}
     public JsonNode modernWrite(String path,Object payload){return call("https://api.dingtalk.com"+path,payload,false,true);}
+    public String approvalFileDownloadUrl(String instanceId,String fileId) {
+        var response=modern("/v1.0/workflow/processInstances/spaces/files/urls/download",Map.of("processInstanceId",instanceId,"fileId",fileId));
+        var result=response.path("result");String address=MoldApplicationForms.text(result.path("downloadUri"));
+        if(!response.path("success").asBoolean()||address==null)throw new RemoteFailure(false,"钉钉未授权下载原审批附件，请核对应用的审批附件下载权限");
+        if(result.hasNonNull("fileId")&&!fileId.equals(result.path("fileId").asText()))throw new RemoteFailure(false,"钉钉返回的附件身份与原文件不一致");
+        return address;
+    }
     public String uploadImage(byte[] bytes,String name,String contentType) {
         try {
             String token=tokens.getAccessToken(),boundary="plm-"+UUID.randomUUID();

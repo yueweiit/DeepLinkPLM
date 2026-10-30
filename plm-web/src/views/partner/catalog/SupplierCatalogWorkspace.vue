@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { useRoute, useRouter, onBeforeRouteUpdate, type LocationQueryRaw } from 'vue-router'
+import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate, type LocationQueryRaw } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PageContainer from '@/components/PageContainer/index.vue'
-import { catalogStyle, catalogStyles, catalogSuppliers, renameCatalogStyle } from '@/api/modules/partnerCatalog'
+import { catalogStyle, catalogStyles, catalogSuppliers, updateCatalogStyle } from '@/api/modules/partnerCatalog'
+import {t} from '@/locales'
 import { newRequestId } from '@/api/modules/partner'
 import type { CatalogAdditionResult, CatalogPage, CatalogStyle, CatalogSupplier } from '@/types/partnerCatalog'
 import { partnerError } from '@/utils/partnerError'
@@ -13,6 +16,7 @@ import SupplierStyleDetail from './SupplierStyleDetail.vue'
 import CatalogSourceImport from './CatalogSourceImport.vue'
 import CatalogIdentityDialog from './CatalogIdentityDialog.vue'
 import CatalogModelSheetDialog from './CatalogModelSheetDialog.vue'
+import CatalogStyleEditor from './CatalogStyleEditor.vue'
 import { catalogKey, catalogPhoneSummary } from './catalogPresentation'
 import { moqScopeLabel, supplierCurrency, supplierPriceValue } from '@/utils/partnerPrice'
 
@@ -26,7 +30,8 @@ const selectionBusy=ref(false)
 const checked = ref(new Map<string, CatalogStyle>()), selectionOpen = ref(false), selectionItems = ref<CatalogStyle[]>([]), addition = ref<CatalogAdditionResult>(), sourcesOpen = ref(false)
 const identityItems=ref<CatalogStyle[]>([])
 const modelSheetItem=ref<CatalogStyle>(),modelSheetMessage=ref('')
-const renaming=ref(false)
+const removing=ref(false),editing=ref<CatalogStyle>()
+const deleted=computed(()=>route.query.deleted==='true')
 const selectionLoading=ref(false),selectionLoadError=ref(''),selectionLoaded=ref(0),pendingSelection=ref<CatalogStyle[]>([])
 let generation = 0,selectionGeneration=0
 const positive = (value: unknown, fallback: number) => { const number = Number(value); return Number.isSafeInteger(number) && number > 0 ? number : fallback }
@@ -56,46 +61,50 @@ async function load() {
   try {
     if (!supplierCode.value) {
       styles.value = undefined
-      const result = await catalogSuppliers({ q: supplierQuery.value.trim(), page: supplierPage.value, size: 24 })
+      const result = await catalogSuppliers({ q: supplierQuery.value.trim(), page: supplierPage.value, size: 24,...(deleted.value?{deleted:'true'}:{}) })
       if (serial === generation) suppliers.value = result
     } else if (isDetail.value) {
-      const result = await catalogStyle(supplierCode.value, { sourceKind: sourceKind.value as CatalogStyle['sourceKind'], recordId: Number(route.query.recordId), rowId: String(route.query.rowId) })
+      const result = await catalogStyle(supplierCode.value, { sourceKind: sourceKind.value as CatalogStyle['sourceKind'], recordId: Number(route.query.recordId), rowId: String(route.query.rowId) },deleted.value)
       if (serial === generation) detail.value = result
     } else {
-      const result = await catalogStyles({ supplierCode: supplierCode.value, keyword: keyword.value.trim(), page: page.value, size: size.value })
+      const result = await catalogStyles({ supplierCode: supplierCode.value, keyword: keyword.value.trim(), page: page.value, size: size.value,...(deleted.value?{deleted:'true'}:{}) })
       if (serial === generation) styles.value = result
     }
   } catch (cause) { if (serial === generation) error.value = partnerError(cause) }
   finally { if (serial === generation) loading.value = false }
 }
-watch(() => supplierCode.value, () => { checked.value = new Map(); selectionOpen.value = false; addition.value = undefined; styles.value = undefined })
+watch([supplierCode,deleted], () => { checked.value = new Map(); selectionOpen.value = false; addition.value = undefined; styles.value = undefined })
 watch(() => route.fullPath, () => { selectionOpen.value = false; modelSheetItem.value=undefined; modelSheetMessage.value=''; void load() }, { immediate: true })
 watch(() => route.query.sourceManager, value => { if(value==='1')sourcesOpen.value=true }, {immediate:true})
-onBeforeRouteUpdate(()=>{if(selectionBusy.value||renaming.value){ElMessage.warning('请先完成或取消当前填写，再切换页面。');return false}})
+function guardInput(){if(selectionBusy.value||removing.value||editing.value){ElMessage.warning(uiText('请先完成或取消当前填写，再切换页面。'));return false}}
+onBeforeRouteUpdate(guardInput);onBeforeRouteLeave(guardInput)
 onBeforeUnmount(() => { generation++;selectionGeneration++ })
 function navigate(query: LocationQueryRaw) { return router.push({ path: '/partner-products', query }) }
 function selectionContext():LocationQueryRaw{return Object.fromEntries(['selectionId','targetSelectionId','targetVersion','selectionVersion','from'].filter(key=>route.query[key]!==undefined).map(key=>[key,route.query[key]]))}
-function chooseSupplier(row: CatalogSupplier) { return navigate({ ...selectionContext(),supplierCode: row.supplierCode, ...(route.query.supplierQ ? { supplierQ: String(route.query.supplierQ) } : {}), supplierPage: supplierPage.value }) }
+function chooseSupplier(row: CatalogSupplier) { return navigate({ ...selectionContext(),supplierCode: row.supplierCode, ...(route.query.supplierQ ? { supplierQ: String(route.query.supplierQ) } : {}),supplierPage: supplierPage.value,...(deleted.value?{deleted:'true'}:{}) }) }
 function chooseAnother() { return navigate({ ...selectionContext(),...(route.query.supplierQ ? { supplierQ: String(route.query.supplierQ) } : {}), supplierPage: supplierPage.value }) }
 function searchSuppliers() { return navigate({ ...selectionContext(),supplierQ: supplierQuery.value.trim() || undefined, supplierPage: 1 }) }
 function searchStyles() { return navigate({ ...route.query, keyword: keyword.value.trim() || undefined, catalogPage: 1 }) }
 function changePage(value: number) { return navigate({ ...route.query, catalogPage: value }) }
 function changeSize(value: number) { return navigate({ ...route.query, catalogSize: value, catalogPage: 1 }) }
 function open(row: CatalogStyle) { return navigate({ ...route.query, sourceKind: row.sourceKind, recordId: row.recordId, rowId: row.rowId }) }
-async function renameStyle(row:CatalogStyle){
-  if(!canWrite.value||renaming.value)return
-  renaming.value=true;error.value=''
+async function setRemoved(row:CatalogStyle){
+  if(!canWrite.value||removing.value)return
+  removing.value=true;error.value=''
   try{
-    const current=await catalogStyle(supplierCode.value,{sourceKind:row.sourceKind,recordId:row.recordId,rowId:row.rowId})
-    const result=await ElMessageBox.prompt('填写正确的款式名称。','修改款式名称',{inputValue:current.name,confirmButtonText:'保存名称',cancelButtonText:'取消',inputValidator:value=>Boolean(value?.trim())&&value.trim().length<=12000||'请填写款式名称（最多12000字）',closeOnClickModal:false})
-    await renameCatalogStyle(supplierCode.value,current,{name:result.value.trim(),rowVersion:current.rowVersion,recordVersion:current.recordVersion,requestId:newRequestId()})
-    ElMessage.success('款式名称已保存');await load()
-  }catch(cause){if(cause!=='cancel'&&cause!=='close')error.value=partnerError(cause)}finally{renaming.value=false}
+    const discarded=row.discarded!==true
+    await ElMessageBox.confirm(discarded?t('删除后从目录移除，已有选品、样品和历史仍保留，可在已删除中恢复。'):t('恢复此产品到供应商目录？'),discarded?t('删除产品'):t('恢复产品'),{confirmButtonText:t('确认'),cancelButtonText:t('取消'),closeOnClickModal:false,type:'warning'})
+    const current=await catalogStyle(supplierCode.value,{sourceKind:row.sourceKind,recordId:row.recordId,rowId:row.rowId},row.discarded===true)
+    await updateCatalogStyle(supplierCode.value,current,{changes:{discarded},rowVersion:current.rowVersion,recordVersion:current.recordVersion,requestId:newRequestId()})
+    checked.value=new Map();await load()
+  }catch(cause){if(cause!=='cancel'&&cause!=='close')error.value=partnerError(cause)}finally{removing.value=false}
 }
+async function edited(){editing.value=undefined;checked.value=new Map();ElMessage.success(t('产品资料已保存'));await load()}
+function editStyle(row:CatalogStyle){if(canWrite.value&&!row.discarded)editing.value=row}
 function back() { const { sourceKind: _source, recordId: _record, rowId: _row, ...query } = route.query; return navigate(query) }
 function openProduct(id: number) { return navigate({ id, from: route.fullPath }) }
 function openSource() { if (!detail.value) return; const row = detail.value; if(row.sourcePurpose==='catalog_source'){sourcesOpen.value=true;return} return router.push(row.sourceKind === 'selection' ? { path: '/partner-selections', query: { id: row.recordId, from: route.fullPath } } : { path: `/partner-operations/supplier_quote/${row.recordId}`, query: { from: route.fullPath } }) }
-function check(row: CatalogStyle, value: boolean) { const next = new Map(checked.value); if (value) next.set(catalogKey(row), row); else next.delete(catalogKey(row)); checked.value = next }
+function check(row: CatalogStyle, value: boolean) { if(row.discarded)return;const next = new Map(checked.value); if (value) next.set(catalogKey(row), row); else next.delete(catalogKey(row)); checked.value = next }
 function checkPage(value: boolean) { for (const row of rows.value) check(row, value) }
 function cancelSelectionLoad(){selectionGeneration++;selectionLoading.value=false;selectionLoadError.value='';selectionLoaded.value=0;pendingSelection.value=[]}
 async function add(candidates:CatalogStyle[]){
@@ -114,63 +123,66 @@ function added(result: CatalogAdditionResult) {
   void refresh.then(() => { if (serial === generation && error.value) error.value = `选品已保存，目录显示暂未更新：${error.value}。请重新加载目录。` })
 }
 function modelSheetSaved(result:{style:CatalogStyle}){modelSheetItem.value=undefined;detail.value=result.style;modelSheetMessage.value='本款型号表已更新；未创建产品、样品或手机编码。'}
-const photo = (row: CatalogStyle) => (row.fileDetails || []).find(file => file.type?.startsWith('image/'))
-const photoCount = (row: CatalogStyle) => (row.fileDetails || []).filter(file => file.type?.startsWith('image/')).length
+const photos = (row: CatalogStyle) => (row.fileDetails || []).filter(file => file.type?.startsWith('image/'))
+const photo = (row: CatalogStyle) => photos(row)[0]
 </script>
 
 <template>
   <PageContainer :title="title" class="supplier-catalog-workspace">
     <template #actions>
-      <el-button v-if="isDetail" @click="back">返回款式列表</el-button>
-      <el-button v-else-if="supplierCode" @click="chooseAnother">更换供应商</el-button>
-      <el-button v-if="canManageSources" @click="sourcesOpen=true">供应商资料／导入</el-button>
-      <el-button v-if="isDetail&&detail&&canWrite" @click="identityItems=[detail]">款式号核对</el-button>
-      <el-button @click="router.push('/partner-listings')">上架产品目录</el-button>
-      <el-button :loading="loading" @click="load">刷新</el-button>
+      <el-button v-if="isDetail" @click="back">{{ uiText("返回款式列表") }}</el-button>
+      <el-button v-else-if="supplierCode" @click="chooseAnother">{{ uiText("更换供应商") }}</el-button>
+      <el-button v-if="canManageSources" @click="sourcesOpen=true">{{ uiText("供应商资料／导入") }}</el-button>
+      <el-button v-if="supplierCode&&canWrite&&!deleted" type="primary" @click="sourcesOpen=true">{{t('新增产品')}}</el-button>
+      <el-button @click="navigate({...route.query,sourceKind:undefined,recordId:undefined,rowId:undefined,deleted:deleted?undefined:'true',catalogPage:1,supplierPage:1})">{{deleted?t('返回在用产品'):t('已删除产品')}}</el-button>
+      <el-button v-if="isDetail&&detail&&canWrite" @click="identityItems=[detail]">{{ uiText("款式号核对") }}</el-button>
+      <el-button @click="router.push('/partner-listings')">{{ uiText("上架产品目录") }}</el-button>
+      <el-button :loading="loading" @click="load">{{ uiText("刷新") }}</el-button>
     </template>
-    <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon><el-button link @click="load">重新加载</el-button><el-button v-if="supplierCode" link @click="chooseAnother">重新选择供应商</el-button></el-alert>
+    <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon><el-button link @click="load">{{ uiText("重新加载") }}</el-button><el-button v-if="supplierCode" link @click="chooseAnother">{{ uiText("重新选择供应商") }}</el-button></el-alert>
     <el-alert v-if="modelSheetMessage" :title="modelSheetMessage" type="success" :closable="false"/>
-    <div v-if="selectionLoading" class="catalog-selection-loading" role="status"><span>正在读取所选款式的可选型号 {{selectionLoaded}} / {{pendingSelection.length}}</span><el-button link @click="cancelSelectionLoad">取消本次读取</el-button></div><el-alert v-else-if="selectionLoadError" :title="selectionLoadError" type="error" :closable="false" class="catalog-selection-load-error"><el-button link type="primary" @click="add(pendingSelection)">重试本次所选款式</el-button><el-button link @click="cancelSelectionLoad">保留勾选，暂不选样</el-button></el-alert>
-    <div v-if="addition" class="catalog-addition" role="status"><span>已保存到选品目录：{{ addition.selection.name }}<template v-if="addition.reusedCount">（{{ addition.reusedCount }} 项沿用已有选择）</template></span><el-button link type="primary" @click="router.push({path:'/partner-selections',query:{id:addition.selection.id,from:route.fullPath}})">打开选品目录</el-button></div>
+    <div v-if="selectionLoading" class="catalog-selection-loading" role="status"><span>{{ uiText("正在读取所选款式的可选型号 ") }}{{selectionLoaded}} / {{pendingSelection.length}}</span><el-button link @click="cancelSelectionLoad">{{ uiText("取消本次读取") }}</el-button></div><el-alert v-else-if="selectionLoadError" :title="selectionLoadError" type="error" :closable="false" class="catalog-selection-load-error"><el-button link type="primary" @click="add(pendingSelection)">{{ uiText("重试本次所选款式") }}</el-button><el-button link @click="cancelSelectionLoad">{{ uiText("保留勾选，暂不选样") }}</el-button></el-alert>
+    <div v-if="addition" class="catalog-addition" role="status"><span>{{ uiText("已保存到选品目录：") }}{{ addition.selection.name }}<template v-if="addition.reusedCount">（{{ addition.reusedCount }}{{ uiText(" 项沿用已有选择）") }}</template></span><el-button link type="primary" @click="router.push({path:'/partner-selections',query:{id:addition.selection.id,from:route.fullPath}})">{{ uiText("打开选品目录") }}</el-button></div>
     <div v-if="!supplierCode" key="suppliers" class="catalog-branch">
-      <form class="catalog-search supplier-search" @submit.prevent="searchSuppliers"><el-input v-model="supplierQuery" placeholder="搜索有款式的供应商" aria-label="搜索供应商" clearable/><el-button native-type="submit">查询</el-button></form>
+      <form class="catalog-search supplier-search" @submit.prevent="searchSuppliers"><el-input v-model="supplierQuery" :placeholder='uiText("搜索有款式的供应商")' :aria-label='uiText("搜索供应商")' clearable/><el-button native-type="submit">{{ uiText("查询") }}</el-button></form>
       <div class="catalog-scroll supplier-scroll" :aria-busy="loading">
-        <div v-if="suppliers?.content.length" class="supplier-choices"><button v-for="row in suppliers.content" :key="row.supplierCode" class="supplier-choice" type="button" :aria-label="`${row.supplierName}，${row.styleCount}款，查看款式`" @click="chooseSupplier(row)"><span class="supplier-monogram" aria-hidden="true">{{ row.shortCode || row.supplierName.slice(0,1) }}</span><span class="supplier-choice-info"><strong>{{ row.supplierName }}</strong><small v-if="row.status==='inactive'">资料已停用</small></span><span class="supplier-style-count">{{ row.styleCount }} 款<span aria-hidden="true">→</span></span></button></div>
-        <el-empty v-else-if="!loading&&!error" description="没有找到有款式的供应商" :image-size="65"><el-button v-if="suppliers?.canWrite" @click="router.push({path:'/suppliers',query:{from:route.fullPath}})">维护供应商资料</el-button></el-empty>
-        <p v-if="loading&&!suppliers" class="catalog-loading" role="status">正在加载供应商…</p>
+        <div v-if="suppliers?.content.length" class="supplier-choices"><button v-for="row in suppliers.content" :key="row.supplierCode" class="supplier-choice" type="button" :aria-label="uiText('{value0}，{value1}款，查看款式',{value0:(row.supplierName),value1:(row.styleCount)})" @click="chooseSupplier(row)"><span class="supplier-monogram" aria-hidden="true">{{ row.shortCode || row.supplierName.slice(0,1) }}</span><span class="supplier-choice-info"><strong>{{ row.supplierName }}</strong><small v-if="row.status==='inactive'">{{ uiText("资料已停用") }}</small></span><span class="supplier-style-count">{{ row.styleCount }}{{ uiText(" 款") }}<span aria-hidden="true">→</span></span></button></div>
+        <el-empty v-else-if="!loading&&!error" :description='uiText("没有找到有款式的供应商")' :image-size="65"><el-button v-if="suppliers?.canWrite" @click="router.push({path:'/suppliers',query:{from:route.fullPath}})">{{ uiText("维护供应商资料") }}</el-button></el-empty>
+        <p v-if="loading&&!suppliers" class="catalog-loading" role="status">{{ uiText("正在加载供应商…") }}</p>
       </div>
-      <footer class="catalog-pager"><span>共 {{ suppliers?.totalElements || 0 }} 家有款式的供应商</span><el-pagination v-if="(suppliers?.totalElements||0)>24" :current-page="supplierPage" :page-size="24" :total="suppliers?.totalElements||0" :pager-count="5" layout="prev,pager,next" :disabled="loading" @current-change="navigate({...route.query,supplierPage:$event})"/></footer>
+      <footer class="catalog-pager"><span>{{ uiText("共 ") }}{{ suppliers?.totalElements || 0 }}{{ uiText(" 家有款式的供应商") }}</span><el-pagination v-if="(suppliers?.totalElements||0)>24" :current-page="supplierPage" :page-size="24" :total="suppliers?.totalElements||0" :pager-count="5" layout="prev,pager,next" :disabled="loading" @current-change="navigate({...route.query,supplierPage:$event})"/></footer>
     </div>
-    <div v-else-if="isDetail" key="detail" class="catalog-scroll detail-scroll" :aria-busy="loading"><SupplierStyleDetail v-if="detail" :row="detail" :can-read-cost="canReadCost" :can-edit="canWrite&&!renaming" @edit="renameStyle(detail)" @product="openProduct" @source="openSource" @model-sheet="modelSheetItem=detail"/><p v-else-if="loading" class="catalog-loading" role="status">正在加载本款资料…</p></div>
+    <div v-else-if="isDetail" key="detail" class="catalog-scroll detail-scroll" :aria-busy="loading"><SupplierStyleDetail v-if="detail" :row="detail" :can-read-cost="canReadCost" :can-edit="canWrite&&!removing&&!detail.discarded" @edit="editStyle(detail)" @product="openProduct" @source="openSource" @model-sheet="modelSheetItem=detail"/><el-button v-if="detail&&canWrite" :disabled="removing" @click="setRemoved(detail)">{{detail.discarded?t('恢复产品'):t('删除产品')}}</el-button><p v-else-if="loading" class="catalog-loading" role="status">{{ uiText("正在加载本款资料…") }}</p></div>
     <div v-else key="styles" class="catalog-branch">
-      <form class="catalog-search" @submit.prevent="searchStyles"><el-input v-model="keyword" placeholder="搜索款式、货号、手机型号或编码" aria-label="搜索供应商款式" clearable/><el-button native-type="submit" :disabled="loading">查询</el-button></form>
-      <div class="catalog-list-toolbar"><div><el-checkbox v-if="canWrite" :model-value="allPageChecked" :indeterminate="!allPageChecked&&rows.some(row=>checked.has(catalogKey(row)))" :disabled="loading||selectionLoading" @change="checkPage(Boolean($event))">勾选本页</el-checkbox><span v-if="canWrite">已选 {{ checked.size }} 款（跨页保留）</span><span v-else>{{ supplierName }}的款式</span><el-button v-if="checked.size" link @click="cancelSelectionLoad();checked=new Map()">取消勾选</el-button></div><div v-if="canWrite"><el-button :disabled="!checked.size||loading" @click="identityItems=[...checked.values()]">款式号／字段核对</el-button><el-button type="primary" :disabled="!checked.size||loading||selectionLoading" :loading="selectionLoading" @click="add([...checked.values()])">选择样品</el-button></div></div>
+      <form class="catalog-search" @submit.prevent="searchStyles"><el-input v-model="keyword" :placeholder='uiText("搜索款式、货号、手机型号或编码")' :aria-label='uiText("搜索供应商款式")' clearable/><el-button native-type="submit" :disabled="loading">{{ uiText("查询") }}</el-button></form>
+      <div class="catalog-list-toolbar"><div><el-checkbox v-if="canWrite" :model-value="allPageChecked" :indeterminate="!allPageChecked&&rows.some(row=>checked.has(catalogKey(row)))" :disabled="loading||selectionLoading" @change="checkPage(Boolean($event))">{{ uiText("勾选本页") }}</el-checkbox><span v-if="canWrite">{{ uiText("已选 ") }}{{ checked.size }}{{ uiText(" 款（跨页保留）") }}</span><span v-else>{{ supplierName }}{{ uiText("的款式") }}</span><el-button v-if="checked.size" link @click="cancelSelectionLoad();checked=new Map()">{{ uiText("取消勾选") }}</el-button></div><div v-if="canWrite"><el-button :disabled="!checked.size||loading" @click="identityItems=[...checked.values()]">{{ uiText("款式号／字段核对") }}</el-button><el-button type="primary" :disabled="!checked.size||loading||selectionLoading" :loading="selectionLoading" @click="add([...checked.values()])">{{ uiText("选择样品") }}</el-button></div></div>
       <div class="catalog-scroll catalog-style-list" :class="{'without-cost':!canReadCost,'readonly-catalog':!canWrite}" :aria-busy="loading">
-        <div class="catalog-style-head" aria-hidden="true"><span>图片</span><span v-if="canWrite" class="catalog-check-title">勾选</span><span>款式编号／名称</span><span>手机型号</span><span>颜色</span><span>材质</span><span v-if="canReadCost">报价</span><span v-if="canReadCost">币种</span><span>起订数量</span><span>起订口径</span><span>操作</span></div>
+        <div class="catalog-style-head" aria-hidden="true"><span>{{ uiText("图片") }}</span><span v-if="canWrite" class="catalog-check-title">{{ uiText("勾选") }}</span><span>{{ uiText("款式编号／名称") }}</span><span>{{ uiText("手机型号") }}</span><span>{{ uiText("供应商颜色") }}</span><span>{{ uiText("材质") }}</span><span v-if="canReadCost">{{ uiText("报价") }}</span><span v-if="canReadCost">{{ uiText("币种") }}</span><span>{{ uiText("起订数量") }}</span><span>{{ uiText("起订口径") }}</span><span>{{ uiText("操作") }}</span></div>
         <article v-for="row in rows" :key="catalogKey(row)" class="catalog-style-row" :data-style-key="catalogKey(row)">
-          <div class="catalog-style-photo"><PartnerPhoto v-if="photo(row)" :id="photo(row)!.id"/><span v-else class="catalog-no-photo">暂无图片</span><button v-if="photo(row)" type="button" class="catalog-photo-open" :aria-label="`查看${row.name}的${photoCount(row)}张图片`" @click="open(row)">{{ photoCount(row) }}图</button></div>
-          <div v-if="canWrite" class="catalog-style-check"><el-checkbox :model-value="checked.has(catalogKey(row))" :aria-label="`选择${row.name}`" :disabled="loading||selectionLoading" @change="check(row,Boolean($event))"/></div>
-          <div class="catalog-style-name"><strong class="catalog-style-code">{{row.catalogStyleLabel||row.catalogStyleCode||'款式号待补'}}</strong><el-button link type="primary" @click="open(row)">{{ row.name || '未命名款式' }}</el-button><small v-if="row.supplierItemCode">供方款号：{{row.supplierItemCode}}</small><el-button v-if="row.productId" link @click="openProduct(row.productId)">{{ row.productCode || '关联我方产品' }}</el-button></div>
-          <div class="catalog-style-model"><span class="catalog-cell-label">手机型号</span><strong>{{ catalogPhoneSummary(row) }}</strong><small v-if="row.phones?.length>2">{{ row.phoneMatchSummary?.codeGroupCount || row.phones.length }} 个型号编码组 · 详情查看</small><small v-else-if="row.phones?.length">{{ row.phones.map(phone=>phone.phoneModelCode).filter(Boolean).join(' / ') }}</small></div>
-          <div class="catalog-style-config"><span class="catalog-cell-label">颜色</span><strong>{{ row.color || '未提供' }}</strong></div>
-          <div class="catalog-style-material"><span class="catalog-cell-label">材质</span><span v-if="!row.material||row.material.length<=12">{{row.material||'未提供'}}</span><el-button v-else link type="primary" @click="open(row)">查看材质</el-button></div>
-          <div v-if="canReadCost" class="catalog-style-price"><span class="catalog-cell-label">报价</span><strong>{{ supplierPriceValue(row) }}</strong></div>
-          <div v-if="canReadCost" class="catalog-style-currency"><span class="catalog-cell-label">币种</span><span>{{supplierCurrency(row)}}</span><small v-if="row.currencySource==='business_default'">业务默认</small></div>
+          <div class="catalog-style-photo"><PartnerPhoto v-if="photo(row)" :id="photo(row)!.id" previewable :preview-files="photos(row)"/><span v-else class="catalog-no-photo">{{ uiText("暂无图片") }}</span><span v-if="photo(row)" class="catalog-photo-open" aria-hidden="true">{{ photos(row).length }}{{ uiText("图") }}</span></div>
+          <div v-if="canWrite" class="catalog-style-check"><el-checkbox :model-value="checked.has(catalogKey(row))" :aria-label="uiText('选择{value0}',{value0:(row.name)})" :disabled="loading||selectionLoading||row.discarded" @change="check(row,Boolean($event))"/></div>
+          <div class="catalog-style-name"><strong class="catalog-style-code">{{row.catalogStyleLabel||row.catalogStyleCode||uiText('款式号待补')}}</strong><el-button link type="primary" @click="open(row)">{{ row.name || uiText('未命名款式') }}</el-button><small v-if="row.supplierItemCode">{{ uiText("供方款号：") }}{{row.supplierItemCode}}</small><el-button v-if="row.productId" link @click="openProduct(row.productId)">{{ row.productCode || uiText('关联我方产品') }}</el-button></div>
+          <div class="catalog-style-model"><span class="catalog-cell-label">{{ uiText("手机型号") }}</span><strong>{{ catalogPhoneSummary(row) }}</strong><small v-if="row.phones?.length>2">{{ row.phoneMatchSummary?.codeGroupCount || row.phones.length }}{{ uiText(" 个型号编码组 · 详情查看") }}</small><small v-else-if="row.phones?.length">{{ row.phones.map(phone=>phone.phoneModelCode).filter(Boolean).join(' / ') }}</small></div>
+          <div class="catalog-style-config"><span class="catalog-cell-label">{{ uiText("供应商颜色") }}</span><strong>{{ row.color || uiText('未提供') }}</strong></div>
+          <div class="catalog-style-material"><span class="catalog-cell-label">{{ uiText("材质") }}</span><span v-if="!row.material||row.material.length<=12">{{row.material||uiText('未提供')}}</span><el-button v-else link type="primary" @click="open(row)">{{ uiText("查看材质") }}</el-button></div>
+          <div v-if="canReadCost" class="catalog-style-price"><span class="catalog-cell-label">{{ uiText("报价") }}</span><strong>{{ supplierPriceValue(row) }}</strong></div>
+          <div v-if="canReadCost" class="catalog-style-currency"><span class="catalog-cell-label">{{ uiText("币种") }}</span><span>{{supplierCurrency(row)}}</span><small v-if="row.currencySource==='business_default'">{{ uiText("业务默认") }}</small></div>
           
-          <div class="catalog-style-moq"><span class="catalog-cell-label">起订数量</span><span>{{row.moqQuantity??'未确认'}}<small v-if="row.moqUnit"> {{row.moqUnit}}</small></span></div>
+          <div class="catalog-style-moq"><span class="catalog-cell-label">{{ uiText("起订数量") }}</span><span>{{row.moqQuantity??uiText('未确认')}}<small v-if="row.moqUnit"> {{row.moqUnit}}</small></span></div>
           
-          <div class="catalog-style-moq-scope"><span class="catalog-cell-label">起订口径</span><span>{{moqScopeLabel(row.moqScope)}}</span></div>
-          <div class="catalog-style-actions"><el-button link type="primary" @click="open(row)">详情</el-button><el-button v-if="canWrite" link type="primary" :disabled="renaming" :aria-label="'修改'+row.name+'名称'" @click="renameStyle(row)">改名</el-button></div>
+          <div class="catalog-style-moq-scope"><span class="catalog-cell-label">{{ uiText("起订口径") }}</span><span>{{uiText(moqScopeLabel(row.moqScope))}}</span></div>
+          <div class="catalog-style-actions"><el-button link type="primary" @click="open(row)">{{ uiText("详情") }}</el-button><el-button v-if="canWrite&&!row.discarded" link type="primary" :disabled="removing" :aria-label="t('编辑产品')+' '+row.name" @click="editStyle(row)">{{t('编辑')}}</el-button><el-button v-if="canWrite" link :type="row.discarded?'primary':'danger'" :disabled="removing" @click="setRemoved(row)">{{row.discarded?t('恢复'):t('删除')}}</el-button></div>
         </article>
-        <el-empty v-if="!loading&&!rows.length&&!error" :description="keyword?'该供应商暂无符合条件的款式':'该供应商还没有目录款式'" :image-size="65"><div v-if="canWrite" class="catalog-empty-actions"><p>先导入供应商资料，再选需要的款式和具体型号。</p><el-button @click="sourcesOpen=true">导入供应商资料</el-button><el-button @click="router.push({path:'/suppliers',query:{code:supplierCode,from:route.fullPath}})">维护型号与颜色范围</el-button></div></el-empty>
-        <p v-if="loading&&!styles" class="catalog-loading" role="status">正在加载供应商款式…</p>
+        <el-empty v-if="!loading&&!rows.length&&!error" :description="keyword?uiText('该供应商暂无符合条件的款式'):uiText('该供应商还没有目录款式')" :image-size="65"><div v-if="canWrite" class="catalog-empty-actions"><p>{{ uiText("先导入供应商资料，再选需要的款式和具体型号。") }}</p><el-button @click="sourcesOpen=true">{{ uiText("导入供应商资料") }}</el-button><el-button @click="router.push({path:'/suppliers',query:{code:supplierCode,from:route.fullPath}})">{{ uiText("维护型号与颜色范围") }}</el-button></div></el-empty>
+        <p v-if="loading&&!styles" class="catalog-loading" role="status">{{ uiText("正在加载供应商款式…") }}</p>
       </div>
-      <footer class="catalog-pager"><span>共 {{ styles?.totalElements || 0 }} 款</span><el-pagination :current-page="page" :page-size="size" :page-sizes="[20,30,50,100]" :total="styles?.totalElements||0" :pager-count="5" layout="sizes,prev,pager,next" :disabled="loading" @current-change="changePage" @size-change="changeSize"/></footer>
+      <footer class="catalog-pager"><span>{{ uiText("共 ") }}{{ styles?.totalElements || 0 }}{{ uiText(" 款") }}</span><el-pagination :current-page="page" :page-size="size" :page-sizes="[20,30,50,100]" :total="styles?.totalElements||0" :pager-count="5" layout="sizes,prev,pager,next" :disabled="loading" @current-change="changePage" @size-change="changeSize"/></footer>
     </div>
     <CatalogSelectionDialog v-model="selectionOpen" :supplier-code="supplierCode" :supplier-name="supplierName" :items="selectionItems" :can-write="canWrite" :target-selection-id="targetSelectionId" :target-version="targetVersion" @busy="selectionBusy=$event" @added="added"/>
     <CatalogSourceImport v-model="sourcesOpen" :supplier-code="supplierCode" :can-write="canManageSources" @changed="load"/>
     <CatalogIdentityDialog v-if="identityItems.length" :supplier-code="supplierCode" :items="identityItems" @close="identityItems=[]" @saved="identityItems=[];checked=new Map();load()"/>
     <CatalogModelSheetDialog v-if="modelSheetItem" :row="modelSheetItem" @close="modelSheetItem=undefined" @saved="modelSheetSaved"/>
+    <CatalogStyleEditor v-if="editing" :item="editing" :can-read-cost="canReadCost" @close="editing=undefined" @saved="edited"/>
   </PageContainer>
 </template>
 
@@ -203,7 +215,7 @@ const photoCount = (row: CatalogStyle) => (row.fileDetails || []).filter(file =>
 .catalog-style-row{border-top:1px solid var(--el-border-color-lighter);font-size:13px;line-height:1.6;min-height:52px}.catalog-style-row:hover{background:var(--el-fill-color-extra-light)}
 .catalog-style-row>div:not(.catalog-style-photo):not(.catalog-style-check):not(.catalog-style-actions){display:flex;flex-direction:column;justify-content:center;gap:2px}
 .catalog-style-photo{position:relative;display:flex;align-items:center;justify-content:center}.catalog-style-photo :deep(.partner-photo){width:44px;height:44px}
-.catalog-photo-open{position:absolute;right:4px;top:4px;border:1px solid var(--el-color-primary-light-7);border-radius:3px;background:var(--el-bg-color);color:var(--el-color-primary);padding:0 3px;font-size:11px;line-height:16px;cursor:pointer}
+.catalog-photo-open{position:absolute;right:4px;top:4px;border:1px solid var(--el-color-primary-light-7);border-radius:3px;background:var(--el-bg-color);color:var(--el-color-primary);padding:0 3px;font-size:11px;line-height:16px;pointer-events:none}
 .catalog-no-photo{font-size:11px;color:var(--el-text-color-secondary);background:var(--el-fill-color-light);width:44px;height:44px;display:grid;place-items:center;border-radius:5px}
 .catalog-style-check{display:grid;place-items:center;padding:3px!important}.catalog-style-check .el-checkbox{margin:0}
 .catalog-style-name>.el-button{font-size:14px;font-weight:600;justify-content:flex-start}.catalog-style-code{font-size:12px;color:var(--el-color-primary);font-weight:500}

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed } from 'vue'
 
 import type { TimelineItem } from '@/types/common'
@@ -53,7 +55,7 @@ const decoratedHistory = computed(() =>
 </script>
 
 <template>
-  <el-empty v-if="!history.length" description="暂无流程记录" />
+  <el-empty v-if="!history.length" :description='uiText("暂无流程记录")' />
   <div v-else class="timeline-list">
     <article
       v-for="item in decoratedHistory"
@@ -76,13 +78,13 @@ const decoratedHistory = computed(() =>
         <div class="timeline-item__header">
           <div class="timeline-item__title">
             <span v-if="item.stepNo" class="timeline-step-no">{{ String(item.stepNo).padStart(2, '0') }}</span>
-            <strong>{{ item.title }}</strong>
-            <el-tag v-if="item.gate" type="warning" effect="light">{{ item.gateLabel || '门禁点' }}</el-tag>
-            <el-tag v-if="item.variantMeta" :type="item.variantMeta.type" effect="light">{{ item.variantMeta.label }}</el-tag>
-            <el-tag v-if="item.branchMeta" :type="item.branchMeta.type" effect="light">{{ item.branchMeta.label }}</el-tag>
-            <el-tag v-if="item.isDecision" type="primary" effect="light">决策点</el-tag>
+            <strong>{{ uiText(String((item.title) ?? '')) }}</strong>
+            <el-tag v-if="item.gate" type="warning" effect="light">{{ item.gateLabel || uiText('门禁点') }}</el-tag>
+            <el-tag v-if="item.variantMeta" :type="item.variantMeta.type" effect="light">{{ uiText(String((item.variantMeta.label) ?? '')) }}</el-tag>
+            <el-tag v-if="item.branchMeta" :type="item.branchMeta.type" effect="light">{{ uiText(String((item.branchMeta.label) ?? '')) }}</el-tag>
+            <el-tag v-if="item.isDecision" type="primary" effect="light">{{ uiText("决策点") }}</el-tag>
           </div>
-          <el-tag :type="item.tagType" effect="light">{{ item.tagLabel }}</el-tag>
+          <el-tag :type="item.tagType" effect="light">{{ uiText(String((item.tagLabel) ?? '')) }}</el-tag>
         </div>
         <div class="timeline-item__meta">
           <span>{{ item.phase || item.owner || '--' }}</span>

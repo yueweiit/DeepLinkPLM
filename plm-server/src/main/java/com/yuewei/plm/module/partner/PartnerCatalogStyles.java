@@ -11,6 +11,52 @@ import static com.yuewei.plm.module.partner.PartnerValues.*;
 @Component @RequiredArgsConstructor
 public class PartnerCatalogStyles {
  private final PartnerStore store;
+ static Map<String,Object> currentData(Map<String,Object> source){var result=new LinkedHashMap<>(source);result.putAll(map(source.get("catalogCurrent")));return result;}
+ String sourceSql(boolean includeDiscarded){
+  String scope=store.access.visibleSqlClause("partner","r.record_id");
+  String selectionActive=includeDiscarded?"":" and coalesce(s.data->'catalogCurrent'->>'discarded',s.data->>'discarded','false')<>'true'";
+  String quoteActive=includeDiscarded?"":" and coalesce(q.data->'catalogCurrent'->>'discarded',q.data->>'discarded','false')<>'true'";
+  return """
+   select 'selection' as source_kind,r.record_id,r.code as source_code,r.name as source_name,
+          r.version as record_version,r.status as source_status,r.updated_at,s.row_id::text as row_id,s.row_version,
+          s.sort_order,s.data||coalesce(s.data->'catalogCurrent','{}'::jsonb) as data,s.confirmed,s.data->>'supplierCode' as supplier_code,
+          case when coalesce(r.data->>'catalogSource','false')='true' then 'catalog_source' else 'my_selection' end as source_purpose
+     from plm_partner_selection_row s join plm_partner_record r on r.record_id=s.record_id
+    where r.kind='selection' and r.deleted_flag=0
+      and (coalesce(r.data->>'purpose','')<>'my_selection' or r.data->>'catalogSource'='true')
+      and not exists(select 1 from plm_partner_event e where e.record_id=r.record_id
+          and e.action='catalog_add' and (e.data->'createdRowIds') @> jsonb_build_array(s.row_id::text))
+      and (%s) %s
+   union all
+   select 'quote',r.record_id,r.code,r.name,r.version,r.status,r.updated_at,q.line_id::text,q.row_version,
+          q.sort_order,q.data||coalesce(q.data->'catalogCurrent','{}'::jsonb),false,coalesce(nullif(q.data->>'supplierCode',''),r.supplier_code),'catalog_source'
+     from plm_partner_quote_line q join plm_partner_record r on r.record_id=q.record_id
+    where r.kind='supplier_quote' and r.deleted_flag=0
+      and (coalesce(q.data->>'supplierCode','')='' or q.data->>'supplierCode'=r.supplier_code)
+      and (%s) %s
+   """.formatted(scope,selectionActive,scope,quoteActive);
+ }
+ String currentNameSearch(String styleExpression){
+  return "exists(select 1 from ("+sourceSql(true)+") current_source join plm_partner_catalog_style_source current_link on current_link.source_kind=current_source.source_kind and current_link.record_id=current_source.record_id and current_link.row_id::text=current_source.row_id where current_link.style_id::text="+styleExpression+" and current_source.data->>'name' ilike ?)";
+ }
+ /** Current descriptive data is a read projection; receipt identities and confirmed snapshots stay immutable. */
+ public void projectCurrent(List<Map<String,Object>> rows){
+  var ids=rows.stream().map(r->number(r.get("catalogStyleId"))).filter(id->id>0).distinct().toList();if(ids.isEmpty())return;
+  var sources=store.jdbc.queryForList("select link.style_id,current_source.record_id,current_source.row_id,current_source.source_kind,current_source.data::text from ("+sourceSql(true)+") current_source join plm_partner_catalog_style_source link on link.source_kind=current_source.source_kind and link.record_id=current_source.record_id and link.row_id::text=current_source.row_id where link.style_id in ("+String.join(",",Collections.nCopies(ids.size(),"?"))+")",ids.toArray());
+  var byStyle=new HashMap<Long,List<Map<String,Object>>>();for(var source:sources){source.put("values",decode(store.json,source.remove("data")));byStyle.computeIfAbsent(number(source.get("style_id")),k->new ArrayList<>()).add(source);}
+  boolean costs=new PartnerOperationsAccess(store.access).costs();
+  for(var row:rows){var candidates=byStyle.getOrDefault(number(row.get("catalogStyleId")),List.of());if(candidates.isEmpty())continue;
+   var origin=map(row.get("catalogSourceSnapshot"));if(origin.isEmpty())origin=map(row.get("sourceSnapshot"));
+   if(origin.isEmpty()){var batches=maps(row.get("batches"));if(!batches.isEmpty())origin=map(batches.get(0).get("sourceSnapshot"));}
+   long record=number(origin.getOrDefault("recordId",origin.get("sourceRecordId")));String sourceRow=text(origin.getOrDefault("rowId",origin.get("sourceRowId")));
+   var exact=candidates.stream().filter(s->number(s.get("record_id"))==record&&text(s.get("row_id")).equals(sourceRow)).toList();
+   var selected=exact.isEmpty()?candidates:exact;var current=new LinkedHashMap<String,Object>();
+   var fields=new ArrayList<>(List.of("name","color","material","supplierItemCode","specification","modelText","discarded"));if(costs)fields.addAll(List.of("unitPrice","currency","priceNote","priceUnit"));
+   for(String field:fields){var values=selected.stream().map(s->map(s.get("values")).get(field)).distinct().toList();if(values.size()==1)current.put(field,values.get(0));}
+   current.put("available",selected.stream().anyMatch(s->!Boolean.TRUE.equals(map(s.get("values")).get("discarded"))));row.put("currentCatalog",current);
+   String name=text(current.get("name"));if(!name.isEmpty()){row.put("recordedName",row.getOrDefault("name",""));row.put("name",name);if(row.containsKey("sampleCode"))row.put("productName",name);}
+  }
+ }
  public Map<String,Object> identity(String kind,long record,String row){
   var found=store.jdbc.queryForList("select s.style_id as \"catalogStyleId\",s.code as \"catalogStyleCode\",s.supplier_code as \"supplierCode\",coalesce(p.short_code,'') as \"supplierShortCode\",x.fields::text from plm_partner_catalog_style_source x join plm_partner_catalog_style s on s.style_id=x.style_id join plm_supplier_profile p on p.supplier_code=s.supplier_code where x.source_kind=? and x.record_id=? and x.row_id=?::uuid",kind,record,row);
   if(found.isEmpty())return Map.of();var result=new LinkedHashMap<>(found.get(0));result.putAll(decode(store.json,result.remove("fields")));String code=text(result.get("catalogStyleCode")),shortCode=text(result.remove("supplierShortCode"));result.put("catalogStyleLabel",shortCode.isEmpty()?code:shortCode+"-"+code);return result;

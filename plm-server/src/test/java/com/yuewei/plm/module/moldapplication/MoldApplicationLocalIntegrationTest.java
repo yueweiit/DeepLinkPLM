@@ -635,18 +635,18 @@ class MoldApplicationLocalIntegrationTest {
         assertThatThrownBy(()->service.startFromResearch(new MoldApplicationService.ResearchDraft(researchProject,phoneModel,"it-research-version-12345678",0L),null)).hasMessageContaining("项目已被其他操作更新");
         assertThat(researchStore.load(researchProject)).isEqualTo(state);assertThat(jdbc.queryForObject("select current_step_no from plm_product where product_id=?",Integer.class,researchProject)).isEqualTo(1);verifyNoInteractions(client,files);
     }
-    @Test void researchContinuesTheCrossSourceDraftAndViewsFinishedRequestsWithoutDuplicating()throws Exception {
+    @Test void researchContinuesTheCrossSourceDraftAndKeepsFinishedRequestsReadOnly()throws Exception {
         researchFixture(true);var original=service.startFromPhone(new MoldApplicationService.SourceDraft(phoneModel,null,null,null,researchProject,"new",null,null,null,null,"it-cross-source-12345678",false),null);
         var originalForm=((JsonNode)original.get("form")).deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)originalForm).put("remark","原入口工程师备注");original=service.save(id(original),new MoldApplicationService.Draft(originalForm,researchProject,phone,version(original),phoneModel,"new",null,null,null),null);
         var linked=service.startFromResearch(researchInput("it-research-cross-12345678"),null);assertThat(id(linked)).isEqualTo(id(original));assertThat(((JsonNode)linked.get("form")).path("remark").asText()).isEqualTo("原入口工程师备注");assertThat(media.list(id(linked))).hasSize(1);
         jdbc.update("update plm_mold_application set status='completed',remote_status='COMPLETED',remote_result='refuse',external_instance_id='IT-LEMOS-REJECTED' where application_id=?",id(linked));
-        long count=jdbc.queryForObject("select count(*) from plm_mold_application",Long.class);var finished=service.startFromResearch(researchInput("it-research-finished-12345678"),null);assertThat(id(finished)).isEqualTo(id(linked));assertThat(finished).containsEntry("canEditDraft",false);assertThat(service.researchApplications(researchProject).get(0)).containsEntry("businessStatus","rejected");assertThat(jdbc.queryForObject("select count(*) from plm_mold_application",Long.class)).isEqualTo(count);verifyNoInteractions(client,files);
+        long count=jdbc.queryForObject("select count(*) from plm_mold_application",Long.class);var finished=service.detail(id(linked));assertThatThrownBy(()->service.startFromResearch(researchInput("it-research-finished-12345678"),null)).isInstanceOf(BusinessException.class);assertThat(id(finished)).isEqualTo(id(linked));assertThat(finished).containsEntry("canEditDraft",false);assertThat(service.researchApplications(researchProject).get(0)).containsEntry("businessStatus","rejected");assertThat(jdbc.queryForObject("select count(*) from plm_mold_application",Long.class)).isEqualTo(count);verifyNoInteractions(client,files);
     }
     @Test void inheritedFilesAndSourceCannotBypassRevokedProjectOrFilePermissions()throws Exception {
         researchFixture(true);var created=service.startFromResearch(researchInput("it-research-permissions-12345678"),null);long application=id(created),file=((Number)media.list(application).get(0).get("attachmentId")).longValue();
         var scoped=spy(access);doReturn(false).when(scoped).hasPermission("file:read");doThrow(new BusinessException(40103,"原文件未获授权")).when(scoped).requireFile(researchFile);org.springframework.test.util.ReflectionTestUtils.setField(service,"access",scoped);org.springframework.test.util.ReflectionTestUtils.setField(researchDevelopment,"access",scoped);
         assertThat((List<?>)service.detail(application).get("files")).isEmpty();assertThat(((JsonNode)service.detail(application).get("sourceSnapshot")).path("research").path("referencesRestricted").asBoolean()).isTrue();
-        assertThatThrownBy(()->service.download(application,file)).hasMessageContaining("未获授权");
+        assertThatThrownBy(()->service.download(application,file)).isInstanceOf(BusinessException.class).hasMessageContaining("没有权限：file:read");
         doReturn(false).when(scoped).hasPermission("project:view");assertThatThrownBy(()->service.detail(application)).hasMessageContaining("申请不存在或未获授权");assertThat(service.page(1,50,null,null,null,null,null,null).getContent()).noneMatch(row->Objects.equals(row.get("applicationId"),application));
         assertThatThrownBy(()->service.download(application,file)).hasMessageContaining("未获授权");verifyNoInteractions(client,files);
     }
@@ -768,17 +768,21 @@ class MoldApplicationLocalIntegrationTest {
         assertThat(fields).noneMatch(f->Set.of(MoldApplicationForms.COMPONENTS.get("generatedCodes"),MoldApplicationForms.COMPONENTS.get("informationComplete")).contains(f.get("id")));
         assertThat(fields).anySatisfy(f->assertThat(f).containsEntry("id",MoldApplicationForms.COMPONENTS.get("tipo")).containsEntry("value","亮甲Rainbow 3.0"));
         assertThat(((JsonNode)submitted.get("sourceSnapshot")).path("researchSubmission").path("projectId").asLong()).isEqualTo(researchProject);
-        var convert=converter();var approved=json.createObjectNode();approved.put("status","RUNNING").put("business_id","IT-RESEARCH").put("title","本地新品审批").put("originator_userid","mold-it-user");
+        var convert=converter();
+        var productCoding=mock(com.yuewei.plm.module.product.service.ResearchProductCodingService.class);when(productCoding.ensurePrefix(eq(researchProject),anyString())).thenReturn(Map.of("status","pending","productSpecificCode","","productCodePrefix",""));when(productCoding.operationOptions()).thenReturn(List.of());
+        org.springframework.test.util.ReflectionTestUtils.setField(convert,"productCoding",productCoding);org.springframework.test.util.ReflectionTestUtils.setField(service,"productCoding",productCoding);
+        var approved=json.createObjectNode();approved.put("status","RUNNING").put("business_id","IT-RESEARCH").put("title","本地新品审批").put("originator_userid","mold-it-user");
         var remoteForm=approved.putArray("form_component_values");for(var field:fields)remoteForm.addObject().put("id",field.get("id")).put("value",field.get("value"));
         approved.putArray("tasks").addObject().put("userid",MoldApplicationForms.EXECUTION_APPROVER_USER_ID).put("taskid","it-research-proof").put("task_status","COMPLETED").put("task_result","AGREE").put("finish_time","2026-10-29 12:00:00");
         doReturn(approved).when(client).instance("it-uncoded-approved");
         service.callback("it-uncoded-approved",props.getProcessCode(),true);service.callback("it-uncoded-approved",props.getProcessCode(),true);
-        var synced=repo.row(id(row),false);assertThat(synced).containsEntry("approvalGranted",true).containsEntry("productLineId",researchProject).containsEntry("projectId",null).containsEntry("provisioningStatus","blocked");
+        var synced=repo.row(id(row),false);assertThat(synced).containsEntry("approvalGranted",true).containsEntry("productLineId",researchProject).containsEntry("projectId",researchProject).containsEntry("provisioningStatus","blocked");
         assertThat(((JsonNode)synced.get("sourceSnapshot")).path("researchSubmission")).isEqualTo(((JsonNode)submitted.get("sourceSnapshot")).path("researchSubmission"));
-        assertThatThrownBy(()->convert.preview(id(row))).hasMessageContaining("不自动建立型号开发项目或实物套");
-        assertThatThrownBy(()->convert.convertAutomatically(id(row))).hasMessageContaining("不自动建立型号开发项目或实物套");
-        assertThatThrownBy(()->service.correctTargets(id(row),new MoldApplicationService.TargetCorrection(version(submitted),"new",null,null,"工程核对"),null)).hasMessageContaining("不自动建立型号开发项目或实物套");
-        assertThatThrownBy(()->service.retryProvision(id(row),version(submitted),null)).hasMessageContaining("不自动建立型号开发项目或实物套");
+        assertThat(convert.preview(id(row))).containsKey("researchCoding");
+        var pending=convert.convertAutomatically(id(row));assertThat(pending).containsEntry("projectId",researchProject).containsEntry("moldSetId",null);
+        assertThat(((JsonNode)pending.get("researchCoding")).path("missingFields").toString()).contains("materialCodes","phoneModelId");
+        assertThatThrownBy(()->service.correctTargets(id(row),new MoldApplicationService.TargetCorrection(version(submitted),"new",null,null,"工程核对"),null)).hasMessageContaining("原项目第5步自动续办");
+        assertThat(service.retryProvision(id(row),version(repo.row(id(row),false)),null)).containsEntry("projectId",researchProject).containsEntry("moldSetId",null);
         assertThat(service.researchApplications(researchProject)).singleElement().satisfies(r->assertThat(r).containsEntry("model","Honor 600 Lite 待最终适配确认"));
         assertThat(service.detail(id(row)).get("nextStep").toString()).contains("新品审批已同意","新品项目");
         approved.put("status","TERMINATED");service.callback("it-uncoded-approved",props.getProcessCode(),false);
@@ -819,7 +823,7 @@ class MoldApplicationLocalIntegrationTest {
     @Test void researchApprovalCannotCarryHiddenNewSetOrModelExecutionTargets()throws Exception {
         var row=uncodedResearchPrepared();allowWrite();var form=(JsonNode)row.get("form");
         var saved=service.save(id(row),new MoldApplicationService.Draft(form,researchProject,null,version(row),null,"new_set",null,null,null,"错误旧隐藏选择",null,true),null);
-        assertThatThrownBy(()->service.submit(id(saved),new MoldApplicationService.Submit(version(saved),null,true),null)).hasMessageContaining("新增套、共模和型号项目目标请从型号开发办理");verify(client,never()).submit(anyMap());
+        assertThatThrownBy(()->service.submit(id(saved),new MoldApplicationService.Submit(version(saved),null,true),null)).hasMessageContaining("提交前请选择标准手机型号");verify(client,never()).submit(anyMap());
     }
 
     @Test void researchSubmissionMarkerAndStateRollBackWhenMandatorySubmitAuditFails()throws Exception {

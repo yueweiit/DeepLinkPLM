@@ -7,14 +7,22 @@ import static com.yuewei.plm.module.project.development.DevelopmentWorkflowStore
 /** Business validation shared by UI actions and the original timeline/publication entrypoints. */
 public final class DevelopmentRules {
     private DevelopmentRules() {}
-    public record ReadinessCheck(String code,String title,String target,boolean complete,String message) {}
+    public static final Set<String> PRODUCT_3D_SOURCE_EXTENSIONS=Set.of("step","stp","stl","igs","iges","sldprt","sldasm","x_t","x_b","3dm","obj","3mf","prt");
+    public static final Set<String> PRODUCT_3D_RENDER_EXTENSIONS=Set.of("jpg","jpeg","png","webp","pdf");
+    public record ReadinessCheck(String code,String title,String target,boolean complete,String message,boolean blocking) {
+        public ReadinessCheck(String code,String title,String target,boolean complete,String message){this(code,title,target,complete,message,true);}
+        public boolean satisfied(){return complete||!blocking;}
+    }
     /** Both the read-only checklist and the original write gates execute these checks. */
     public static ReadinessCheck check(String code,String title,String target,Runnable validation){
-        try{validation.run();return new ReadinessCheck(code,title,target,true,"");}
-        catch(com.yuewei.plm.common.exception.BusinessException missing){return new ReadinessCheck(code,title,target,false,missing.getMessage());}
+        return check(code,title,target,true,validation);
+    }
+    public static ReadinessCheck check(String code,String title,String target,boolean blocking,Runnable validation){
+        try{validation.run();return new ReadinessCheck(code,title,target,true,"",blocking);}
+        catch(com.yuewei.plm.common.exception.BusinessException missing){return new ReadinessCheck(code,title,target,false,missing.getMessage(),blocking);}
     }
     public static void requireChecks(List<ReadinessCheck> checks){
-        checks.stream().filter(c->!c.complete()).findFirst().ifPresent(c->{throw invalid(c.message());});
+        checks.stream().filter(c->!c.satisfied()).findFirst().ifPresent(c->{throw invalid(c.message());});
     }
     public static void require(boolean value,String message){if(!value)throw invalid(message);}
     public static int roundStage(String kind,Map<String,Object> details){
@@ -46,8 +54,12 @@ public final class DevelopmentRules {
         for(Object item:requirementReferences(rows)){var ref=map(item);result.add(text(ref.get("type"))+":"+number(ref.get("id")));}return result;
     }
     public static boolean technicalReference(Map<String,Object> ref){
-        return Set.of("bom","process").contains(text(ref.get("type")))||("file".equals(ref.get("type"))&&Set.of("drawing","sop","sip").contains(text(ref.get("category"))));
+        return Set.of("bom","process").contains(text(ref.get("type")))||("file".equals(ref.get("type"))&&Set.of("drawing","render_3d","sop","sip").contains(text(ref.get("category"))));
     }
+    public static boolean product3dSource(Map<String,Object> ref){return "file".equals(ref.get("type"))&&"drawing".equals(ref.get("category"))&&PRODUCT_3D_SOURCE_EXTENSIONS.contains(fileExtension(ref));}
+    public static boolean product3dRender(Map<String,Object> ref){return "file".equals(ref.get("type"))&&"render_3d".equals(ref.get("category"))&&PRODUCT_3D_RENDER_EXTENSIONS.contains(fileExtension(ref));}
+    public static boolean product3dDrawing(Map<String,Object> ref){return product3dSource(ref)||product3dRender(ref);}
+    private static String fileExtension(Map<String,Object> ref){return text(ref.get("fileExt")).replace(".","").toLowerCase(Locale.ROOT);}
     /** Product requirements keep their source documents; design and test versions belong to their reviews. */
     public static List<Map<String,Object>> requirementReferences(Object value){
         if(!(value instanceof List<?> rows))return List.of();

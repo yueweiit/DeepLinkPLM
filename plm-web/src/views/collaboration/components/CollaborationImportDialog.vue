@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as api from '@/api/modules/collaboration'
@@ -71,14 +73,14 @@ async function applyStyleMapping(style: string, lineId: number | null) {
       if (matches.length === 1) await chooseTarget(row,matches[0].itemId)
       else { row.itemId = null; row.moldSetId = null; row.before = {}; row.newMoldSet = props.kind === 'delivery' }
     }
-    ElMessage.success('款式映射已暂存，请继续核对品牌、型号和日期异常')
+    ElMessage.success(uiText('款式映射已暂存，请继续核对品牌、型号和日期异常'))
   } finally { busy.value = false }
 }
 function editValue(row: ImportDecision, field: PlanField, text: string, quiet = false) {
   try {
     row.values[field.key] = parseCell(field,text)
     if (!row.itemId && ['styleName','compatibleModels'].includes(field.key)) row[field.key as 'styleName' | 'compatibleModels'] = String(row.values[field.key] ?? '')
-  } catch (e) { if (!quiet) ElMessage.warning(e instanceof Error ? e.message : '格式不正确') }
+  } catch (e) { if (!quiet) ElMessage.warning(e instanceof Error ? e.message : uiText('格式不正确')) }
 }
 function includeReviewed() {
   let count = 0
@@ -88,45 +90,45 @@ function includeReviewed() {
     const mappingOnly = issues.every(t => t.startsWith('未匹配现有档案') || t.startsWith('存在多个匹配档案'))
     if (mappingOnly && (row.itemId || row.productLineId) && bulkReason.value.trim()) { row.reviewReason = bulkReason.value.trim(); row.skip = false; count++ }
   })
-  ElMessage.success(`已纳入 ${count} 行；品牌、日期及重复关系异常仍须逐行核对`)
+  ElMessage.success(uiText('已纳入 {value0} 行；品牌、日期及重复关系异常仍须逐行核对',{value0:(count)}))
 }
 async function commit() {
   if (!preview.value || !included.value) return
   for (let n = 0; n < decisions.value.length; n++) {
     const row = decisions.value[n]; if (row.skip) continue
-    if (preview.value.rows[n].issues.length && !row.reviewReason.trim()) { selectedIndex.value = n; ElMessage.warning(`第 ${row.rowNo} 行须填写人工核对说明`); return }
-    if (!row.itemId && (!row.styleName.trim() || !row.compatibleModels.trim())) { selectedIndex.value = n; ElMessage.warning(`第 ${row.rowNo} 行须填写款式和兼容型号`); return }
-    if (props.kind === 'delivery' && !row.newMoldSet && !row.moldSetId) { selectedIndex.value = n; ElMessage.warning(`第 ${row.rowNo} 行须选择模具套或确认新增一套`); return }
-    if (props.kind === 'schedule' && (!row.itemId || !row.moldSetId || row.newMoldSet)) { selectedIndex.value = n; ElMessage.warning(`第 ${row.rowNo} 行须选择现有档案与实物模具套；排程不自动建档`); return }
-    if (props.kind === 'schedule' && /[/＋+]/.test(preview.value.rows[n].compatibleModels) && !row.confirmCompatibility) { selectedIndex.value = n; ElMessage.warning(`第 ${row.rowNo} 行须明确确认合写型号兼容关系`); return }
+    if (preview.value.rows[n].issues.length && !row.reviewReason.trim()) { selectedIndex.value = n; ElMessage.warning(uiText('第 {value0} 行须填写人工核对说明',{value0:(row.rowNo)})); return }
+    if (!row.itemId && (!row.styleName.trim() || !row.compatibleModels.trim())) { selectedIndex.value = n; ElMessage.warning(uiText('第 {value0} 行须填写款式和兼容型号',{value0:(row.rowNo)})); return }
+    if (props.kind === 'delivery' && !row.newMoldSet && !row.moldSetId) { selectedIndex.value = n; ElMessage.warning(uiText('第 {value0} 行须选择模具套或确认新增一套',{value0:(row.rowNo)})); return }
+    if (props.kind === 'schedule' && (!row.itemId || !row.moldSetId || row.newMoldSet)) { selectedIndex.value = n; ElMessage.warning(uiText('第 {value0} 行须选择现有档案与实物模具套；排程不自动建档',{value0:(row.rowNo)})); return }
+    if (props.kind === 'schedule' && /[/＋+]/.test(preview.value.rows[n].compatibleModels) && !row.confirmCompatibility) { selectedIndex.value = n; ElMessage.warning(uiText('第 {value0} 行须明确确认合写型号兼容关系',{value0:(row.rowNo)})); return }
     if (props.kind === 'market' && !row.itemId) Object.assign(row.values,{ styleName: row.styleName, compatibleModels: row.compatibleModels })
   }
   busy.value = true; failure.value = ''
-  try { const result = props.kind === 'schedule' ? await schedule.commitScheduleImport(preview.value.importToken, decisions.value) : await api.commitCollaborationImport(preview.value.importToken, decisions.value); ElMessage.success(result.duplicate ? '这些来源行已经导入，没有重复创建' : `已导入 ${result.saved} 行，跳过 ${result.skipped} 行`); emit('imported'); visible.value = false }
+  try { const result = props.kind === 'schedule' ? await schedule.commitScheduleImport(preview.value.importToken, decisions.value) : await api.commitCollaborationImport(preview.value.importToken, decisions.value); ElMessage.success(result.duplicate ? uiText('这些来源行已经导入，没有重复创建') : uiText('已导入 {value0} 行，跳过 {value1} 行',{value0:(result.saved),value1:(result.skipped)})); emit('imported'); visible.value = false }
   catch (e) { failure.value = e instanceof Error ? e.message : '提交失败，请检查核对结果；本次导入未完成' }
   finally { busy.value = false }
 }
 </script>
 
 <template>
-  <el-dialog v-model="visible" :title="`Excel 导入预览 · ${kind === 'schedule' ? '开模时间管控' : kind === 'delivery' ? '模具交付' : kind === 'production' ? '累计产量' : '市场资料'}`" width="min(1400px, 94vw)" top="4vh" :close-on-click-modal="false" destroy-on-close>
-    <p class="import-note">先预览、修正映射，再确认提交。不会从备注猜测产量、根据 $ 猜币种，或自动合并歧义型号。相同文件已导入的来源行不会重复创建。</p>
-    <div class="upload-row"><input ref="fileInput" type="file" accept=".xlsx" aria-label="选择协作计划 XLSX 文件" @change="fileChosen" /><el-button type="primary" :disabled="!selectedFile" :loading="busy" @click="upload">读取预览</el-button><el-button @click="downloadTemplate">下载标准模板</el-button></div>
+  <el-dialog v-model="visible" :title="uiText('Excel 导入预览 · {value0}',{value0:(kind === 'schedule' ? '开模时间管控' : kind === 'delivery' ? '模具交付' : kind === 'production' ? '累计产量' : '市场资料')})" width="min(1400px, 94vw)" top="4vh" :close-on-click-modal="false" destroy-on-close>
+    <p class="import-note">{{ uiText("先预览、修正映射，再确认提交。不会从备注猜测产量、根据 $ 猜币种，或自动合并歧义型号。相同文件已导入的来源行不会重复创建。") }}</p>
+    <div class="upload-row"><input ref="fileInput" type="file" accept=".xlsx" :aria-label='uiText("选择协作计划 XLSX 文件")' @change="fileChosen" /><el-button type="primary" :disabled="!selectedFile" :loading="busy" @click="upload">{{ uiText("读取预览") }}</el-button><el-button @click="downloadTemplate">{{ uiText("下载标准模板") }}</el-button></div>
     <el-alert v-if="failure" :title="failure" type="error" :closable="false" />
     <template v-if="preview">
-      <div class="preview-summary">共 {{ preview.total }} 行，{{ preview.needsReview }} 行需要核对；已选择导入 {{ included }} 行。原始文件和历史项目尚未改动。</div>
-      <details class="mapping-box" open><summary>款式映射（人工选择现有产品线，不自动猜别名）</summary><div class="mapping-grid"><label v-for="style in styleLabels" :key="style"><span>{{ style }}</span><el-select v-model="styleMap[style]" clearable placeholder="保持原款式 / 选择产品线" @change="applyStyleMapping(style,$event)"><el-option v-for="line in options.productLines" :key="line.productLineId" :label="line.productName" :value="line.productLineId" /></el-select></label></div><div class="upload-row"><el-input v-model="bulkReason" placeholder="对仅有款式映射问题的行填写核对说明" /><el-button :disabled="!bulkReason.trim() || busy" @click="includeReviewed">纳入已核对的映射行</el-button></div></details>
+      <div class="preview-summary">{{ uiText("共 ") }}{{ preview.total }}{{ uiText(" 行，") }}{{ preview.needsReview }}{{ uiText(" 行需要核对；已选择导入 ") }}{{ included }}{{ uiText(" 行。原始文件和历史项目尚未改动。") }}</div>
+      <details class="mapping-box" open><summary>{{ uiText("款式映射（人工选择现有产品线，不自动猜别名）") }}</summary><div class="mapping-grid"><label v-for="style in styleLabels" :key="style"><span>{{ style }}</span><el-select v-model="styleMap[style]" clearable :placeholder='uiText("保持原款式 / 选择产品线")' @change="applyStyleMapping(style,$event)"><el-option v-for="line in options.productLines" :key="line.productLineId" :label="line.productName" :value="line.productLineId" /></el-select></label></div><div class="upload-row"><el-input v-model="bulkReason" :placeholder='uiText("对仅有款式映射问题的行填写核对说明")' /><el-button :disabled="!bulkReason.trim() || busy" @click="includeReviewed">{{ uiText("纳入已核对的映射行") }}</el-button></div></details>
       <div class="import-layout">
-        <div class="preview-list"><el-table :data="preview.rows" height="460" highlight-current-row @row-click="(row: ImportRow) => selectedIndex = preview!.rows.indexOf(row)"><el-table-column label="导入" width="60"><template #default="{row,$index}"><el-checkbox :model-value="!decisions[$index].skip" :disabled="row.alreadyImported" @change="decisions[$index].skip = !$event" /></template></el-table-column><el-table-column prop="rowNo" label="原表行" width="70" /><el-table-column label="款式 / 手机型号" min-width="260"><template #default="{row,$index}"><strong>{{ row.styleName }}</strong><p>{{ row.compatibleModels }}</p><small>{{ row.brand }} · {{ decisions[$index].itemId ? '档案 ' + decisions[$index].itemId : '待建立 / 选择档案' }}</small></template></el-table-column><el-table-column label="核对状态" width="145"><template #default="{row,$index}"><el-tag :type="row.alreadyImported ? 'info' : row.issues.length && !decisions[$index].reviewReason ? 'warning' : 'success'" size="small">{{ row.alreadyImported ? '已导入，自动跳过' : row.issues.length && !decisions[$index].reviewReason ? '待人工核对' : '可确认' }}</el-tag></template></el-table-column></el-table></div>
-        <article v-if="selected && source" class="row-editor"><h4>{{ source.sheetName }} · 第 {{ selected.rowNo }} 行</h4><div class="issues"><p v-for="issue in source.issues" :key="issue">{{ issue }}</p></div><label>目标协作档案<CollaborationObjectSelect v-model="targetReferences" type="item" :multiple="false" :product-line-id="selected.productLineId" aria-label="导入关联已有档案"/></label>
-          <div v-if="!selected.itemId" class="target-fields"><label>产品线<el-select v-model="selected.productLineId" clearable><el-option v-for="l in options.productLines" :key="l.productLineId" :label="l.productName" :value="l.productLineId" /></el-select></label><label>款式<el-input v-model="selected.styleName" /></label><label>原始品牌（只读）<span>{{ source.brand || '未填写' }}</span></label><label>兼容型号<el-input v-model="selected.compatibleModels" /></label></div>
-          <template v-if="isMold"><el-checkbox v-if="kind === 'delivery'" v-model="selected.newMoldSet">新增一套 PC＋TPU 模具（复制 / 重新开模）</el-checkbox><label>{{ selected.newMoldSet ? '复制来源套（可留空，新套日期等仅使用本次明确填入值）' : '对应模具套' }}<el-select v-model="selected.moldSetId" clearable @change="chooseSet(selected!,$event)"><el-option v-for="s in setOptions" :key="s.moldSetId" :label="`${s.assetNumber || '#'+s.moldSetId} / ${s.setName || ''}`" :value="s.moldSetId!" /></el-select></label><el-checkbox v-if="kind === 'schedule' && /[/＋+]/.test(source.compatibleModels)" v-model="selected.confirmCompatibility">我已核对合写手机型号，确认所选档案兼容关系</el-checkbox></template>
-          <details open><summary>待写入字段（可修正）</summary><label v-for="f in sourceFields.filter(f => Object.prototype.hasOwnProperty.call(selected!.values,f.key))" :key="f.key"><span>{{ f.label }}</span><CollaborationCell :field="f" :users="options.users" :brands="brands" :value="selected.values[f.key]" :editable="collaborationFieldEditable(f,options.writableGroups)" @preview="editValue(selected!,f,$event,true)" @edit="editValue(selected!,f,$event)" /></label></details>
-          <label>人工核对说明<el-input v-model="selected.reviewReason" type="textarea" :rows="2" placeholder="说明别名映射、品牌或日期修正；数量下调也在此说明" /></label><el-checkbox :model-value="!selected.skip" :disabled="source.alreadyImported" @change="selected!.skip = !$event">确认本行纳入导入</el-checkbox><details><summary>原始行数据（只读）</summary><pre>{{ source.raw }}</pre></details>
+        <div class="preview-list"><el-table :data="preview.rows" height="460" highlight-current-row @row-click="(row: ImportRow) => selectedIndex = preview!.rows.indexOf(row)"><el-table-column :label='uiText("导入")' width="60"><template #default="{row,$index}"><el-checkbox :model-value="!decisions[$index].skip" :disabled="row.alreadyImported" @change="decisions[$index].skip = !$event" /></template></el-table-column><el-table-column prop="rowNo" :label='uiText("原表行")' width="70" /><el-table-column :label='uiText("款式 / 手机型号")' min-width="260"><template #default="{row,$index}"><strong>{{ row.styleName }}</strong><p>{{ row.compatibleModels }}</p><small>{{ row.brand }} · {{ decisions[$index].itemId ? uiText('档案 ') + decisions[$index].itemId : uiText('待建立 / 选择档案') }}</small></template></el-table-column><el-table-column :label='uiText("核对状态")' width="145"><template #default="{row,$index}"><el-tag :type="row.alreadyImported ? 'info' : row.issues.length && !decisions[$index].reviewReason ? 'warning' : 'success'" size="small">{{ row.alreadyImported ? uiText('已导入，自动跳过') : row.issues.length && !decisions[$index].reviewReason ? uiText('待人工核对') : uiText('可确认') }}</el-tag></template></el-table-column></el-table></div>
+        <article v-if="selected && source" class="row-editor"><h4>{{ source.sheetName }}{{ uiText(" · 第 ") }}{{ selected.rowNo }}{{ uiText(" 行") }}</h4><div class="issues"><p v-for="issue in source.issues" :key="issue">{{ issue }}</p></div><label>{{ uiText("目标协作档案") }}<CollaborationObjectSelect v-model="targetReferences" type="item" :multiple="false" :product-line-id="selected.productLineId" :aria-label='uiText("导入关联已有档案")'/></label>
+          <div v-if="!selected.itemId" class="target-fields"><label>{{ uiText("产品线") }}<el-select v-model="selected.productLineId" clearable><el-option v-for="l in options.productLines" :key="l.productLineId" :label="l.productName" :value="l.productLineId" /></el-select></label><label>{{ uiText("款式") }}<el-input v-model="selected.styleName" /></label><label>{{ uiText("原始品牌（只读）") }}<span>{{ source.brand || uiText('未填写') }}</span></label><label>{{ uiText("兼容型号") }}<el-input v-model="selected.compatibleModels" /></label></div>
+          <template v-if="isMold"><el-checkbox v-if="kind === 'delivery'" v-model="selected.newMoldSet">{{ uiText("新增一套 PC＋TPU 模具（复制 / 重新开模）") }}</el-checkbox><label>{{ selected.newMoldSet ? uiText('复制来源套（可留空，新套日期等仅使用本次明确填入值）') : uiText('对应模具套') }}<el-select v-model="selected.moldSetId" clearable @change="chooseSet(selected!,$event)"><el-option v-for="s in setOptions" :key="s.moldSetId" :label="`${s.assetNumber || '#'+s.moldSetId} / ${s.setName || ''}`" :value="s.moldSetId!" /></el-select></label><el-checkbox v-if="kind === 'schedule' && /[/＋+]/.test(source.compatibleModels)" v-model="selected.confirmCompatibility">{{ uiText("我已核对合写手机型号，确认所选档案兼容关系") }}</el-checkbox></template>
+          <details open><summary>{{ uiText("待写入字段（可修正）") }}</summary><label v-for="f in sourceFields.filter(f => Object.prototype.hasOwnProperty.call(selected!.values,f.key))" :key="f.key"><span>{{ uiText(String((f.label) ?? '')) }}</span><CollaborationCell :field="f" :users="options.users" :brands="brands" :value="selected.values[f.key]" :editable="collaborationFieldEditable(f,options.writableGroups)" @preview="editValue(selected!,f,$event,true)" @edit="editValue(selected!,f,$event)" /></label></details>
+          <label>{{ uiText("人工核对说明") }}<el-input v-model="selected.reviewReason" type="textarea" :rows="2" :placeholder='uiText("说明别名映射、品牌或日期修正；数量下调也在此说明")' /></label><el-checkbox :model-value="!selected.skip" :disabled="source.alreadyImported" @change="selected!.skip = !$event">{{ uiText("确认本行纳入导入") }}</el-checkbox><details><summary>{{ uiText("原始行数据（只读）") }}</summary><pre>{{ source.raw }}</pre></details>
         </article>
       </div>
     </template>
-    <template #footer><span v-if="preview" class="footer-note">提交只影响选中的行；有冲突时本次提交回滚，保留预览供修正。</span><el-button @click="visible=false">关闭预览</el-button><el-button type="primary" :loading="busy" :disabled="!included" @click="commit">确认导入 {{ included || '' }} 行</el-button></template>
+    <template #footer><span v-if="preview" class="footer-note">{{ uiText("提交只影响选中的行；有冲突时本次提交回滚，保留预览供修正。") }}</span><el-button @click="visible=false">{{ uiText("关闭预览") }}</el-button><el-button type="primary" :loading="busy" :disabled="!included" @click="commit">{{ uiText("确认导入 ") }}{{ included || '' }}{{ uiText(" 行") }}</el-button></template>
   </el-dialog>
 </template>
 <style scoped>

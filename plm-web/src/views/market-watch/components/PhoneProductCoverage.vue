@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed } from 'vue'
 import type { MarketPhoneModel } from '@/types/marketWatch'
 
@@ -21,31 +23,31 @@ const missingNames = computed(() => missing.value.map(p => p.productLineName).jo
 
 <template>
   <div v-if="compact" class="coverage-brief">
-    <button class="coverage-state" :class="phone.moldStatus" @click="emit('details')">{{ statusLabel }} · {{ opened }}/{{ totalLabel }} 款</button>
+    <button class="coverage-state" :class="phone.moldStatus" @click="emit('details')">{{ uiText(String((statusLabel) ?? '')) }} · {{ opened }}/{{ uiText(String((totalLabel) ?? '')) }}{{ uiText(" 款") }}</button>
     <button class="gap-summary" @click="emit('details')">
-      <span v-if="missing.length && missing.length < 4">未开：{{ missingNames }}</span>
-      <span v-else-if="missing.length">未开 {{ missing.length }} 款<span v-if="opened"> · 已开 {{ opened }} 款</span></span>
-      <span v-else-if="phone.makingProductCount">开模中 {{ phone.makingProductCount }} 款</span>
-      <span v-else-if="phone.appliedProductCount">有申请 {{ phone.appliedProductCount }} 款</span>
-      <span v-else>{{ total === 0 ? '当前无在售产品' : total !== undefined && opened === total ? '在售产品已覆盖' : '查看产品覆盖与依据' }}</span>
+      <span v-if="missing.length && missing.length < 4">{{ uiText("未开：") }}{{ missingNames }}</span>
+      <span v-else-if="missing.length">{{ uiText("未开 ") }}{{ missing.length }}{{ uiText(" 款") }}<span v-if="opened">{{ uiText(" · 已开 ") }}{{ opened }}{{ uiText(" 款") }}</span></span>
+      <span v-else-if="phone.makingProductCount">{{ uiText("开模中 ") }}{{ phone.makingProductCount }}{{ uiText(" 款") }}</span>
+      <span v-else-if="phone.appliedProductCount">{{ uiText("有申请 ") }}{{ phone.appliedProductCount }}{{ uiText(" 款") }}</span>
+      <span v-else>{{ total === 0 ? uiText('当前无在售产品') : total !== undefined && opened === total ? uiText('在售产品已覆盖') : uiText('查看产品覆盖与依据') }}</span>
     </button>
   </div>
-  <section v-else class="product-coverage-panel" aria-label="在售产品开模覆盖">
-    <header class="coverage-heading"><div><h4>在售产品开模覆盖</h4><p>已开 <strong>{{ opened }}</strong> / {{ totalLabel }} 款<span v-if="missing.length"> · 还缺 {{ missing.length }} 款</span></p></div><span class="coverage-state" :class="phone.wholePhoneStatus">{{ statusLabel }}</span></header>
+  <section v-else class="product-coverage-panel" :aria-label='uiText("在售产品开模覆盖")'>
+    <header class="coverage-heading"><div><h4>{{ uiText("在售产品开模覆盖") }}</h4><p>{{ uiText("已开 ") }}<strong>{{ opened }}</strong> / {{ uiText(String((totalLabel) ?? '')) }}{{ uiText(" 款") }}<span v-if="missing.length">{{ uiText(" · 还缺 ") }}{{ missing.length }}{{ uiText(" 款") }}</span></p></div><span class="coverage-state" :class="phone.wholePhoneStatus">{{ uiText(String((statusLabel) ?? '')) }}</span></header>
     <div class="coverage-track" aria-hidden="true"><span v-for="p in products" :key="p.productLineId" :class="p.status"/></div>
     <div v-if="groups.length" class="coverage-groups">
       <section v-for="group in groups" :key="group.key" class="product-group" :class="group.key">
-        <h5><span>{{ group.icon }} {{ group.title }}</span><b>{{ group.products.length }}</b></h5>
+        <h5><span>{{ group.icon }} {{ uiText(String((group.title) ?? '')) }}</span><b>{{ group.products.length }}</b></h5>
         <button v-for="p in group.products" :key="p.productLineId" class="product-card" :class="p.status" @click="emit('product', p.productLineId)">
-          <strong>{{ p.productLineName }}</strong><span class="product-status">{{ names[p.status] || '资料待补' }}</span>
-          <small v-if="p.reusable">已有明确可复用套</small><small v-else-if="p.status === 'molded'">{{ p.skuCount ? `已有 ${p.skuCount} 个 SKU / 产品依据` : '查看开模完成依据' }}</small><small v-else-if="p.applicationCount">{{ p.applicationCount }} 条申请 · 查看进度</small><small v-else>可申请此产品</small>
+          <strong>{{ p.productLineName }}</strong><span class="product-status">{{ uiText(names[p.status] || '资料待补') }}</span>
+          <small v-if="p.reusable">{{ uiText("已有明确可复用套") }}</small><small v-else-if="p.status === 'molded'">{{ p.skuCount ? uiText('已有 {value0} 个 SKU / 产品依据',{value0:(p.skuCount)}) : uiText('查看开模完成依据') }}</small><small v-else-if="p.applicationCount">{{ p.applicationCount }}{{ uiText(" 条申请 · 查看进度") }}</small><small v-else>{{ uiText("可申请此产品") }}</small>
         </button>
       </section>
     </div>
-    <p v-else-if="total === 0" class="coverage-note">当前无在售产品；产品正式上市后将自动纳入覆盖。</p>
-    <p v-else-if="total === undefined" class="coverage-note">在售产品覆盖数量待加载，请刷新后查看。</p>
-    <p v-else class="coverage-note">先关联标准手机，即可查看当前在售产品的开模覆盖。</p>
-    <p class="coverage-note">开模依据与实物可复用分别记录；共模及 PC / TPU 适配见具体套。</p>
+    <p v-else-if="total === 0" class="coverage-note">{{ uiText("当前无在售产品；产品正式上市后将自动纳入覆盖。") }}</p>
+    <p v-else-if="total === undefined" class="coverage-note">{{ uiText("在售产品覆盖数量待加载，请刷新后查看。") }}</p>
+    <p v-else class="coverage-note">{{ uiText("先关联标准手机，即可查看当前在售产品的开模覆盖。") }}</p>
+    <p class="coverage-note">{{ uiText("开模依据与实物可复用分别记录；共模及 PC / TPU 适配见具体套。") }}</p>
     <slot/>
   </section>
 </template>

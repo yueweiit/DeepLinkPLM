@@ -6,6 +6,8 @@ import { createPinia,setActivePinia } from 'pinia'
 import { useUserStore } from '@/stores/user'
 import PhoneObjectIdSelect from '@/components/PhoneObjectSelect/IdSelect.vue'
 const api=vi.hoisted(()=>({getSystemUsers:vi.fn(),getSystemRoles:vi.fn(),saveSystemUser:vi.fn(),getSystemScopeOptions:vi.fn()}))
+const languageApi=vi.hoisted(()=>({saveUserLanguage:vi.fn()}))
+vi.mock('@/api/modules/pilot',()=>languageApi)
 vi.mock('@/api/modules/system',()=>api)
 vi.mock('@/components/FixedTableViewport/index.vue',()=>({default:{template:'<div><slot :table-height="400" /></div>'}}))
 import SystemUserManagementView from '../SystemUserManagementView.vue'
@@ -14,6 +16,30 @@ const financeUser:PilotUser={userId:10,username:'finance01',displayName:'财务�
 beforeEach(()=>{vi.clearAllMocks();setActivePinia(createPinia());useUserStore().token='account-test';api.getSystemUsers.mockResolvedValue([financeUser]);api.getSystemRoles.mockResolvedValue([{roleCode:'administrator',permissions:['*']},{roleCode:'finance',permissions:['finance:read','finance:write','finance:confirm','finance:export']}]);api.saveSystemUser.mockResolvedValue({saved:true})})
 afterEach(()=>{wrappers.splice(0).forEach(w=>w.unmount())})
 describe('existing system route now manages real accounts',()=>{
+ it('refreshes only the signed-in account default when its profile preference changes without saving grants',async()=>{
+  api.getSystemUsers.mockResolvedValue([{...financeUser,preferredLanguage:'zh-CN'},{...financeUser,userId:11,displayName:'其他账号',preferredLanguage:'zh-CN'}])
+  const store=useUserStore();store.profile={userId:10,userName:'财务负责人',roleName:'财务',department:'财务',preferredLanguage:'zh-CN'}
+  const w=mount(SystemUserManagementView,{global:{plugins:[ElementPlus]}});wrappers.push(w);await flushPromises()
+  await w.getComponent(ElInput).setValue('finance01')
+  store.profile={...store.profile,preferredLanguage:'es'};await flushPromises()
+  expect((w.get('select[aria-label="默认语言 财务负责人"]').element as HTMLSelectElement).value).toBe('es')
+  expect((w.get('select[aria-label="默认语言 其他账号"]').element as HTMLSelectElement).value).toBe('zh-CN')
+  expect(w.getComponent(ElInput).props('modelValue')).toBe('finance01')
+  expect(api.getSystemUsers).toHaveBeenCalledTimes(1);expect(api.saveSystemUser).not.toHaveBeenCalled();expect(languageApi.saveUserLanguage).not.toHaveBeenCalled()
+ })
+
+ it('sets an account default through the dedicated language API without submitting or replacing its grants',async()=>{
+  api.getSystemUsers.mockResolvedValue([{...financeUser,preferredLanguage:'zh-CN'}])
+  languageApi.saveUserLanguage.mockResolvedValue({userId:10,preferredLanguage:'es'})
+  const w=mount(SystemUserManagementView,{global:{plugins:[ElementPlus]}});wrappers.push(w);await flushPromises()
+  const select=w.get('select[aria-label="默认语言 财务负责人"]')
+  await select.setValue('es');await flushPromises()
+  expect(languageApi.saveUserLanguage).toHaveBeenCalledWith(10,'es','zh-CN');expect((select.element as HTMLSelectElement).value).toBe('es')
+  expect(api.saveSystemUser).not.toHaveBeenCalled();expect(w.text()).toContain('财务负责人')
+  languageApi.saveUserLanguage.mockRejectedValue(new Error('stale preference'))
+  await select.setValue('zh-CN');await flushPromises()
+  expect((select.element as HTMLSelectElement).value).toBe('es');expect(api.saveSystemUser).not.toHaveBeenCalled()
+ })
  it('shows administrator grants as fixed and restores independently editable grants after changing roles',async()=>{
   const w=mount(SystemUserManagementView,{global:{plugins:[ElementPlus]}});wrappers.push(w);await flushPromises();expect(w.text()).toContain('财务负责人')
   await w.findAll('button').find(b=>b.text()==='编辑 / 授权')!.trigger('click');await flushPromises()

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import {computed,inject,nextTick,ref,useId,watch} from 'vue'
 import {formContextKey,type InputInstance} from 'element-plus'
 import {ArrowDown,Search} from '@element-plus/icons-vue'
@@ -47,46 +49,46 @@ defineExpose({open,cancel,refresh})
 </script>
 <template>
   <div class="phone-model-multi-select">
-    <el-popover role="dialog" :id="panelId" :title="`${ariaLabel}选择面板`" popper-class="phone-model-selector-popover" :visible="opened" placement="bottom-start" :width="720" :show-arrow="false" :persistent="false" :popper-style="{padding:'0',maxWidth:'calc(100vw - 24px)'}" :popper-options="{strategy:'fixed',modifiers:[{name:'preventOverflow',options:{padding:12,altAxis:true,tether:false}}]}" @after-enter="focusSearch">
+    <el-popover role="dialog" :id="panelId" :title="uiText('{value0}选择面板',{value0:(ariaLabel)})" popper-class="phone-model-selector-popover" :visible="opened" placement="bottom-start" :width="720" :show-arrow="false" :persistent="false" :popper-style="{padding:'0',maxWidth:'calc(100vw - 24px)'}" :popper-options="{strategy:'fixed',modifiers:[{name:'preventOverflow',options:{padding:12,altAxis:true,tether:false}}]}" @after-enter="focusSearch">
       <template #reference>
         <button ref="trigger" type="button" class="phone-model-trigger" role="combobox" aria-haspopup="dialog" :aria-expanded="opened" :aria-controls="panelId" :aria-label="ariaLabel" :disabled="isDisabled||!user.token" @click="togglePanel" @keydown.down.prevent="open" @keydown.esc.prevent="cancel()">
           <span v-if="!modelValue.length||!user.token" class="trigger-placeholder">{{placeholder}}</span>
-          <span v-else class="trigger-tags"><el-tag v-for="id in preview" :key="id" size="small" type="info">{{text(id)}}</el-tag><span v-if="confirmedIds.length>preview.length" class="trigger-more">+{{confirmedIds.length-preview.length}} 个</span></span>
+          <span v-else class="trigger-tags"><el-tag v-for="id in preview" :key="id" size="small" type="info">{{text(id)}}</el-tag><span v-if="confirmedIds.length>preview.length" class="trigger-more">+{{confirmedIds.length-preview.length}}{{ uiText(" 个") }}</span></span>
           <el-icon class="trigger-arrow" :class="{expanded:opened}"><ArrowDown/></el-icon>
         </button>
       </template>
       <section v-if="opened" :id="`${panelId}-content`" ref="panel" class="phone-model-panel" :style="{height:`${panelHeight}px`}" @keydown.esc.stop.prevent="cancel()" @keydown="trapFocus">
-        <header class="panel-search"><el-input ref="searchInput" v-model="search" size="small" maxlength="128" clearable :prefix-icon="Search" placeholder="搜索品牌、系列、型号或别名，如 17PM、Samsung S26" aria-label="搜索手机品牌及型号"/><div v-if="$slots.tools" class="panel-tools"><slot name="tools"/></div></header>
-        <div v-if="externalChanged" class="panel-error" role="alert">外部选择已变化，请取消后重新打开，避免覆盖新内容。</div>
-        <div v-if="brandError||memberError" class="panel-error" role="alert"><span>{{brandError||memberError}}</span><el-button size="small" link @click="brandError?loadBrands():loadMembers(true)">重试资料</el-button></div>
+        <header class="panel-search"><el-input ref="searchInput" v-model="search" size="small" maxlength="128" clearable :prefix-icon="Search" :placeholder='uiText("搜索品牌、系列、型号或别名，如 17PM、Samsung S26")' :aria-label='uiText("搜索手机品牌及型号")'/><div v-if="$slots.tools" class="panel-tools"><slot name="tools"/></div></header>
+        <div v-if="externalChanged" class="panel-error" role="alert">{{ uiText("外部选择已变化，请取消后重新打开，避免覆盖新内容。") }}</div>
+        <div v-if="brandError||memberError" class="panel-error" role="alert"><span>{{brandError||memberError}}</span><el-button size="small" link @click="brandError?loadBrands():loadMembers(true)">{{ uiText("重试资料") }}</el-button></div>
         <div class="selection-body">
-          <nav class="brand-nav" aria-label="手机品牌分类" :aria-busy="brandsLoading">
-            <button v-if="!props.brandId" type="button" :class="{active:!brandId}" :aria-current="!brandId?'true':undefined" @click="setBrand(null)" @keydown.down.prevent="focusBrand($event,1)" @keydown.up.prevent="focusBrand($event,-1)"><span>全部品牌</span><small v-if="draft.length">{{draft.length}}</small></button>
-            <button v-for="brand in allBrands.filter(b=>!props.brandId||b.brandId===props.brandId)" :key="brand.brandId" type="button" :data-brand-id="brand.brandId" :class="{active:brandId===brand.brandId}" :aria-current="brandId===brand.brandId?'true':undefined" @click="setBrand(brand.brandId)" @keydown.down.prevent="focusBrand($event,1)" @keydown.up.prevent="focusBrand($event,-1)"><span>{{brand.name}}<small v-if="brand.status==='disabled'">（已停用）</small></span><small v-if="brandCounts.get(brand.brandId)" :aria-label="`已选 ${brandCounts.get(brand.brandId)} 个`">{{brandCounts.get(brand.brandId)}}</small></button>
-            <span v-if="brandsLoading" class="brand-hint">品牌加载中…</span><span v-else-if="!allBrands.length&&!brandError" class="brand-hint">暂无品牌资料</span>
+          <nav class="brand-nav" :aria-label='uiText("手机品牌分类")' :aria-busy="brandsLoading">
+            <button v-if="!props.brandId" type="button" :class="{active:!brandId}" :aria-current="!brandId?'true':undefined" @click="setBrand(null)" @keydown.down.prevent="focusBrand($event,1)" @keydown.up.prevent="focusBrand($event,-1)"><span>{{ uiText("全部品牌") }}</span><small v-if="draft.length">{{draft.length}}</small></button>
+            <button v-for="brand in allBrands.filter(b=>!props.brandId||b.brandId===props.brandId)" :key="brand.brandId" type="button" :data-brand-id="brand.brandId" :class="{active:brandId===brand.brandId}" :aria-current="brandId===brand.brandId?'true':undefined" @click="setBrand(brand.brandId)" @keydown.down.prevent="focusBrand($event,1)" @keydown.up.prevent="focusBrand($event,-1)"><span>{{brand.name}}<small v-if="brand.status==='disabled'">{{ uiText("（已停用）") }}</small></span><small v-if="brandCounts.get(brand.brandId)" :aria-label="uiText('已选 {value0} 个',{value0:(brandCounts.get(brand.brandId))})">{{brandCounts.get(brand.brandId)}}</small></button>
+            <span v-if="brandsLoading" class="brand-hint">{{ uiText("品牌加载中…") }}</span><span v-else-if="!allBrands.length&&!brandError" class="brand-hint">{{ uiText("暂无品牌资料") }}</span>
           </nav>
           <div class="model-results" :aria-busy="loading||membersLoading||bulkLoading">
-            <div class="results-toolbar"><el-checkbox v-if="multiple" size="small" :model-value="allSelected" :indeterminate="someSelected" :disabled="!canBulk" @change="bulkSelect()">全选当前筛选结果</el-checkbox><span v-else class="single-hint">选择一款手机后点击完成</span><span class="result-count">{{total}} 个型号</span></div>
-            <p v-if="multiple&&!brandId&&!search.trim()&&allowedIds===undefined" class="bulk-hint">选品牌或输入搜索条件后可批量选择。</p>
+            <div class="results-toolbar"><el-checkbox v-if="multiple" size="small" :model-value="allSelected" :indeterminate="someSelected" :disabled="!canBulk" @change="bulkSelect()">{{ uiText("全选当前筛选结果") }}</el-checkbox><span v-else class="single-hint">{{ uiText("选择一款手机后点击完成") }}</span><span class="result-count">{{total}}{{ uiText(" 个型号") }}</span></div>
+            <p v-if="multiple&&!brandId&&!search.trim()&&allowedIds===undefined" class="bulk-hint">{{ uiText("选品牌或输入搜索条件后可批量选择。") }}</p>
             <div v-if="selectionError" class="panel-error" role="alert">{{selectionError}}</div>
             <div ref="modelList" class="model-scroll">
-              <p v-if="loading||membersLoading" class="result-message" role="status">正在读取型号…</p>
-              <div v-else-if="error" class="result-message" role="alert"><p>{{error}}</p><el-button size="small" @click="loadPage()">重试型号</el-button></div>
-              <p v-else-if="!groups.length" class="result-message" role="status">{{search.trim()?'没有匹配的品牌或型号，请调整搜索条件':'暂无可选型号'}}</p>
-              <template v-else><section v-for="group in groups" :key="group.key" class="model-series" :aria-label="`${group.brandName} ${group.name}`"><div class="series-heading"><strong><span v-if="!brandId">{{group.brandName}} · </span>{{group.name}}</strong><el-button v-if="multiple" size="small" link :disabled="isDisabled||bulkLoading" :aria-label="`${groupSelected(group.key)?'取消':'选择'}${group.brandName} ${group.name}本组`" @click="bulkSelect(group)">{{groupSelected(group.key)?'取消本组':'选择本组'}}</el-button></div><el-checkbox v-for="phone in group.phones" :key="phone.phoneModelId" size="small" class="model-checkbox" :model-value="selectedSet.has(phone.phoneModelId)" :disabled="isDisabled||bulkLoading||!!unavailablePhone(phone)&&!selectedSet.has(phone.phoneModelId)" @change="toggle(phone.phoneModelId)">{{phoneSelectionLabel(phone)}}</el-checkbox></section></template>
+              <p v-if="loading||membersLoading" class="result-message" role="status">{{ uiText("正在读取型号…") }}</p>
+              <div v-else-if="error" class="result-message" role="alert"><p>{{error}}</p><el-button size="small" @click="loadPage()">{{ uiText("重试型号") }}</el-button></div>
+              <p v-else-if="!groups.length" class="result-message" role="status">{{search.trim()?uiText('没有匹配的品牌或型号，请调整搜索条件'):uiText('暂无可选型号')}}</p>
+              <template v-else><section v-for="group in groups" :key="group.key" class="model-series" :aria-label="`${group.brandName} ${group.name}`"><div class="series-heading"><strong><span v-if="!brandId">{{group.brandName}} · </span>{{group.name}}</strong><el-button v-if="multiple" size="small" link :disabled="isDisabled||bulkLoading" :aria-label="uiText('{value0}{value1} {value2}本组',{value0:(groupSelected(group.key)?'取消':'选择'),value1:(group.brandName),value2:(group.name)})" @click="bulkSelect(group)">{{groupSelected(group.key)?uiText('取消本组'):uiText('选择本组')}}</el-button></div><el-checkbox v-for="phone in group.phones" :key="phone.phoneModelId" size="small" class="model-checkbox" :model-value="selectedSet.has(phone.phoneModelId)" :disabled="isDisabled||bulkLoading||!!unavailablePhone(phone)&&!selectedSet.has(phone.phoneModelId)" @change="toggle(phone.phoneModelId)">{{phoneSelectionLabel(phone)}}</el-checkbox></section></template>
             </div>
-            <div class="model-pagination"><span v-if="bulkLoading" role="status">正在读取当前范围，完成后统一勾选…</span><el-pagination v-else-if="total>PAGE_SIZE" size="small" :current-page="page" :page-size="PAGE_SIZE" :total="total" :pager-count="5" layout="prev,pager,next" :disabled="loading||membersLoading" @current-change="loadPage"/><span v-else>每页最多 {{PAGE_SIZE}} 个型号</span></div>
+            <div class="model-pagination"><span v-if="bulkLoading" role="status">{{ uiText("正在读取当前范围，完成后统一勾选…") }}</span><el-pagination v-else-if="total>PAGE_SIZE" size="small" :current-page="page" :page-size="PAGE_SIZE" :total="total" :pager-count="5" layout="prev,pager,next" :disabled="loading||membersLoading" @current-change="loadPage"/><span v-else>{{ uiText("每页最多 ") }}{{PAGE_SIZE}}{{ uiText(" 个型号") }}</span></div>
           </div>
         </div>
         <footer class="selection-footer">
-          <div class="selected-heading"><strong>已选择 {{draft.length}} 个型号</strong><el-button size="small" link :disabled="!draft.length||bulkLoading||isDisabled" @click="clear">清空全部</el-button></div>
-          <div class="selected-tags" aria-label="本次已选型号"><el-tag v-for="id in selectedTags" :key="id" size="small" :closable="!isDisabled&&!bulkLoading" @close="toggle(id)">{{text(id)}}</el-tag><span v-if="!draft.length" class="no-selection">尚未选择型号</span></div>
-          <div v-if="selectedPages>1" class="selected-pagination" aria-label="已选型号分页"><el-button size="small" link :disabled="selectedPage===1" @click="selectedPage--">上一页已选</el-button><span>{{selectedPage}} / {{selectedPages}} · 每页 {{TAG_PAGE_SIZE}} 个</span><el-button size="small" link :disabled="selectedPage===selectedPages" @click="selectedPage++">下一页已选</el-button></div>
-          <div class="selection-actions"><span class="selection-note">{{multiple?'可跨品牌连续选择，完成后生效':'本字段仅选择一款手机'}}</span><el-button size="small" @click="cancel()">取消</el-button><el-button size="small" type="primary" :disabled="!canConfirm" @click="confirm">完成选择（{{draft.length}}）</el-button></div>
+          <div class="selected-heading"><strong>{{ uiText("已选择 ") }}{{draft.length}}{{ uiText(" 个型号") }}</strong><el-button size="small" link :disabled="!draft.length||bulkLoading||isDisabled" @click="clear">{{ uiText("清空全部") }}</el-button></div>
+          <div class="selected-tags" :aria-label='uiText("本次已选型号")'><el-tag v-for="id in selectedTags" :key="id" size="small" :closable="!isDisabled&&!bulkLoading" @close="toggle(id)">{{text(id)}}</el-tag><span v-if="!draft.length" class="no-selection">{{ uiText("尚未选择型号") }}</span></div>
+          <div v-if="selectedPages>1" class="selected-pagination" :aria-label='uiText("已选型号分页")'><el-button size="small" link :disabled="selectedPage===1" @click="selectedPage--">{{ uiText("上一页已选") }}</el-button><span>{{selectedPage}} / {{selectedPages}}{{ uiText(" · 每页 ") }}{{TAG_PAGE_SIZE}}{{ uiText(" 个") }}</span><el-button size="small" link :disabled="selectedPage===selectedPages" @click="selectedPage++">{{ uiText("下一页已选") }}</el-button></div>
+          <div class="selection-actions"><span class="selection-note">{{multiple?uiText('可跨品牌连续选择，完成后生效'):uiText('本字段仅选择一款手机')}}</span><el-button size="small" @click="cancel()">{{ uiText("取消") }}</el-button><el-button size="small" type="primary" :disabled="!canConfirm" @click="confirm">{{ uiText("完成选择（") }}{{draft.length}}）</el-button></div>
         </footer>
       </section>
     </el-popover>
-    <p v-if="memberError&&!opened" class="closed-error" role="alert">{{memberError}}<el-button size="small" link @click="loadMembers()">重试</el-button></p>
+    <p v-if="memberError&&!opened" class="closed-error" role="alert">{{memberError}}<el-button size="small" link @click="loadMembers()">{{ uiText("重试") }}</el-button></p>
   </div>
 </template>
 <style scoped>

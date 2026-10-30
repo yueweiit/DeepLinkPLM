@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { Delete, Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -189,7 +191,7 @@ async function loadSupplierOptionsFromInventory() {
     )
   } catch (error) {
     console.warn('Inventory supplier snapshot load failed', error)
-    ElMessage.warning('供应商资料加载失败，已保留当前 BOM 行供应商')
+    ElMessage.warning(uiText('供应商资料加载失败，已保留当前 BOM 行供应商'))
   } finally {
     supplierLoading.value = false
   }
@@ -257,12 +259,12 @@ function isLookupLoading(item: BomItem) {
 
 function save() {
   if (routeDrafts.value.some(item => !item.processId || !item.colors.length)) {
-    ElMessage.warning('请选择绑定工艺路线和适用颜色')
+    ElMessage.warning(uiText('请选择绑定工艺路线和适用颜色'))
     return
   }
   if (routeDrafts.value.some(item => props.processRoutes.length
     && !props.processRoutes.some(process => process.processId === item.processId))) {
-    ElMessage.warning('BOM 只能绑定当前产品下已有的工艺路线')
+    ElMessage.warning(uiText('BOM 只能绑定当前产品下已有的工艺路线'))
     return
   }
   if (routeDrafts.value.some(item => !item.items.length || item.items.some((bomItem) =>
@@ -275,7 +277,7 @@ function save() {
     || (bomItem.lossRate || 0) > 1
     || (canWriteMoney.value && ((bomItem.unitCost || 0) < 0 || (bomItem.lineCost || 0) < 0))
   ))) {
-    ElMessage.warning('请检查物料名称、单位、数量、损耗率、单价和单个成本')
+    ElMessage.warning(uiText('请检查物料名称、单位、数量、损耗率、单价和单个成本'))
     return
   }
   routeDrafts.value.forEach(item => item.items.forEach((bomItem, index) => { bomItem.lineNo = index + 1 }))
@@ -290,7 +292,7 @@ onMounted(async () => {
 <template>
   <el-drawer
     :model-value="modelValue"
-    title="维护候选 BOM 明细"
+    :title='uiText("维护候选 BOM 明细")'
     size="min(920px, 94vw)"
     @close="emit('update:modelValue', false)"
   >
@@ -298,22 +300,22 @@ onMounted(async () => {
       <div class="variant-toolbar">
         <el-radio-group v-model="activeRouteIndex" size="small">
           <el-radio-button v-for="(draft, index) in routeDrafts" :key="draft.productBomRouteId || draft.routeVariantNo || index" :value="index">
-            {{ draft.variantName || draft.routeVariantNo || `副本 ${index + 1}` }}
+            {{ draft.variantName || draft.routeVariantNo || uiText('副本 {value0}',{value0:(index + 1)}) }}
           </el-radio-button>
         </el-radio-group>
         <div class="variant-toolbar__actions">
-          <el-button data-test="route-variant-copy" :icon="Plus" @click="addVariant">复制当前 BOM</el-button>
-          <el-button v-if="routeDrafts.length > 1" :icon="Delete" @click="removeVariant">删除副本</el-button>
+          <el-button data-test="route-variant-copy" :icon="Plus" @click="addVariant">{{ uiText("复制当前 BOM") }}</el-button>
+          <el-button v-if="routeDrafts.length > 1" :icon="Delete" @click="removeVariant">{{ uiText("删除副本") }}</el-button>
         </div>
       </div>
       <div class="route-editor__header">
         <label class="route-editor__field">
-          <span>绑定工艺路线</span>
+          <span>{{ uiText("绑定工艺路线") }}</span>
           <el-select
             v-model="routeDraft.processId"
             data-test="route-select"
             filterable
-            placeholder="请选择绑定工艺路线"
+            :placeholder='uiText("请选择绑定工艺路线")'
             @change="applyProcessRoute"
           >
             <el-option
@@ -325,21 +327,21 @@ onMounted(async () => {
           </el-select>
         </label>
         <label class="route-editor__field">
-          <span>副本名称</span>
-          <el-input v-model="routeDraft.variantName" placeholder="例如：红色用料" />
+          <span>{{ uiText("副本名称") }}</span>
+          <el-input v-model="routeDraft.variantName" :placeholder='uiText("例如：红色用料")' />
         </label>
         <label class="route-editor__field">
-          <span>路线编码</span>
+          <span>{{ uiText("路线编码") }}</span>
           <el-input :model-value="routeDraft.routeCode" readonly />
         </label>
         <label class="route-editor__field">
-          <span>路线名称</span>
+          <span>{{ uiText("路线名称") }}</span>
           <el-input :model-value="routeDraft.routeName" readonly />
         </label>
       </div>
       <div class="route-editor__color-row">
         <label class="route-editor__field">
-          <span>适用颜色</span>
+          <span>{{ uiText("适用颜色") }}</span>
           <el-select
             v-model="routeDraft.selectedColorIds"
             data-test="route-color-select"
@@ -347,7 +349,7 @@ onMounted(async () => {
             multiple
             filterable
             clearable
-            placeholder="请选择该 BOM 副本适用的颜色"
+            :placeholder='uiText("请选择该 BOM 副本适用的颜色")'
             popper-class="bom-color-select-popper"
             @change="updateColors"
           >
@@ -359,44 +361,44 @@ onMounted(async () => {
             />
           </el-select>
         </label>
-        <el-button data-test="route-item-add" :icon="Plus" @click="addItem">添加物料</el-button>
+        <el-button data-test="route-item-add" :icon="Plus" @click="addItem">{{ uiText("添加物料") }}</el-button>
       </div>
 
-      <p class="route-editor__hint">用量相对 BOM 基准产量。来源配方按款号和投料节点保存；同一物料在不同节点可分别用料。金额未知时留空，不默认币种。</p>
-      <p v-if="routeDraft.articleCodes">明确适用 {{routeDraft.articleCodes.length}} 个制造品目；通用料仍受此范围约束。</p>
-      <el-alert v-if="!canWriteMoney" :title="canReadMoney ? '内部金额只读；可保存用料与数量，金额由财务维护，不会被零值覆盖。' : '当前账号无内部金额查看与编辑权限；用料维护不提交价格或成本。'" type="info" :closable="false" />
+      <p class="route-editor__hint">{{ uiText("用量相对 BOM 基准产量。来源配方按款号和投料节点保存；同一物料在不同节点可分别用料。金额未知时留空，不默认币种。") }}</p>
+      <p v-if="routeDraft.articleCodes">{{ uiText("明确适用 ") }}{{routeDraft.articleCodes.length}}{{ uiText(" 个制造品目；通用料仍受此范围约束。") }}</p>
+      <el-alert v-if="!canWriteMoney" :title="canReadMoney ? uiText('内部金额只读；可保存用料与数量，金额由财务维护，不会被零值覆盖。') : uiText('当前账号无内部金额查看与编辑权限；用料维护不提交价格或成本。')" type="info" :closable="false" />
 
       <div class="item-table-wrap">
         <table class="item-table">
           <thead>
             <tr>
               <th>NO</th>
-              <th>物料编码</th>
-              <th>物料名称</th>
-              <th>规格</th>
-              <th>数量</th>
-              <th>单位</th>
-              <th>供应商</th>
-              <th v-if="canReadMoney">单价</th>
-              <th v-if="canReadMoney">单个成本</th>
-              <th>损耗率</th>
-              <th>备注</th>
-              <th>操作</th>
+              <th>{{ uiText("物料编码") }}</th>
+              <th>{{ uiText("物料名称") }}</th>
+              <th>{{ uiText("规格") }}</th>
+              <th>{{ uiText("数量") }}</th>
+              <th>{{ uiText("单位") }}</th>
+              <th>{{ uiText("供应商") }}</th>
+              <th v-if="canReadMoney">{{ uiText("单价") }}</th>
+              <th v-if="canReadMoney">{{ uiText("单个成本") }}</th>
+              <th>{{ uiText("损耗率") }}</th>
+              <th>{{ uiText("备注") }}</th>
+              <th>{{ uiText("操作") }}</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="!routeDraft.items.length">
-              <td :colspan="canReadMoney ? 12 : 10" class="item-table__empty">暂无物料明细</td>
+              <td :colspan="canReadMoney ? 12 : 10" class="item-table__empty">{{ uiText("暂无物料明细") }}</td>
             </tr>
             <tr v-for="(item, itemIndex) in routeDraft.items" :key="item.productBomItemId || itemIndex">
               <td data-label="行号" data-test="route-item-line-no" class="line-no-cell">{{ itemIndex + 1 }}</td>
               <td data-label="组件编码">
                 <el-input v-model="item.itemCode" data-test="route-item-code" :disabled="isLookupLoading(item)" @blur="lookupItem(item)" />
-                <el-tag v-if="item.unmatchedFlag === 1" class="manual-tag" type="warning" size="small">未匹配</el-tag>
+                <el-tag v-if="item.unmatchedFlag === 1" class="manual-tag" type="warning" size="small">{{ uiText("未匹配") }}</el-tag>
               </td>
-              <td data-label="组件名称／投料节点"><el-input v-model="item.itemName" data-test="route-item-name" /><small class="complete-value">{{item.itemName}}</small><el-select v-if="routeNodes.some(n=>n.nodeCode)" v-model="item.nodeId" placeholder="明确投料节点" filterable><el-option v-for="n in routeNodes" :key="n.id" :value="n.id" :label="`${n.stepNo} · ${n.name}`"/></el-select><small v-if="item.nodeCode">{{item.nodeCode}}</small></td>
-              <td data-label="规格／适用范围"><el-input v-model="item.specification"/><small v-if="item.articleCodes==null">通用物料</small><small v-else>专用范围：{{item.articleCodes.join('、')||'空范围（无SKU适用）'}}</small></td>
-              <td data-label="精确用量"><el-input :model-value="item.quantityExact??String(item.quantity)" data-test="route-item-quantity" inputmode="decimal" placeholder="精确用量，最多8位小数" @update:model-value="item.quantityExact=$event;item.quantity=Number($event);refreshLineCost(item)" /></td>
+              <td data-label="组件名称／投料节点"><el-input v-model="item.itemName" data-test="route-item-name" /><small class="complete-value">{{item.itemName}}</small><el-select v-if="routeNodes.some(n=>n.nodeCode)" v-model="item.nodeId" :placeholder='uiText("明确投料节点")' filterable><el-option v-for="n in routeNodes" :key="n.id" :value="n.id" :label="`${n.stepNo} · ${n.name}`"/></el-select><small v-if="item.nodeCode">{{item.nodeCode}}</small></td>
+              <td data-label="规格／适用范围"><el-input v-model="item.specification"/><small v-if="item.articleCodes==null">{{ uiText("通用物料") }}</small><small v-else>{{ uiText("专用范围：") }}{{item.articleCodes.join('、')||uiText('空范围（无SKU适用）')}}</small></td>
+              <td data-label="精确用量"><el-input :model-value="item.quantityExact??String(item.quantity)" data-test="route-item-quantity" inputmode="decimal" :placeholder='uiText("精确用量，最多8位小数")' @update:model-value="item.quantityExact=$event;item.quantity=Number($event);refreshLineCost(item)" /></td>
               <td data-label="单位"><el-input v-model="item.unit" data-test="route-item-unit" /></td>
               <td data-label="供应商">
                 <el-select
@@ -406,7 +408,7 @@ onMounted(async () => {
                   filterable
                   clearable
                   :loading="supplierLoading"
-                  placeholder="未选择"
+                  :placeholder='uiText("未选择")'
                 >
                   <el-option
                     v-for="supplier in supplierOptions"
@@ -420,15 +422,15 @@ onMounted(async () => {
               <td v-if="canReadMoney" data-label="单个成本"><el-input-number v-model="item.lineCost" data-test="route-item-line-cost" :disabled="!canWriteMoney" :controls="false" :min="0" :precision="4" /></td>
               <td data-label="损耗率"><el-input-number v-model="item.lossRate" data-test="route-item-loss-rate" :controls="false" :min="0" :max="1" :precision="4" /></td>
               <td data-label="备注"><el-input v-model="item.remark" type="textarea" :rows="1" /></td>
-              <td data-label="操作"><el-button :icon="Delete" circle title="移除物料" @click="removeItem(itemIndex)" /></td>
+              <td data-label="操作"><el-button :icon="Delete" circle :title='uiText("移除物料")' @click="removeItem(itemIndex)" /></td>
             </tr>
           </tbody>
         </table>
       </div>
     </section>
     <template #footer>
-      <el-button @click="emit('update:modelValue', false)">取消</el-button>
-      <el-button data-test="route-editor-save" type="primary" :loading="loading" @click="save">保存路线与 BOM</el-button>
+      <el-button @click="emit('update:modelValue', false)">{{ uiText("取消") }}</el-button>
+      <el-button data-test="route-editor-save" type="primary" :loading="loading" @click="save">{{ uiText("保存路线与 BOM") }}</el-button>
     </template>
   </el-drawer>
 </template>

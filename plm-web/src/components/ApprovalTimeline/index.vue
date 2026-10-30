@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import type { ApprovalStep } from '@/types/common'
 import { formatDateTime } from '@/utils/format'
 import { getStatusColor, getStatusLabel } from '@/utils/status'
@@ -9,7 +11,7 @@ defineProps<{
 </script>
 
 <template>
-  <el-empty v-if="!steps.length" description="暂无审批记录" />
+  <el-empty v-if="!steps.length" :description='uiText("暂无审批记录")' />
   <el-steps v-else :active="steps.findIndex((item) => item.status === 'pending') + 1 || steps.length" finish-status="success">
     <el-step v-for="step in steps" :key="step.stepName" :title="step.stepName">
       <template #description>

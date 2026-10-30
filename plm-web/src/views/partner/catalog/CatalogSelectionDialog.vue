@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PhoneModelMultiSelect from '@/components/PhoneModelMultiSelect/index.vue'
@@ -84,11 +86,11 @@ watch([busy,unknown],()=>emit('busy',busy.value||unknown.value),{flush:'sync'})
 onBeforeUnmount(()=>{generation++;emit('busy',false)})
 async function close(done?: () => void) {
   if(busy.value||closing.value)return
-  if(unknown.value){ElMessage.warning('请先核对本次保存结果，避免重复提交。');return}
+  if(unknown.value){ElMessage.warning(uiText('请先核对本次保存结果，避免重复提交。'));return}
   const serial = generation
   closing.value = true
   try {
-    if (hasUnsavedChoice.value) await ElMessageBox.confirm('本次型号或拟拿样数量还未保存，确定放弃并关闭吗？', '保留本次选品', { confirmButtonText: '放弃并关闭', cancelButtonText: '继续选品', closeOnClickModal: false })
+    if (hasUnsavedChoice.value) await ElMessageBox.confirm(uiText('本次型号或拟拿样数量还未保存，确定放弃并关闭吗？'), uiText('保留本次选品'), { confirmButtonText: uiText('放弃并关闭'), cancelButtonText: uiText('继续选品'), closeOnClickModal: false })
     if (serial !== generation || !props.modelValue) return
     done?.(); emit('update:modelValue', false)
   } catch { /* Keep every temporary choice when the user continues or dismisses the prompt. */ }
@@ -161,63 +163,63 @@ async function submit(){
   const result=await addCatalogSelection(pendingCommand)
   if(serial!==generation||!props.modelValue)return
   unknown.value=false;pendingCommand=undefined;emit('added',result);emit('update:modelValue',false)
-  ElMessage.success(`已保存 ${selectedStyleCount.value} 款选样${plannedTotal.value?`，拟拿样合计 ${plannedTotal.value} 件`:''}；实际收样另行登记`)
+  ElMessage.success(uiText('已保存 {value0} 款选样{value1}；实际收样另行登记',{value0:(selectedStyleCount.value),value1:(plannedTotal.value?`，拟拿样合计 ${plannedTotal.value} 件`:'')}))
  }catch(cause){if(serial===generation&&props.modelValue){unknown.value=!!pendingCommand&&resultUnknown(cause);if(unknown.value)error.value='保存结果待核对，请点击“核对保存结果”；会沿用本次资料，不重复选样。';else{pendingCommand=undefined;preview.value=undefined;error.value=partnerError(cause)}}}finally{busy.value=false}
 }
 
 </script>
 
 <template>
-  <el-dialog :model-value="modelValue" class="catalog-selection-dialog-shell" title="选择样品" width="min(880px,96vw)" top="20px" append-to-body :close-on-click-modal="false" :close-on-press-escape="!busy&&!unknown" :show-close="!busy&&!unknown" :before-close="close">
+  <el-dialog :model-value="modelValue" class="catalog-selection-dialog-shell" :title='uiText("选择样品")' width="min(880px,96vw)" top="20px" append-to-body :close-on-click-modal="false" :close-on-press-escape="!busy&&!unknown" :show-close="!busy&&!unknown" :before-close="close">
     <div class="catalog-selection-dialog">
-      <p class="selection-intro">{{ supplierName || supplierCode }} · 已勾选 {{ items.length }} 款</p>
+      <p class="selection-intro">{{ supplierName || supplierCode }}{{ uiText(" · 已勾选 ") }}{{ items.length }}{{ uiText(" 款") }}</p>
       <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon/>
       <section class="selection-models">
-        <section class="selection-batch" aria-label="统一批量选择">
-          <div class="selection-section-heading"><h3>统一选择手机型号</h3><span>应用到未单独调整的款式</span></div>
+        <section class="selection-batch" :aria-label='uiText("统一批量选择")'>
+          <div class="selection-section-heading"><h3>{{ uiText("统一选择手机型号") }}</h3><span>{{ uiText("应用到未单独调整的款式") }}</span></div>
           <div class="selection-batch-controls">
-            <PhoneModelMultiSelect v-if="batchScope===undefined||batchScope.length" v-model="commonModels" class="selection-batch-picker" :members="batchPhones" :allowed-ids="batchScope" :disabled="busy||unknown||!canWrite" aria-label="批量选择系列／型号" placeholder="选择手机系列／型号" @selected="commonPhones=$event"/>
-            <span v-else class="selection-scope-note">本批暂无可批量选择的型号，请逐款核对。</span>
-            <el-button type="primary" :disabled="busy||unknown||!canWrite||!commonModels.length" @click="applyBatch()">应用到 {{items.length}} 款</el-button>
+            <PhoneModelMultiSelect v-if="batchScope===undefined||batchScope.length" v-model="commonModels" class="selection-batch-picker" :members="batchPhones" :allowed-ids="batchScope" :disabled="busy||unknown||!canWrite" :aria-label='uiText("批量选择系列／型号")' :placeholder='uiText("选择手机系列／型号")' @selected="commonPhones=$event"/>
+            <span v-else class="selection-scope-note">{{ uiText("本批暂无可批量选择的型号，请逐款核对。") }}</span>
+            <el-button type="primary" :disabled="busy||unknown||!canWrite||!commonModels.length" @click="applyBatch()">{{ uiText("应用到 ") }}{{items.length}}{{ uiText(" 款") }}</el-button>
           </div>
-          <div class="selection-batch-shortcuts"><span>快捷选择</span><el-button link :disabled="busy||unknown||!canWrite" @click="applyBatch('all')">各款可选型号全选</el-button><el-button v-for="family in batchFamilies" :key="family.key" link :disabled="busy||unknown||!canWrite" @click="chooseBatchFamily(family.phoneModelIds)">选择{{family.name}}（{{family.phoneModelIds.length}}）</el-button><el-button link class="selection-clear" :disabled="busy||unknown||!canWrite" @click="clearBatch">清空</el-button></div>
-          <div class="selection-quantity-batch"><label>拟拿样数量（每款合计）</label><el-input-number v-model="commonSampleQty" :key="'common-qty:'+(busy||unknown||!canWrite)" :min="0" :max="Number.MAX_SAFE_INTEGER" :precision="0" :controls="false" placeholder="如 2" aria-label="每款统一拟拿样数量" :disabled="busy||unknown||!canWrite"/><el-button :disabled="busy||unknown||!canWrite" @click="applyQuantity">应用每款数量</el-button><small>保留单款例外，不按型号数相乘</small></div>
+          <div class="selection-batch-shortcuts"><span>{{ uiText("快捷选择") }}</span><el-button link :disabled="busy||unknown||!canWrite" @click="applyBatch('all')">{{ uiText("各款可选型号全选") }}</el-button><el-button v-for="family in batchFamilies" :key="family.key" link :disabled="busy||unknown||!canWrite" @click="chooseBatchFamily(family.phoneModelIds)">{{ uiText("选择") }}{{family.name}}（{{family.phoneModelIds.length}}）</el-button><el-button link class="selection-clear" :disabled="busy||unknown||!canWrite" @click="clearBatch">{{ uiText("清空") }}</el-button></div>
+          <div class="selection-quantity-batch"><label>{{ uiText("拟拿样数量（每款合计）") }}</label><el-input-number v-model="commonSampleQty" :key="'common-qty:'+(busy||unknown||!canWrite)" :min="0" :max="Number.MAX_SAFE_INTEGER" :precision="0" :controls="false" :placeholder='uiText("如 2")' :aria-label='uiText("每款统一拟拿样数量")' :disabled="busy||unknown||!canWrite"/><el-button :disabled="busy||unknown||!canWrite" @click="applyQuantity">{{ uiText("应用每款数量") }}</el-button><small>{{ uiText("保留单款例外，不按型号数相乘") }}</small></div>
         </section>
-        <div class="selection-section-heading selection-check-heading"><h3>逐款核对</h3><span>{{selectedStyleCount}} 款已选<template v-if="pendingRows.length"> · {{pendingRows.length}} 款待选择</template></span></div>
-        <div class="selection-table-heading"><span>款式</span><span>本次选中型号</span><span>拟拿样数量</span><span>操作</span></div>
+        <div class="selection-section-heading selection-check-heading"><h3>{{ uiText("逐款核对") }}</h3><span>{{selectedStyleCount}}{{ uiText(" 款已选") }}<template v-if="pendingRows.length"> · {{pendingRows.length}}{{ uiText(" 款待选择") }}</template></span></div>
+        <div class="selection-table-heading"><span>{{ uiText("款式") }}</span><span>{{ uiText("本次选中型号") }}</span><span>{{ uiText("拟拿样数量") }}</span><span>{{ uiText("操作") }}</span></div>
         <article v-for="row in items" :key="catalogKey(row)" class="selection-model-row" :class="{'is-excluded':excluded[catalogKey(row)]}">
           <div class="selection-row-main">
-            <header><PartnerPhoto v-if="photo(row)" :id="photo(row)!.id"/><span v-else class="selection-photo-placeholder" aria-label="暂无款式图片">暂无图片</span><div><strong>{{row.name}}</strong><small><template v-if="unspecifiedScope(row)">供应商未注明型号</template><template v-else-if="row.phoneScopeMode==='unresolved'||!row.phoneModelIds.length">型号资料待关联</template><template v-else-if="!allowedModels(row).length">当前范围暂无可选型号</template><template v-else>本款可选 {{allowedModels(row).length}} 个型号</template> · 本次选 {{chosen[catalogKey(row)]?.length||0}} 个</small></div></header>
+            <header><PartnerPhoto v-if="photo(row)" :id="photo(row)!.id"/><span v-else class="selection-photo-placeholder" :aria-label='uiText("暂无款式图片")'>{{ uiText("暂无图片") }}</span><div><strong>{{row.name}}</strong><small><template v-if="unspecifiedScope(row)">{{ uiText("供应商未注明型号") }}</template><template v-else-if="row.phoneScopeMode==='unresolved'||!row.phoneModelIds.length">{{ uiText("型号资料待关联") }}</template><template v-else-if="!allowedModels(row).length">{{ uiText("当前范围暂无可选型号") }}</template><template v-else>{{ uiText("本款可选 ") }}{{allowedModels(row).length}}{{ uiText(" 个型号") }}</template>{{ uiText(" · 本次选 ") }}{{chosen[catalogKey(row)]?.length||0}}{{ uiText(" 个") }}</small></div></header>
             <div class="selection-row-chosen">
               <el-tag v-for="id in (chosen[catalogKey(row)]||[]).slice(0,2)" :key="id" size="small" :closable="canWrite&&!busy&&!unknown" @close="changeModels(row,(chosen[catalogKey(row)]||[]).filter(value=>value!==id))">{{phoneName(row,id)}}</el-tag>
-              <el-button v-if="(chosen[catalogKey(row)]?.length||0)>2" link @click="expanded[catalogKey(row)]=true">共 {{chosen[catalogKey(row)].length}} 个，展开</el-button>
-              <span v-if="!chosen[catalogKey(row)]?.length" class="selection-row-empty">{{excluded[catalogKey(row)]?'本次不选':'未选型号'}}</span>
-              <small v-if="adjusted[catalogKey(row)]">已单独调整</small>
+              <el-button v-if="(chosen[catalogKey(row)]?.length||0)>2" link @click="expanded[catalogKey(row)]=true">{{ uiText("共 ") }}{{chosen[catalogKey(row)].length}}{{ uiText(" 个，展开") }}</el-button>
+              <span v-if="!chosen[catalogKey(row)]?.length" class="selection-row-empty">{{excluded[catalogKey(row)]?uiText('本次不选'):uiText('未选型号')}}</span>
+              <small v-if="adjusted[catalogKey(row)]">{{ uiText("已单独调整") }}</small>
             </div>
-            <div class="selection-row-quantity"><label>拟拿样数量（本款合计）</label><el-input-number :model-value="sampleQuantities[catalogKey(row)]" :key="catalogKey(row)+':qty:'+(busy||unknown||!canWrite||excluded[catalogKey(row)])" :min="0" :max="Number.MAX_SAFE_INTEGER" :precision="0" :controls="false" placeholder="未定" :aria-label="row.name+'拟拿样数量'" :disabled="busy||unknown||!canWrite||excluded[catalogKey(row)]" @update:model-value="changeQuantity(row,$event)"/><el-button v-if="quantityAdjusted[catalogKey(row)]" link :disabled="busy||unknown||!canWrite" @click="followQuantity(row)">随统一数量</el-button></div>
-            <el-button class="selection-adjust-button" link :disabled="busy||unknown||!canWrite" :aria-expanded="!!expanded[catalogKey(row)]" @click="expanded[catalogKey(row)]=!expanded[catalogKey(row)]">{{expanded[catalogKey(row)]?'收起':'调整'}}</el-button>
+            <div class="selection-row-quantity"><label>{{ uiText("拟拿样数量（本款合计）") }}</label><el-input-number :model-value="sampleQuantities[catalogKey(row)]" :key="catalogKey(row)+':qty:'+(busy||unknown||!canWrite||excluded[catalogKey(row)])" :min="0" :max="Number.MAX_SAFE_INTEGER" :precision="0" :controls="false" :placeholder='uiText("未定")' :aria-label="row.name+uiText('拟拿样数量')" :disabled="busy||unknown||!canWrite||excluded[catalogKey(row)]" @update:model-value="changeQuantity(row,$event)"/><el-button v-if="quantityAdjusted[catalogKey(row)]" link :disabled="busy||unknown||!canWrite" @click="followQuantity(row)">{{ uiText("随统一数量") }}</el-button></div>
+            <el-button class="selection-adjust-button" link :disabled="busy||unknown||!canWrite" :aria-expanded="!!expanded[catalogKey(row)]" @click="expanded[catalogKey(row)]=!expanded[catalogKey(row)]">{{expanded[catalogKey(row)]?uiText('收起'):uiText('调整')}}</el-button>
           </div>
           <div v-show="expanded[catalogKey(row)]" class="selection-row-adjust">
-          <div class="selection-adjust-actions"><strong>本款型号与颜色</strong><el-button v-if="adjusted[catalogKey(row)]" link :disabled="busy||unknown||!canWrite" @click="restoreBatch(row)">恢复统一选择</el-button><el-button v-if="!excluded[catalogKey(row)]" link :disabled="busy||unknown||!canWrite" @click="changeModels(row,[])">本次不选</el-button></div>
-          <p v-if="row.modelText" class="selection-source-models"><span>来源型号：</span>{{row.modelText}}</p>
-          <div v-if="modelFamilies[catalogKey(row)]?.length" class="selection-series-shortcuts" aria-label="本款系列快捷选择"><el-button v-for="family in modelFamilies[catalogKey(row)]" :key="family.key" size="small" :type="familyChosen(row,family.phoneModelIds)?'primary':undefined" plain :disabled="busy||unknown||!canWrite" @click="toggleFamily(row,family.phoneModelIds)">{{familyChosen(row,family.phoneModelIds)?'取消':'选择'}}{{family.name}}（{{family.phoneModelIds.length}}）</el-button></div>
-          <PhoneModelMultiSelect v-if="unspecifiedScope(row)||allowedModels(row).length" :model-value="chosen[catalogKey(row)]||[]" :members="row.phones" :allowed-ids="selectorScope(row)" :disabled="busy||unknown||!canWrite||row.phoneScopeMode==='unresolved'" :aria-label="row.name+'本次所选系列／型号'" :placeholder="unspecifiedScope(row)?'从现有手机资料选择系列／型号':'选择系列／型号（仅本款可选范围）'" @update:model-value="changeModels(row,$event)" @selected="rememberPhones(row,$event)"/>
-          <details v-if="knownPairs(row).length" class="selection-pairs"><summary>颜色／配置（选填）</summary><el-checkbox-group :model-value="pairs[catalogKey(row)]||[]" :disabled="busy||unknown||!canWrite" @update:model-value="changePairs(row,$event as string[])"><el-checkbox v-for="pair in knownPairs(row)" :key="pairKey(pair)" :value="pairKey(pair)">{{phoneName(row,pair.phoneModelId)}} · {{pair.colorSnapshot!.name}}<span v-if="pair.state==='unverified'">（待核实）</span></el-checkbox></el-checkbox-group></details>
-          <p v-else-if="row.color" class="selection-color">供方颜色：{{row.color}}（选填，不自动组合）</p>
+          <div class="selection-adjust-actions"><strong>{{ uiText("本款型号与颜色") }}</strong><el-button v-if="adjusted[catalogKey(row)]" link :disabled="busy||unknown||!canWrite" @click="restoreBatch(row)">{{ uiText("恢复统一选择") }}</el-button><el-button v-if="!excluded[catalogKey(row)]" link :disabled="busy||unknown||!canWrite" @click="changeModels(row,[])">{{ uiText("本次不选") }}</el-button></div>
+          <p v-if="row.modelText" class="selection-source-models"><span>{{ uiText("来源型号：") }}</span>{{row.modelText}}</p>
+          <div v-if="modelFamilies[catalogKey(row)]?.length" class="selection-series-shortcuts" :aria-label='uiText("本款系列快捷选择")'><el-button v-for="family in modelFamilies[catalogKey(row)]" :key="family.key" size="small" :type="familyChosen(row,family.phoneModelIds)?'primary':undefined" plain :disabled="busy||unknown||!canWrite" @click="toggleFamily(row,family.phoneModelIds)">{{familyChosen(row,family.phoneModelIds)?uiText('取消'):uiText('选择')}}{{family.name}}（{{family.phoneModelIds.length}}）</el-button></div>
+          <PhoneModelMultiSelect v-if="unspecifiedScope(row)||allowedModels(row).length" :model-value="chosen[catalogKey(row)]||[]" :members="row.phones" :allowed-ids="selectorScope(row)" :disabled="busy||unknown||!canWrite||row.phoneScopeMode==='unresolved'" :aria-label="row.name+uiText('本次所选系列／型号')" :placeholder="unspecifiedScope(row)?uiText('从现有手机资料选择系列／型号'):uiText('选择系列／型号（仅本款可选范围）')" @update:model-value="changeModels(row,$event)" @selected="rememberPhones(row,$event)"/>
+          <details v-if="knownPairs(row).length" class="selection-pairs"><summary>{{ uiText("颜色／配置（选填）") }}</summary><el-checkbox-group :model-value="pairs[catalogKey(row)]||[]" :disabled="busy||unknown||!canWrite" @update:model-value="changePairs(row,$event as string[])"><el-checkbox v-for="pair in knownPairs(row)" :key="pairKey(pair)" :value="pairKey(pair)">{{phoneName(row,pair.phoneModelId)}} · {{pair.colorSnapshot!.name}}<span v-if="pair.state==='unverified'">{{ uiText("（待核实）") }}</span></el-checkbox></el-checkbox-group></details>
+          <p v-else-if="row.color" class="selection-color">{{ uiText("供方颜色：") }}{{row.color}}{{ uiText("（选填，不自动组合）") }}</p>
           </div>
-          <p v-if="unspecifiedScope(row)&&!excluded[catalogKey(row)]" class="selection-scope-note selection-row-notice">供应商未注明型号，可从现有资料选择；不代表已确认可供。</p>
-          <p v-if="!excluded[catalogKey(row)]&&(row.phoneScopeMode==='unresolved'||!unspecifiedScope(row)&&!allowedModels(row).length)" class="selection-issue selection-row-notice">{{row.phoneScopeMode==='unresolved'||!row.phoneModelIds.length?'本款型号资料尚未提取或关联，请先核对来源型号表。':'本款型号已明确不供，暂无可选型号。'}}</p>
-          <p v-if="!excluded[catalogKey(row)]&&chosen[catalogKey(row)]?.some(id=>!modelAllowed(row,id))" class="selection-issue selection-row-notice">本次型号不在当前允许范围或资料已变化，请重新选择。</p>
-          <p v-if="unmatched[catalogKey(row)]?.length" class="selection-scope-note selection-row-notice">未选入：{{phoneList(row,unmatched[catalogKey(row)],batchPhones)}}（不在本款可选范围或已停用）</p>
-          <section v-if="progressPhones(row).length" class="selection-supplier-progress"><strong>本次型号的供方进度</strong><p v-for="id in visibleProgress(row)" :key="id"><b>{{phoneName(row,id)}}</b><span v-for="status in catalogPhoneProgress(row,id)" :key="status">{{status}}</span></p><el-pagination v-if="progressPhones(row).length>6" :current-page="progressPage(row)" :page-size="6" :total="progressPhones(row).length" :pager-count="5" layout="prev,pager,next" @current-change="progressPages[catalogKey(row)]=$event"/><small>原进度如实保留，不等于本批现货、实收或质检结论。</small></section>
+          <p v-if="unspecifiedScope(row)&&!excluded[catalogKey(row)]" class="selection-scope-note selection-row-notice">{{ uiText("供应商未注明型号，可从现有资料选择；不代表已确认可供。") }}</p>
+          <p v-if="!excluded[catalogKey(row)]&&(row.phoneScopeMode==='unresolved'||!unspecifiedScope(row)&&!allowedModels(row).length)" class="selection-issue selection-row-notice">{{row.phoneScopeMode==='unresolved'||!row.phoneModelIds.length?uiText('本款型号资料尚未提取或关联，请先核对来源型号表。'):uiText('本款型号已明确不供，暂无可选型号。')}}</p>
+          <p v-if="!excluded[catalogKey(row)]&&chosen[catalogKey(row)]?.some(id=>!modelAllowed(row,id))" class="selection-issue selection-row-notice">{{ uiText("本次型号不在当前允许范围或资料已变化，请重新选择。") }}</p>
+          <p v-if="unmatched[catalogKey(row)]?.length" class="selection-scope-note selection-row-notice">{{ uiText("未选入：") }}{{phoneList(row,unmatched[catalogKey(row)],batchPhones)}}{{ uiText("（不在本款可选范围或已停用）") }}</p>
+          <section v-if="progressPhones(row).length" class="selection-supplier-progress"><strong>{{ uiText("本次型号的供方进度") }}</strong><p v-for="id in visibleProgress(row)" :key="id"><b>{{phoneName(row,id)}}</b><span v-for="status in catalogPhoneProgress(row,id)" :key="status">{{status}}</span></p><el-pagination v-if="progressPhones(row).length>6" :current-page="progressPage(row)" :page-size="6" :total="progressPhones(row).length" :pager-count="5" layout="prev,pager,next" @current-change="progressPages[catalogKey(row)]=$event"/><small>{{ uiText("原进度如实保留，不等于本批现货、实收或质检结论。") }}</small></section>
         </article>
-        <p v-if="batchMessage" class="selection-batch-message" role="status">{{batchMessage}}</p>
-        <p v-if="pendingRows.length&&combinationCount" class="selection-scope-note">{{pendingRows.length}} 款尚未选择型号，请点击对应“调整”补选，或明确选择“本次不选”。</p>
+        <p v-if="batchMessage" class="selection-batch-message" role="status">{{uiText(String((batchMessage) ?? ''))}}</p>
+        <p v-if="pendingRows.length&&combinationCount" class="selection-scope-note">{{pendingRows.length}}{{ uiText(" 款尚未选择型号，请点击对应“调整”补选，或明确选择“本次不选”。") }}</p>
       </section>
       <div v-if="validationIssues.length" class="selection-errors" role="alert"><p v-for="message in validationIssues" :key="message" class="selection-issue">{{message}}</p></div>
-      <p class="selection-note">{{targetSelectionId?'本次增选直接保存到原选品目录。':'直接保存到本供应商的选品目录。'}}收到实物再登记收样，不会提前生成产品或样品批次。</p>
+      <p class="selection-note">{{targetSelectionId?uiText('本次增选直接保存到原选品目录。'):uiText('直接保存到本供应商的选品目录。')}}{{ uiText("收到实物再登记收样，不会提前生成产品或样品批次。") }}</p>
     </div>
-    <template #footer><div class="selection-total" aria-live="polite"><strong>已选 {{selectedStyleCount}} 款</strong><small>{{unplannedCount===selectedItems.length?'拟拿样数量未填':'拟拿样合计 '+plannedTotal+' 件'}}<template v-if="unplannedCount"> · {{unplannedCount}} 款未填数量</template>，不按型号数相乘</small></div><el-button :disabled="busy||closing||unknown" @click="close()">取消</el-button><el-button type="primary" :disabled="!canWrite||busy||closing||(!unknown&&!valid)" :loading="busy" @click="submit">{{unknown?'核对保存结果':'保存选样'}}</el-button></template>
+    <template #footer><div class="selection-total" aria-live="polite"><strong>{{ uiText("已选 ") }}{{selectedStyleCount}}{{ uiText(" 款") }}</strong><small>{{unplannedCount===selectedItems.length?uiText('拟拿样数量未填'):uiText('拟拿样合计 ')+plannedTotal+uiText(' 件')}}<template v-if="unplannedCount"> · {{unplannedCount}}{{ uiText(" 款未填数量") }}</template>{{ uiText("，不按型号数相乘") }}</small></div><el-button :disabled="busy||closing||unknown" @click="close()">{{ uiText("取消") }}</el-button><el-button type="primary" :disabled="!canWrite||busy||closing||(!unknown&&!valid)" :loading="busy" @click="submit">{{unknown?uiText('核对保存结果'):uiText('保存选样')}}</el-button></template>
   </el-dialog>
 </template>
 

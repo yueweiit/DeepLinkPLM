@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, ref, watch } from 'vue';
 import { Picture } from '@element-plus/icons-vue';
 import { materialKey, type DevelopmentMaterial } from '@/api/modules/productResearch';
@@ -19,34 +21,34 @@ function dragLeave(){dragDepth.value=Math.max(0,dragDepth.value-1);}
 function dropFiles(event:DragEvent){if(!isFileDrag(event))return;event.preventDefault();dragDepth.value=0;const files=Array.from(event.dataTransfer?.files||[]);if(canUpload.value&&files.length)emit('files',files);}
 
 const files=computed(()=>props.materials.filter(m=>m.type==='file'));
-const images=computed(()=>files.value.filter(m=>m.attachment&&['jpg','jpeg','png','webp'].includes(m.attachment.fileExt.toLowerCase())));
+const images=computed(()=>files.value.filter(m=>m.attachment&&['jpg','jpeg','png','webp'].includes((m.attachment.fileExt||'').toLowerCase())));
 const rows=computed(()=>props.materials.filter(m=>filter.value==='all'||(filter.value==='images'?images.value.includes(m):filter.value==='files'?m.type==='file'&&!images.value.includes(m):['bom','process'].includes(m.type))));
 function choose(m:DevelopmentMaterial,checked:unknown){const key=materialKey(m);emit('update:selected',checked?[...new Set([...props.selected,key])]:props.selected.filter(k=>k!==key));}
 const status=(s:string)=>({draft:'草稿',released:'正式',locked:'已锁定',frozen:'已冻结',reviewing:'评审中'} as Record<string,string>)[s]||s;
 </script>
 <template>
- <aside class="research-materials stage-materials" :class="{'is-dragging':dragDepth>0}" aria-label="本阶段图片与附件" data-readiness-target="drawings" @dragenter="dragEnter" @dragover="dragOver" @dragleave="dragLeave" @drop="dropFiles">
-  <input v-if="editable" ref="fileInput" class="local-file-input" type="file" multiple :accept="ENGINEERING_UPLOAD_ACCEPT" :disabled="busy" aria-label="选择本地图片或附件" @change="selectedFiles"/>
-  <header class="section-heading"><div><h3>图片与附件</h3><span>{{files.length}} 个文件版本 · {{images.length}} 张图片 · 本阶段采用 {{selected.length}} 份</span></div><div class="material-actions"><el-button link :disabled="busy" @click="emit('refresh')">刷新</el-button><el-button v-if="editable" data-readiness-focus="upload" :disabled="busy" type="primary" @click="pickFiles">从本地上传</el-button><el-button v-else-if="uploadStageName" type="primary" :disabled="busy" @click="emit('currentStage')">前往{{uploadStageName}}上传</el-button><el-button v-if="!hideEngineering" link :disabled="busy" @click="emit('engineering','bom')">{{editable?'维护／确认 BOM':'查看 BOM'}}</el-button><el-button v-if="!hideEngineering" link :disabled="busy" @click="emit('engineering','process')">{{editable?'维护工艺路线':'查看工艺'}}</el-button></div></header>
+ <aside class="research-materials stage-materials" :class="{'is-dragging':dragDepth>0}" :aria-label='uiText("本阶段图片与附件")' data-readiness-target="drawings" @dragenter="dragEnter" @dragover="dragOver" @dragleave="dragLeave" @drop="dropFiles">
+  <input v-if="editable" ref="fileInput" class="local-file-input" type="file" multiple :accept="ENGINEERING_UPLOAD_ACCEPT" :disabled="busy" :aria-label='uiText("选择本地图片或附件")' @change="selectedFiles"/>
+  <header class="section-heading"><div><h3>{{ uiText("图片与附件") }}</h3><span>{{files.length}}{{ uiText(" 个文件版本 · ") }}{{images.length}}{{ uiText(" 张图片 · 本阶段采用 ") }}{{selected.length}}{{ uiText(" 份") }}</span></div><div class="material-actions"><el-button link :disabled="busy" @click="emit('refresh')">{{ uiText("刷新") }}</el-button><el-button v-if="editable" data-readiness-focus="upload" :disabled="busy" type="primary" @click="pickFiles">{{ uiText("从本地上传") }}</el-button><el-button v-else-if="uploadStageName" type="primary" :disabled="busy" @click="emit('currentStage')">{{ uiText("前往") }}{{uploadStageName}}{{ uiText("上传") }}</el-button><el-button v-if="!hideEngineering" link :disabled="busy" @click="emit('engineering','bom')">{{editable?uiText('维护／确认 BOM'):uiText('查看 BOM')}}</el-button><el-button v-if="!hideEngineering" link :disabled="busy" @click="emit('engineering','process')">{{editable?uiText('维护工艺路线'):uiText('查看工艺')}}</el-button></div></header>
   <slot name="notice"/>
-  <p v-if="!editable" class="upload-readonly-note">{{uploadStageName?`本页仅查看，上传请前往当前阶段“${uploadStageName}”。`:'当前资料只读；图片和附件仍可预览、下载。'}}</p>
+  <p v-if="!editable" class="upload-readonly-note">{{uploadStageName?uiText('本页仅查看，上传请前往当前阶段“{value0}”。',{value0:(uploadStageName)}):uiText('当前资料只读；图片和附件仍可预览、下载。')}}</p>
   <div class="material-body">
    <div class="material-images">
-    <div v-if="images.length" class="image-gallery"><article v-for="m in images.slice(0,4)" :key="m.id" class="image-tile"><DocumentPreview :file="m.attachment!" compact/><div class="image-caption"><span>{{m.name}} · {{m.versionNo}}</span><el-button link :disabled="busy" :aria-label="`查看大图 ${m.name} ${m.versionNo}`" @click="emit('view',m)">查看大图</el-button></div></article><p v-if="images.length>4">共 {{images.length}} 张图片，完整版本保留在资料清单。</p></div>
-    <div v-if="!images.length" class="image-placeholder"><el-icon :size="22"><Picture/></el-icon><span>暂无图片</span></div>
+    <div v-if="images.length" class="image-gallery"><article v-for="m in images.slice(0,4)" :key="m.id" class="image-tile"><DocumentPreview :file="m.attachment!" compact/><div class="image-caption"><span>{{m.name}} · {{m.versionNo}}</span><el-button link :disabled="busy" :aria-label="uiText('查看大图 {value0} {value1}',{value0:(m.name),value1:(m.versionNo)})" @click="emit('view',m)">{{ uiText("查看大图") }}</el-button></div></article><p v-if="images.length>4">{{ uiText("共 ") }}{{images.length}}{{ uiText(" 张图片，完整版本保留在资料清单。") }}</p></div>
+    <div v-if="!images.length" class="image-placeholder"><el-icon :size="22"><Picture/></el-icon><span>{{ uiText("暂无图片") }}</span></div>
    </div>
-   <section class="material-versions" aria-label="附件与工程资料版本">
-    <el-radio-group v-model="filter" class="material-filter" size="small" aria-label="资料类型"><el-radio-button value="all">全部资料</el-radio-button><el-radio-button value="images">图片</el-radio-button><el-radio-button value="files">附件</el-radio-button><el-radio-button v-if="!hideEngineering" value="engineering">BOM／工艺</el-radio-button></el-radio-group>
-    <p v-if="!selectable" class="muted">采用版本在对应评审中选择；已确认依据继续保留。</p>
+   <section class="material-versions" :aria-label='uiText("附件与工程资料版本")'>
+    <el-radio-group v-model="filter" class="material-filter" size="small" :aria-label='uiText("资料类型")'><el-radio-button value="all">{{ uiText("全部资料") }}</el-radio-button><el-radio-button value="images">{{ uiText("图片") }}</el-radio-button><el-radio-button value="files">{{ uiText("附件") }}</el-radio-button><el-radio-button v-if="!hideEngineering" value="engineering">{{ uiText("BOM／工艺") }}</el-radio-button></el-radio-group>
+    <p v-if="!selectable" class="muted">{{ uiText("采用版本在对应评审中选择；已确认依据继续保留。") }}</p>
     <article v-for="m in rows" :key="materialKey(m)" class="material-row">
-     <el-checkbox :model-value="selected.includes(materialKey(m))" :disabled="!selectable||busy" @change="choose(m,$event)"><strong>{{m.name}}</strong><span> · {{m.versionNo||'版本待补'}}</span></el-checkbox>
-     <div class="material-meta">{{m.category?fileCategoryLabel(m.category):m.type==='bom'?'BOM':m.type==='process'?'工艺':'链接'}} · {{status(m.status)}}<span v-if="m.attachment"> · {{formatFileSize(m.attachment.fileSize)}}</span></div>
-     <div class="row-actions"><el-button link :disabled="busy" @click="emit('view',m)">预览／详情</el-button><el-button v-if="m.type==='file'" link :disabled="busy" @click="emit('download',m)">下载</el-button><el-button v-if="editable&&m.type==='file'" link :disabled="busy" @click="emit('upload',m)">上传新版</el-button><el-button v-if="editable&&m.type==='file'&&m.status==='draft'" link type="danger" :disabled="busy" @click="emit('remove',m)">删除草稿</el-button></div>
+     <el-checkbox :model-value="selected.includes(materialKey(m))" :disabled="!selectable||busy" @change="choose(m,$event)"><strong>{{m.name}}</strong><span> · {{m.versionNo||uiText('版本待补')}}</span></el-checkbox>
+     <div class="material-meta">{{m.category?uiText(fileCategoryLabel(m.category)):m.type==='bom'?'BOM':m.type==='process'?uiText('工艺'):uiText('链接')}} · {{status(m.status)}}<span v-if="m.attachment"> · {{formatFileSize(m.attachment.fileSize)}}</span></div>
+     <div class="row-actions"><el-button link :disabled="busy" @click="emit('view',m)">{{ uiText("预览／详情") }}</el-button><el-button v-if="m.type==='file'" link :disabled="busy" @click="emit('download',m)">{{ uiText("下载") }}</el-button><el-button v-if="editable&&m.type==='file'" link :disabled="busy" @click="emit('upload',m)">{{ uiText("上传新版") }}</el-button><el-button v-if="editable&&m.type==='file'&&m.status==='draft'" link type="danger" :disabled="busy" @click="emit('remove',m)">{{ uiText("删除草稿") }}</el-button></div>
     </article>
-    <el-empty v-if="!rows.length" :image-size="32" :description="materials.length?'当前类型暂无资料':'暂无附件，可直接上传。'"/>
+    <el-empty v-if="!rows.length" :image-size="32" :description="materials.length?uiText('当前类型暂无资料'):uiText('暂无附件，可直接上传。')"/>
    </section>
   </div>
-  <div v-if="editable" class="material-drop-zone" role="button" :tabindex="busy?-1:0" :aria-disabled="busy" aria-label="拖拽或从本地上传图片及附件" @click="pickFiles" @keydown.enter.prevent="pickFiles" @keydown.space.prevent="pickFiles"><el-icon :size="16"><Picture/></el-icon><strong>{{dragDepth?'松开以选择图片或附件':'将图片或附件拖到这里'}}</strong><span>或点击“从本地上传”</span><span class="upload-limit">每次最多 20 份 · 单份不超过 200 MB</span></div>
+  <div v-if="editable" class="material-drop-zone" role="button" :tabindex="busy?-1:0" :aria-disabled="busy" :aria-label='uiText("拖拽或从本地上传图片及附件")' @click="pickFiles" @keydown.enter.prevent="pickFiles" @keydown.space.prevent="pickFiles"><el-icon :size="16"><Picture/></el-icon><strong>{{dragDepth?uiText('松开以选择图片或附件'):uiText('将图片或附件拖到这里')}}</strong><span>{{ uiText("或点击“从本地上传”") }}</span><span class="upload-limit">{{ uiText("每次最多 20 份 · 单份不超过 200 MB") }}</span></div>
  </aside>
 </template>
 <style scoped>

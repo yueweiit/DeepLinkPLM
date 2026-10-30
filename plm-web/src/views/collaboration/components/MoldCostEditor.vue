@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import {computed,onBeforeUnmount,reactive,ref,watch} from 'vue'
 import {ElMessage} from 'element-plus'
 import {useUserStore} from '@/stores/user'
@@ -30,7 +32,7 @@ async function save(){
  if(!reason.value.trim()){error.value='请填写本次维护原因';return}
  const id=props.groupId,ticket=++epoch,token=user.token,baseline=snapshot.value
  saving.value=true;error.value=''
- try{const next=await saveMoldCost(id,{version:baseline.version,groupToken:baseline.groupToken,amounts:Object.fromEntries(parsed.map(v=>[v.key,v.cents!/100])) as unknown as ActualCostAmounts,reason:reason.value.trim()});if(disposed||ticket!==epoch||token!==user.token||!props.modelValue||id!==props.groupId)return;apply(next);ElMessage.success('实际成本已保存');emit('saved')}
+ try{const next=await saveMoldCost(id,{version:baseline.version,groupToken:baseline.groupToken,amounts:Object.fromEntries(parsed.map(v=>[v.key,v.cents!/100])) as unknown as ActualCostAmounts,reason:reason.value.trim()});if(disposed||ticket!==epoch||token!==user.token||!props.modelValue||id!==props.groupId)return;apply(next);ElMessage.success(uiText('实际成本已保存'));emit('saved')}
  catch(e){if(ticket===epoch&&token===user.token)error.value=e instanceof Error?`${e.message}。输入已保留，请核对后再保存；如资料已被他人修改，请关闭后重新打开。`:'保存失败，输入已保留，请重试'}
  finally{if(ticket===epoch)saving.value=false}
 }
@@ -40,25 +42,25 @@ watch(()=>props.canWrite,value=>{if(!value){++epoch;loading.value=false;saving.v
 onBeforeUnmount(()=>{disposed=true;++epoch})
 </script>
 <template>
- <el-dialog :model-value="modelValue" title="模具实际成本" width="min(720px,96vw)" top="20px" class="mold-cost-editor" :close-on-click-modal="false" :close-on-press-escape="!busy" :show-close="!busy" @update:model-value="updateOpen">
+ <el-dialog :model-value="modelValue" :title='uiText("模具实际成本")' width="min(720px,96vw)" top="20px" class="mold-cost-editor" :close-on-click-modal="false" :close-on-press-escape="!busy" :show-close="!busy" @update:model-value="updateOpen">
   <div v-loading="loading" class="cost-editor-content">
    <el-alert v-if="error" :title="error" type="error" :closable="false"/>
    <section v-if="snapshot" class="cost-snapshot">
     <h3>{{snapshot.styleName}} · {{snapshot.modelNames.join(' / ')}}</h3>
-    <p class="scope-note">填写本组全部模具的实际总金额（人民币），含运费等支出，不是每套单价。未发生的费用请填 0。预算不会自动当作实际成本。</p>
-    <p v-if="snapshot.budget" class="budget-reference">预算参考：¥{{money(snapshot.budget.totalCost)}}</p>
+    <p class="scope-note">{{ uiText("填写本组全部模具的实际总金额（人民币），含运费等支出，不是每套单价。未发生的费用请填 0。预算不会自动当作实际成本。") }}</p>
+    <p v-if="snapshot.budget" class="budget-reference">{{ uiText("预算参考：¥") }}{{money(snapshot.budget.totalCost)}}</p>
     <el-form v-if="editable" label-position="top" @submit.prevent="save">
-     <div class="amount-grid"><el-form-item v-for="[key,label] in fields" :key="key" :label="label+'（元）'" required><el-input v-model="amounts[key]" :aria-label="label+'（元）'" :disabled="saving" inputmode="decimal" placeholder="无费用填 0"/><small v-if="key==='otherCost'">含燃油附加等其他支出</small></el-form-item></div>
-     <div class="actual-total">实际成本合计 <strong>{{totalPreview===null?'待填写完整':'¥'+money(totalPreview)}}</strong></div>
-     <el-form-item label="本次维护原因" required><el-input v-model="reason" aria-label="本次维护原因" type="textarea" :maxlength="2000" :autosize="{minRows:2,maxRows:5}" :disabled="saving" placeholder="例如：按工厂结算单补充制模费及实际运费"/></el-form-item>
+     <div class="amount-grid"><el-form-item v-for="[key,label] in fields" :key="key" :label="label+uiText('（元）')" required><el-input v-model="amounts[key]" :aria-label="label+uiText('（元）')" :disabled="saving" inputmode="decimal" :placeholder='uiText("无费用填 0")'/><small v-if="key==='otherCost'">{{ uiText("含燃油附加等其他支出") }}</small></el-form-item></div>
+     <div class="actual-total">{{ uiText("实际成本合计 ") }}<strong>{{totalPreview===null?uiText('待填写完整'):'¥'+money(totalPreview)}}</strong></div>
+     <el-form-item :label='uiText("本次维护原因")' required><el-input v-model="reason" :aria-label='uiText("本次维护原因")' type="textarea" :maxlength="2000" :autosize="{minRows:2,maxRows:5}" :disabled="saving" :placeholder='uiText("例如：按工厂结算单补充制模费及实际运费")'/></el-form-item>
     </el-form>
-    <dl v-else-if="snapshot.actual" class="actual-values"><template v-for="[key,label] in fields" :key="key"><dt>{{label}}</dt><dd>¥{{money(snapshot.actual[key])}}</dd></template><dt>实际成本合计</dt><dd>¥{{money(snapshot.actual.totalCost)}}</dd></dl>
-    <p v-else class="scope-note">尚未维护实际成本</p>
-    <section v-if="snapshot.history.length" class="cost-history"><h4>修改记录</h4><article v-for="record in snapshot.history" :key="record.version"><div><strong>¥{{money(record.amounts.totalCost)}}</strong><span>{{record.actorName}} · {{date(record.changedAt)}}</span></div><p>制模 ¥{{money(record.amounts.manufacturingCost)}} · 运费 ¥{{money(record.amounts.freightCost)}} · 清关 ¥{{money(record.amounts.customsCost)}} · 其他 ¥{{money(record.amounts.otherCost)}}</p><p>{{record.reason}}</p></article></section>
+    <dl v-else-if="snapshot.actual" class="actual-values"><template v-for="[key,label] in fields" :key="key"><dt>{{label}}</dt><dd>¥{{money(snapshot.actual[key])}}</dd></template><dt>{{ uiText("实际成本合计") }}</dt><dd>¥{{money(snapshot.actual.totalCost)}}</dd></dl>
+    <p v-else class="scope-note">{{ uiText("尚未维护实际成本") }}</p>
+    <section v-if="snapshot.history.length" class="cost-history"><h4>{{ uiText("修改记录") }}</h4><article v-for="record in snapshot.history" :key="record.version"><div><strong>¥{{money(record.amounts.totalCost)}}</strong><span>{{record.actorName}} · {{date(record.changedAt)}}</span></div><p>{{ uiText("制模 ¥") }}{{money(record.amounts.manufacturingCost)}}{{ uiText(" · 运费 ¥") }}{{money(record.amounts.freightCost)}}{{ uiText(" · 清关 ¥") }}{{money(record.amounts.customsCost)}}{{ uiText(" · 其他 ¥") }}{{money(record.amounts.otherCost)}}</p><p>{{record.reason}}</p></article></section>
    </section>
-   <el-button v-else-if="!loading" @click="load">重试读取</el-button>
+   <el-button v-else-if="!loading" @click="load">{{ uiText("重试读取") }}</el-button>
   </div>
-  <template #footer><el-button :disabled="busy" @click="close">关闭</el-button><el-button v-if="editable" type="primary" :loading="saving" :disabled="loading" @click="save">保存实际成本</el-button></template>
+  <template #footer><el-button :disabled="busy" @click="close">{{ uiText("关闭") }}</el-button><el-button v-if="editable" type="primary" :loading="saving" :disabled="loading" @click="save">{{ uiText("保存实际成本") }}</el-button></template>
  </el-dialog>
 </template>
 <style scoped>

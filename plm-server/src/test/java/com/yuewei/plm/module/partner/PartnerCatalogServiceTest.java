@@ -238,17 +238,24 @@ class PartnerCatalogServiceTest {
 
         private void renameFixture(){
             jdbc.execute("""
-                alter table plm_partner_record add column site text,add column external_id text,add column customer_id bigint,add column source_project_id bigint,add column updated_by text;
+                alter table plm_partner_record add column site text,add column external_id text,add column customer_id bigint,add column source_project_id bigint,add column updated_by text,add column parent_record_id bigint;
                 alter table plm_partner_selection_row add column updated_at timestamptz default now(),add column updated_by text;
                 alter table plm_partner_quote_line add column updated_at timestamptz default now(),add column updated_by text;
                 alter table plm_partner_event add column request_id text,add column created_by text,add column actor_id bigint;
                 create temp table plm_partner_revision(record_id bigint,revision bigint,data jsonb,created_by text);
                 create temp table plm_partner_selection_row_revision(record_id bigint,row_id uuid,row_version bigint,request_id text,data jsonb,created_by text);
                 create temp table plm_partner_quote_line_revision(record_id bigint,line_id uuid,row_version bigint,request_id text,data jsonb,created_by text);
+                create temp table plm_attachment(attachment_id bigint,deleted_flag int default 0,file_name text,version_no text,content_type text,file_size bigint);
+                create temp table plm_partner_file(record_id bigint,attachment_id bigint,purpose text default 'photo');
+                create temp table plm_partner_file_job_row(job_id bigint,row_id uuid);
+                create temp table plm_partner_file_job(job_id bigint,record_id bigint,source_attachment_id bigint,kind text,status text);
+                insert into plm_attachment values(88,0,'现用产品图.png','V1','image/png',100);insert into plm_partner_file(record_id,attachment_id) values(10,88),(20,88);
                 """);
             when(scopedAccess.actor()).thenReturn(new CurrentUser(21L,"qa-rename","QA名称维护",false));when(scopedAccess.actorId()).thenReturn(21L);
+            when(scopedAccess.canMaintainEngineeringData()).thenReturn(true);when(scopedAccess.hasPermission(anyString())).thenReturn(true);
             renameAudit=mock(OperationLogService.class);store=new PartnerStore(jdbc,new ObjectMapper(),scopedAccess,renameAudit);
             when(suppliers.requireSupplier(anyString())).thenAnswer(call->Map.of("supplierCode",call.getArgument(0),"supplierName","QA供方"));
+            selections=new PartnerSelectionService(store,permissions,suppliers,mock(PartnerProductService.class),materials);
             catalog=new PartnerCatalogService(store,permissions,suppliers,selections,materials,phones,operations);
         }
 
@@ -259,23 +266,53 @@ class PartnerCatalogServiceTest {
                 String rid=jdbc.queryForObject("select "+column+"::text from "+table+" where record_id=? limit 1",String.class,id);
                 var original=values("name","凡影大孔手机壳","supplierCode",supplier,"unitPrice","3.80","currency","","refs",List.of(Map.of("id",88)),"phoneModelIds",List.of(1218),"confirmationSnapshot",Map.of("row",Map.of("name","凡影大孔手机壳")));
                 jdbc.update("update "+table+" set data=?::jsonb where record_id=? and "+column+"=?::uuid",encode(store.json,original),id,rid);
-                var result=catalog.renameStyle(kind,id,rid,supplier,values("name","凡影精孔手机壳","rowVersion",1,"recordVersion",1,"requestId","rename-"+kind));
-                var after=decode(store.json,jdbc.queryForObject("select data::text from "+table+" where record_id=? and "+column+"=?::uuid",String.class,id,rid));assertEquals("凡影精孔手机壳",after.remove("name"));var expected=new LinkedHashMap<>(original);expected.remove("name");assertEquals(expected,after);
+                var result=catalog.updateStyle(kind,id,rid,supplier,values("name","凡影精孔手机壳","rowVersion",1,"recordVersion",1,"requestId","rename-"+kind));
+                var after=decode(store.json,jdbc.queryForObject("select data::text from "+table+" where record_id=? and "+column+"=?::uuid",String.class,id,rid));assertEquals(Map.of("name","凡影精孔手机壳"),after.remove("catalogCurrent"));assertEquals(original,after);
                 assertEquals(2L,result.get("rowVersion"));assertEquals(2L,result.get("recordVersion"));assertEquals(2L,jdbc.queryForObject("select version from plm_partner_record where record_id=?",Long.class,id));
                 assertEquals(1L,jdbc.queryForObject("select count(*) from "+(kind.equals("quote")?"plm_partner_quote_line_revision":"plm_partner_selection_row_revision")+" where record_id=?",Long.class,id));
-                assertThrows(BusinessException.class,()->catalog.renameStyle(kind,id,rid,supplier,values("name","过期覆盖","rowVersion",1,"recordVersion",1,"requestId","stale-"+kind)));
+                assertThrows(BusinessException.class,()->catalog.updateStyle(kind,id,rid,supplier,values("name","过期覆盖","rowVersion",1,"recordVersion",1,"requestId","stale-"+kind)));
             }
-            assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_catalog_style",Long.class));assertEquals(2L,jdbc.queryForObject("select count(*) from plm_partner_event where action='catalog_style_rename' and actor_id=21",Long.class));var actor=scopedAccess.actor();verify(renameAudit,times(2)).logRequired(any(),eq(actor));
+            assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_catalog_style",Long.class));assertEquals(2L,jdbc.queryForObject("select count(*) from plm_partner_event where action='catalog_style_update' and actor_id=21",Long.class));var actor=scopedAccess.actor();verify(renameAudit,times(2)).logRequired(any(),eq(actor));
         }
 
         @Test void renameRejectsOtherFieldsAndUnauthorizedWritesAndRollsBackWhenRequiredAuditFails(){
             renameFixture();String rid=jdbc.queryForObject("select row_id::text from plm_partner_selection_row where record_id=20",String.class);var input=values("name","凡影精孔手机壳","rowVersion",1,"recordVersion",1,"requestId","rename-audit");
-            var invalid=new LinkedHashMap<>(input);invalid.put("unitPrice","0");assertThrows(BusinessException.class,()->catalog.renameStyle("selection",20,rid,"SELECTION",invalid));
-            doThrow(new BusinessException(40103,"无工程维护权限")).when(permissions).engineer();assertThrows(BusinessException.class,()->catalog.renameStyle("selection",20,rid,"SELECTION",input));doNothing().when(permissions).engineer();
+            var invalid=new LinkedHashMap<>(input);invalid.put("supplierCode","OTHER");assertThrows(BusinessException.class,()->catalog.updateStyle("selection",20,rid,"SELECTION",invalid));
+            doThrow(new BusinessException(40103,"无工程维护权限")).when(permissions).engineer();assertThrows(BusinessException.class,()->catalog.updateStyle("selection",20,rid,"SELECTION",input));doNothing().when(permissions).engineer();
             String before=jdbc.queryForObject("select data::text from plm_partner_selection_row where row_id=?::uuid",String.class,rid);doThrow(new IllegalStateException("QA审计不可用")).when(renameAudit).logRequired(any(),any());
             var nested=new TransactionTemplate(transactions);nested.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_NESTED);
-            assertThrows(IllegalStateException.class,()->nested.execute(status->catalog.renameStyle("selection",20,rid,"SELECTION",input)));
-            assertEquals(before,jdbc.queryForObject("select data::text from plm_partner_selection_row where row_id=?::uuid",String.class,rid));assertEquals(1L,jdbc.queryForObject("select version from plm_partner_record where record_id=20",Long.class));assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_selection_row_revision",Long.class));assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_event where action='catalog_style_rename'",Long.class));
+            assertThrows(IllegalStateException.class,()->nested.execute(status->catalog.updateStyle("selection",20,rid,"SELECTION",input)));
+            assertEquals(before,jdbc.queryForObject("select data::text from plm_partner_selection_row where row_id=?::uuid",String.class,rid));assertEquals(1L,jdbc.queryForObject("select version from plm_partner_record where record_id=20",Long.class));assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_selection_row_revision",Long.class));assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_event where action='catalog_style_update'",Long.class));
+        }
+        @Test void catalogFieldsRefreshDraftsButKeepConfirmedPriceReceiptBasisAndStableIdentities(){
+            renameFixture();String rid=jdbc.queryForObject("select row_id::text from plm_partner_selection_row where record_id=20",String.class);
+            var frozen=Map.of("name","原名称","unitPrice","3.80","color","黑色");var original=values("name","原名称","supplierCode","SELECTION","unitPrice","3.80","currency","CNY","color","黑色","material","TPU","confirmed",true,"confirmationSnapshot",Map.of("row",frozen));
+            jdbc.update("update plm_partner_selection_row set data=?::jsonb where record_id=20",encode(store.json,original));
+            jdbc.update("insert into plm_partner_record(record_id,kind,code,name,version,data) values(100,'selection','SL-DRAFT','工程选品',1,'{\"purpose\":\"my_selection\"}')");
+            var linked=values("name","原名称","supplierCode","SELECTION","unitPrice","3.80","currency","CNY","color","黑色","material","TPU","catalogStyleId",23L,"catalogSourceSnapshot",Map.of("sourceKind","selection","recordId",20L,"rowId",rid));
+            String draft=UUID.randomUUID().toString(),confirmed=UUID.randomUUID().toString();
+            jdbc.update("insert into plm_partner_selection_row(record_id,row_id,row_version,sort_order,data,confirmed) values(100,?::uuid,1,1,?::jsonb,false),(100,?::uuid,1,2,?::jsonb,true)",draft,encode(store.json,linked),confirmed,encode(store.json,linked));
+            var result=catalog.updateStyle("selection",20,rid,"SELECTION",values("rowVersion",1,"recordVersion",1,"requestId","full-edit","changes",Map.of("name","凡盾大孔手机壳","color","蓝色","material","PC","unitPrice","0","currency","MXN")));
+            var saved=decode(store.json,jdbc.queryForObject("select data::text from plm_partner_selection_row where record_id=20",String.class));
+            var catalogCurrent=PartnerCatalogStyles.currentData(saved);assertEquals("0.00",catalogCurrent.get("unitPrice"));assertEquals("MXN",catalogCurrent.get("currency"));assertEquals("explicit",catalogCurrent.get("currencySource"));assertEquals(Map.of("row",frozen),saved.get("confirmationSnapshot"));assertEquals(true,saved.get("confirmed"));assertEquals("3.80",saved.get("unitPrice"));assertEquals("CNY",saved.get("currency"));assertEquals("TPU",saved.get("material"));
+            var displayed=maps(catalog.styles(Map.of("supplierCode","SELECTION")).get("content")).get(0);assertEquals("凡盾大孔手机壳",displayed.get("name"));assertEquals("0.00",displayed.get("unitPrice"));assertEquals("MXN",displayed.get("currency"));assertEquals("PC",catalog.detail("selection",20,rid,"SELECTION").get("material"));
+            jdbc.update("insert into plm_partner_catalog_style values(23,'CP-000023','SELECTION')");jdbc.update("insert into plm_partner_catalog_style_source values('selection',20,?::uuid,23,'{}')",rid);
+            var sample=new LinkedHashMap<String,Object>(Map.of("catalogStyleId",23L,"sampleCode","SY-UNCHANGED","name","原名称","colorName","实收黑色"));new PartnerCatalogStyles(store).projectCurrent(List.of(sample));assertEquals("凡盾大孔手机壳",sample.get("name"));assertEquals("实收黑色",sample.get("colorName"));assertEquals("0.00",map(sample.get("currentCatalog")).get("unitPrice"));
+            when(scopedAccess.canMaintainEngineeringData()).thenReturn(false);when(scopedAccess.hasPermission("finance:read")).thenReturn(false);new PartnerCatalogStyles(store).projectCurrent(List.of(sample));assertFalse(map(sample.get("currentCatalog")).containsKey("unitPrice"));when(scopedAccess.canMaintainEngineeringData()).thenReturn(true);
+            var current=new PartnerSelectionRows(store).find(100,draft,false);assertEquals("凡盾大孔手机壳",current.get("name"));assertEquals("PC",current.get("material"));assertEquals("蓝色",current.get("color"));assertEquals("0.00",current.get("unitPrice"));assertEquals(2L,current.get("rowVersion"));assertEquals(signature(store.json,linked.get("catalogSourceSnapshot")),signature(store.json,current.get("catalogSourceSnapshot")));
+            var historical=new PartnerSelectionRows(store).find(100,confirmed,false);assertEquals("原名称",historical.get("name"));assertEquals("3.80",historical.get("unitPrice"));assertEquals(1L,historical.get("rowVersion"));assertEquals(2L,result.get("recordVersion"));
+            assertThrows(BusinessException.class,()->catalog.updateStyle("selection",20,rid,"SELECTION",values("rowVersion",2,"recordVersion",2,"requestId","bad-price","changes",Map.of("unitPrice","-1"))));
+            catalog.updateStyle("selection",20,rid,"SELECTION",values("rowVersion",2,"recordVersion",2,"requestId","unknown-price","changes",Map.of("unitPrice","")));
+            assertEquals("",new PartnerSelectionRows(store).find(100,draft,false).get("unitPrice"));
+        }
+        @Test void removalAndRestoreUseExistingVersionedRowWithoutDeletingDownstreamOrAllocatingAnotherCp(){
+            renameFixture();String rid=jdbc.queryForObject("select row_id::text from plm_partner_selection_row where record_id=20",String.class);jdbc.update("update plm_partner_selection_row set data=data||'{\"name\":\"可恢复产品\"}'::jsonb where record_id=20");
+            catalog.updateStyle("selection",20,rid,"SELECTION",values("rowVersion",1,"recordVersion",1,"requestId","remove","changes",Map.of("discarded",true)));
+            assertEquals(0L,catalog.styles(Map.of("supplierCode","SELECTION")).get("totalElements"));assertEquals(1L,catalog.styles(Map.of("supplierCode","SELECTION","deleted","true")).get("totalElements"));
+            assertThrows(BusinessException.class,()->catalog.detail("selection",20,rid,"SELECTION"));assertEquals(true,catalog.detail("selection",20,rid,"SELECTION",true).get("discarded"));
+            catalog.updateStyle("selection",20,rid,"SELECTION",values("rowVersion",2,"recordVersion",2,"requestId","restore","changes",Map.of("discarded",false)));
+            assertEquals(1L,catalog.styles(Map.of("supplierCode","SELECTION")).get("totalElements"));assertEquals(0L,catalog.styles(Map.of("supplierCode","SELECTION","deleted","true")).get("totalElements"));assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_catalog_style",Long.class));
+            assertEquals(1L,catalog.styles(Map.of("supplierCode","SELECTION","sourceRecordId","20","sourceKind","selection","size","1","page","3")).get("totalElements"));assertEquals(0L,catalog.styles(Map.of("supplierCode","SELECTION","sourceRecordId","10","sourceKind","quote")).get("totalElements"));
         }
 
         @Test void nonemptySuppliersAreFilteredBeforePaginationAndBothSourceKindsCountWithoutCopies() {

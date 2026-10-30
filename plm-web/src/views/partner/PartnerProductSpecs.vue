@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, ref, watch } from 'vue'
 import { usePagination } from '@/composables/usePagination'
 import type { BusinessData } from '@/types/partner'
@@ -33,37 +35,37 @@ watch(() => filtered.value.length, total => {
 </script>
 
 <template>
-  <section class="product-specs" aria-label="产品规格与供货来源">
+  <section class="product-specs" :aria-label='uiText("产品规格与供货来源")'>
     <header class="spec-toolbar">
-      <div><h2>规格与供货</h2><span class="secondary">共 {{ specs.length }} 个规格<template v-if="keyword.trim()"> · 匹配 {{ filtered.length }} 个</template></span></div>
-      <el-input v-model="keyword" clearable placeholder="搜索型号、SKU、编码或供方" aria-label="搜索产品规格" />
+      <div><h2>{{ uiText("规格与供货") }}</h2><span class="secondary">{{ uiText("共 ") }}{{ specs.length }}{{ uiText(" 个规格") }}<template v-if="keyword.trim()">{{ uiText(" · 匹配 ") }}{{ filtered.length }}{{ uiText(" 个") }}</template></span></div>
+      <el-input v-model="keyword" clearable :placeholder='uiText("搜索型号、SKU、编码或供方")' :aria-label='uiText("搜索产品规格")' />
     </header>
-    <div class="spec-scroll" tabindex="0" aria-label="当前页规格列表" :class="{ 'has-actions': showActions }">
-      <div class="spec-head" aria-hidden="true"><span>型号 / 规格</span><span>规格编号 / 网站 SKU</span><span>供货来源</span><span v-if="showActions">办理</span></div>
+    <div class="spec-scroll" tabindex="0" :aria-label='uiText("当前页规格列表")' :class="{ 'has-actions': showActions }">
+      <div class="spec-head" aria-hidden="true"><span>{{ uiText("型号 / 规格") }}</span><span>{{ uiText("规格编号 / 网站 SKU") }}</span><span>{{ uiText("供货来源") }}</span><span v-if="showActions">{{ uiText("办理") }}</span></div>
       <article v-for="spec in rows" :key="spec.id" class="spec-row" :data-spec-id="spec.id">
-        <div><span class="cell-label">型号 / 规格</span><strong>{{ spec.name || spec.specification || '规格待补' }}</strong></div>
-        <div class="spec-codes"><span><span class="cell-label">编号：</span>{{ spec.code || '规格编号未记录' }}</span><small>网站 SKU：{{ spec.websiteSku || '待补' }}</small></div>
+        <div><span class="cell-label">{{ uiText("型号 / 规格") }}</span><strong>{{ spec.name || spec.specification || uiText('规格待补') }}</strong></div>
+        <div class="spec-codes"><span><span class="cell-label">{{ uiText("编号：") }}</span>{{ spec.code || uiText('规格编号未记录') }}</span><small>{{ uiText("网站 SKU：") }}{{ spec.websiteSku || uiText('待补') }}</small></div>
         <div class="spec-sources">
-          <span class="cell-label">供方：</span>
+          <span class="cell-label">{{ uiText("供方：") }}</span>
           <div v-for="(source, index) in spec.sources || []" :key="source.supplierCode || index" class="spec-source">
             <el-button v-if="source.supplierCode" link type="primary" @click="emit('supplier', source.supplierCode)">{{ source.supplierName || source.supplierCode }}</el-button>
-            <span v-else>{{ source.supplierName || '供方待补' }}</span>
-            <small>货号：{{ source.supplierItemCode || '待补' }}</small>
-            <small v-if="canReadMoney">参考：{{ formatMoney(source.priceCents, source.currency) }}</small>
+            <span v-else>{{ source.supplierName || uiText('供方待补') }}</span>
+            <small>{{ uiText("货号：") }}{{ source.supplierItemCode || uiText('待补') }}</small>
+            <small v-if="canReadMoney">{{ uiText("参考：") }}{{ formatMoney(source.priceCents, source.currency) }}</small>
           </div>
-          <span v-if="!spec.sources?.length" class="secondary">待补供应商</span>
+          <span v-if="!spec.sources?.length" class="secondary">{{ uiText("待补供应商") }}</span>
         </div>
         <div v-if="showActions" class="spec-actions">
-          <template v-if="spec.sources?.length"><el-button size="small" @click="emit('sample', spec)">登记收样</el-button><el-button size="small" @click="emit('quote', spec)">供方询报价</el-button></template>
-          <el-button link type="danger" :disabled="Boolean(deleting)" @click="emit('delete', spec)">删除规格</el-button>
+          <template v-if="spec.sources?.length"><el-button size="small" @click="emit('sample', spec)">{{ uiText("登记收样") }}</el-button><el-button size="small" @click="emit('quote', spec)">{{ uiText("供方询报价") }}</el-button></template>
+          <el-button link type="danger" :disabled="Boolean(deleting)" @click="emit('delete', spec)">{{ uiText("删除规格") }}</el-button>
         </div>
       </article>
-      <el-empty v-if="!filtered.length" :description="specs.length ? '没有匹配的规格，请更换关键词' : '可先保存名称，需要时再补规格与供方'"><el-button v-if="keyword" @click="keyword = ''">清除搜索</el-button></el-empty>
+      <el-empty v-if="!filtered.length" :description="specs.length ? uiText('没有匹配的规格，请更换关键词') : uiText('可先保存名称，需要时再补规格与供方')"><el-button v-if="keyword" @click="keyword = ''">{{ uiText("清除搜索") }}</el-button></el-empty>
     </div>
     <footer class="spec-pager">
-      <span class="secondary" aria-live="polite">{{ filtered.length ? `${offset + 1}–${Math.min(offset + pageSize, filtered.length)}` : '0' }} / {{ filtered.length }} 个规格 · 第 {{ currentPage }} / {{ Math.max(1, Math.ceil(filtered.length / pageSize)) }} 页</span>
+      <span class="secondary" aria-live="polite">{{ filtered.length ? `${offset + 1}–${Math.min(offset + pageSize, filtered.length)}` : '0' }} / {{ filtered.length }}{{ uiText(" 个规格 · 第 ") }}{{ currentPage }} / {{ Math.max(1, Math.ceil(filtered.length / pageSize)) }}{{ uiText(" 页") }}</span>
       <div class="pager-controls">
-        <el-select v-model="pageSize" aria-label="每页规格数"><el-option :value="20" label="20 条 / 页"/><el-option :value="50" label="50 条 / 页"/></el-select>
+        <el-select v-model="pageSize" :aria-label='uiText("每页规格数")'><el-option :value="20" :label='uiText("20 条 / 页")'/><el-option :value="50" :label='uiText("50 条 / 页")'/></el-select>
         <el-pagination v-model:current-page="currentPage" :page-size="pageSize" :total="filtered.length" :pager-count="5" layout="prev, pager, next" />
       </div>
     </footer>

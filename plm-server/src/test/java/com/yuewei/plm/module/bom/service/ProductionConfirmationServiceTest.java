@@ -54,6 +54,69 @@ class ProductionConfirmationServiceTest {
     private CodeItemService codeItemService;
     private ProductionConfirmationService service;
 
+    @Test
+    void researchCodingCreatesOnlyAnIdentityDraftWithTheExplicitOperationAndOriginalPhone() {
+        Product variant = product(20L, "model_variant", 5);
+        variant.setProductSpecificCode("FA"); variant.setPhoneModelMemberId(91L); variant.setPhoneModelCode("0012");
+        CodeItem color = colorCode(2L, "02", "黑色");
+        color.setCodeNameZh("Negro");
+        var result = service.researchSkuDraft(variant, color, "4020", "engineer");
+        assertThat(result.created()).isTrue();
+        Product draft = result.product();
+        assertThat(draft.getProductCode()).isEqualTo("PRD-20-02");
+        assertThat(draft.getFinishedProductCode()).isEqualTo("NFA4020001202");
+        assertThat(draft.getColor()).isEqualTo("黑色");
+        assertThat(draft.getPhoneModelMemberId()).isEqualTo(91L);
+        assertThat(draft.getParentProductId()).isEqualTo(20L);
+        assertThat(draft.getStatus()).isEqualTo("draft");
+        assertThat(draft.getReleasedAt()).isNull(); assertThat(draft.getReleasedBy()).isNull();
+        assertThat(draft.getCurrentStepNo()).isNull(); assertThat(draft.getDevelopmentMode()).isNull();
+        verify(productRepository).insert(draft);
+        org.mockito.Mockito.verifyNoInteractions(colorRepository, operationRepository, routeRepository, bomRepository);
+    }
+
+    @Test
+    void researchCodingReusesTheOriginalMatchingSkuAndKeepsADifferentHistoricalCodeUntouched() {
+        Product variant = product(20L, "model_variant", 5);
+        variant.setProductSpecificCode("FA"); variant.setPhoneModelMemberId(91L); variant.setPhoneModelCode("0012");
+        CodeItem color = colorCode(2L, "02", "黑色");
+        Product old = product(21L, "sku", 5);
+        old.setProductSpecificCode("FA"); old.setPhoneModelMemberId(91L); old.setPhoneModelCode("0012");
+        old.setColorCode("02"); old.setFinishedProductCode("NFA4020001202");
+        when(productRepository.selectList(any(Wrapper.class))).thenReturn(List.of(old));
+        var result = service.researchSkuDraft(variant, color, "4020", "engineer");
+        assertThat(result.created()).isFalse();
+        assertThat(result.product()).isSameAs(old);
+        assertThat(service.researchSkuDraft(variant, color, "4030", "engineer")).isNull();
+        assertThat(old.getFinishedProductCode()).isEqualTo("NFA4020001202");
+        verify(productRepository, never()).insert(any(Product.class));
+        verify(productRepository, never()).updateById(any(Product.class));
+    }
+
+    @Test
+    void productionSyncRetainsTheResearchDraftOperationAndRejectsAConflictingExplicitFinalCode() {
+        Product variant = product(20L, "model_variant", 5);
+        variant.setProductSpecificCode("FA"); variant.setPhoneModelMemberId(91L); variant.setPhoneModelCode("0012");
+        var stored = new ArrayList<Product>();
+        when(productRepository.selectList(any(Wrapper.class))).thenAnswer(call -> new ArrayList<>(stored));
+        when(productRepository.insert(any(Product.class))).thenAnswer(call -> {
+            Product value = call.getArgument(0); value.setProductId(900L); stored.add(value); return 1;
+        });
+        Product draft = service.researchSkuDraft(variant, colorCode(2L, "02", "黑色"), "4020", "engineer").product();
+        var decision = new ProductProductionColorDecision();
+        decision.setColorCode("02"); decision.setColorName("黑色"); decision.setCreatedSkuProductId(900L);
+        when(colorRepository.selectList(any(Wrapper.class))).thenReturn(List.of(decision));
+        assertThat(service.syncModelVariantConfirmedColorsAndSkus(variant)).isZero();
+        assertThat(draft.getFinishedProductCode()).isEqualTo("NFA4020001202");
+        variant.setParentProductId(10L);
+        Product parent = product(10L, "product_line", 5); parent.setProductCode("NFA4030");
+        when(productRepository.selectById(10L)).thenReturn(parent);
+        assertThatThrownBy(() -> service.syncModelVariantConfirmedColorsAndSkus(variant))
+            .hasMessageContaining("NFA4020001202").hasMessageContaining("NFA4030001202").hasMessageContaining("原码保留");
+        assertThat(draft.getFinishedProductCode()).isEqualTo("NFA4020001202");
+        verify(productRepository, times(1)).insert(any(Product.class));
+    }
+
     @BeforeEach
     void setUp() {
         productRepository = mock(ProductRepository.class);

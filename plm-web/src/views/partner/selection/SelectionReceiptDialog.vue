@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import {computed,onBeforeUnmount,reactive,ref,watch} from 'vue'
 import {ElMessage} from 'element-plus'
 import {useRouter} from 'vue-router'
@@ -34,28 +36,28 @@ const scopeKey=(line:SelectionReceiptInputRow)=>JSON.stringify([line.rowId,line.
 function applyBulk(){
  if(bulkDisabled.value||String(user.profile?.userId||'')!==actor)return
  const targets=selectedBulkLines.value,specs=bulkSpecs.value.map(spec=>({...spec,colorName:spec.colorName.trim()})).filter(spec=>spec.colorName||spec.qty!=null)
- if(!targets.length){ElMessage.warning('请先勾选要填写的收样规格');return}
- if(!specs.length){ElMessage.warning('请填写颜色或每条数量');return}
- if(specs.some(spec=>spec.qty!=null&&(!Number.isSafeInteger(spec.qty)||Number(spec.qty)<=0))){ElMessage.warning('每条数量请填写大于0的整数');return}
- if(specs.some(spec=>spec.colorName.length>255||/[\u0000-\u001f\u007f-\u009f]/.test(spec.colorName))){ElMessage.warning('请填写有效颜色名称，最多255个字');return}
+ if(!targets.length){ElMessage.warning(uiText('请先勾选要填写的收样规格'));return}
+ if(!specs.length){ElMessage.warning(uiText('请填写颜色或每条数量'));return}
+ if(specs.some(spec=>spec.qty!=null&&(!Number.isSafeInteger(spec.qty)||Number(spec.qty)<=0))){ElMessage.warning(uiText('每条数量请填写大于0的整数'));return}
+ if(specs.some(spec=>spec.colorName.length>255||/[\u0000-\u001f\u007f-\u009f]/.test(spec.colorName))){ElMessage.warning(uiText('请填写有效颜色名称，最多255个字'));return}
  if(specs.length===1){
   const spec=specs[0]!
   for(const line of targets){if(spec.colorName){if(spec.colorName===colorValue(line).trim())line.colorName=spec.colorName;else colorInput(line,spec.colorName)}if(spec.qty!=null)line.qty=spec.qty}
-  ElMessage.success(`已应用到${targets.length}条收样规格`);return
+  ElMessage.success(uiText('已应用到{value0}条收样规格',{value0:(targets.length)}));return
  }
- if(specs.some(spec=>!spec.colorName)){ElMessage.warning('多种颜色请逐行填写颜色名称');return}
- if(new Set(specs.map(spec=>colorKey(spec.colorName))).size!==specs.length){ElMessage.warning('批量颜色重复，请合并为一行');return}
+ if(specs.some(spec=>!spec.colorName)){ElMessage.warning(uiText('多种颜色请逐行填写颜色名称'));return}
+ if(new Set(specs.map(spec=>colorKey(spec.colorName))).size!==specs.length){ElMessage.warning(uiText('批量颜色重复，请合并为一行'));return}
  const groups=new Map<string,SelectionReceiptInputRow[]>()
  for(const line of targets){const key=scopeKey(line);if(!groups.has(key))groups.set(key,[]);groups.get(key)!.push(line)}
  const plan:{line?:SelectionReceiptInputRow;anchor:SelectionReceiptInputRow;spec:BulkSpec;matched:boolean}[]=[]
  for(const [key,selected] of groups){
   const anchor=selected[0]!
-  if(!anchor.phoneModelId){ElMessage.warning('请先选择勾选款式的实收型号');return}
+  if(!anchor.phoneModelId){ElMessage.warning(uiText('请先选择勾选款式的实收型号'));return}
   const scoped=lines.value.filter(line=>scopeKey(line)===key),reserved=new Set<string>(),missing:BulkSpec[]=[]
   for(const spec of specs){
    const matches=scoped.filter(line=>colorKey(colorValue(line))===colorKey(spec.colorName))
-   if(matches.some(line=>!checkedLines.value.has(line.clientRowId))){ElMessage.warning('该款已有未勾选的同色规格，请勾选后应用');return}
-   if(matches.length>1){ElMessage.warning('该款有多条同名颜色规格，请先逐条核对');return}
+   if(matches.some(line=>!checkedLines.value.has(line.clientRowId))){ElMessage.warning(uiText('该款已有未勾选的同色规格，请勾选后应用'));return}
+   if(matches.length>1){ElMessage.warning(uiText('该款有多条同名颜色规格，请先逐条核对'));return}
    const match=matches[0]
    if(match){reserved.add(match.clientRowId);plan.push({line:match,anchor,spec,matched:true})}else missing.push(spec)
   }
@@ -71,7 +73,7 @@ function applyBulk(){
   if(item.matched)line.colorName=item.spec.colorName;else colorInput(line,item.spec.colorName)
   if(item.spec.qty!=null)line.qty=item.spec.qty
  }
- ElMessage.success(`已应用到${groups.size}款型号，共${plan.length}条收样规格`)
+ ElMessage.success(uiText('已应用到{value0}款型号，共{value1}条收样规格',{value0:(groups.size),value1:(plan.length)}))
 }
 const identityOptions=ref(new Map<string,SampleIdentity[]>()),exactIdentityIds=ref(new Map<string,Set<number>>()),identityLoading=ref(new Set<string>()),identityReview=ref(new Map<string,string>()),printOpen=ref(false)
 const printLabels=computed<SampleLabel[]>(()=>[...new Map((result.value?.batches||[]).filter(b=>b.sampleIdentityId&&b.sampleCode).map(b=>[b.sampleIdentityId,{sampleIdentityId:b.sampleIdentityId!,sampleCode:b.sampleCode!,name:b.name,supplierName:b.supplierName,phoneName:b.phoneName,colorName:b.colorName}])).values()])
@@ -121,56 +123,56 @@ function persistPending(input:SelectionReceiptInput){pendingPayload=input;try{se
 function isUnknown(e:unknown){const failure=e as {code?:string;response?:{status?:number}};return ['ECONNABORTED','ETIMEDOUT','ERR_NETWORK'].includes(failure?.code||'')||Number(failure?.response?.status)>=500}
 async function save(){if(actorChanged.value||String(user.profile?.userId||'')!==actor){error.value='登录账号已改变，请重新进入收样。';return}if(busy.value||loading.value||!lines.value.length)return;setBusy(true);error.value='';if(lines.value.some(line=>needsIdentityReason(line)&&!line.identityReason?.trim())){error.value='选择其他来源的已有样品码时，请填写同物核对原因';setBusy(false);return}const input=pendingPayload||payload();try{if(!unknown.value){const checked=await previewSelectionReceipts(props.id,input);if(actorChanged.value)return;acceptOptions(checked);showIssues.value=true;if(!checked.canSave)return}persistPending(input);const saved=await saveSelectionReceipts(props.id,input);if(actorChanged.value){clearPending();return}unknown.value=false;clearPending();result.value=saved;phase.value='saved';emit('saved',saved)}catch(e){if(actorChanged.value)return;unknown.value=!!pendingPayload&&isUnknown(e);if(unknown.value)error.value='保存结果待核对。请保持本次资料，点击“核对本次保存结果”，不会另建一笔收样。';else{pendingPayload=undefined;clearPending();error.value=partnerError(e)}}finally{setBusy(false)}}
 
-function close(){if(actorChanged.value){emit('close');return}if(busy.value)return;if(unknown.value){ElMessage.warning('请先核对本次保存结果，避免重复登记。');return}emit('close')}
+function close(){if(actorChanged.value){emit('close');return}if(busy.value)return;if(unknown.value){ElMessage.warning(uiText('请先核对本次保存结果，避免重复登记。'));return}emit('close')}
 function viewBatch(id:number){void router.push({path:'/samples',query:{id,from:props.from}});emit('close')}
 onBeforeUnmount(()=>{sequence++;emit('busy',false)})
 </script>
 
 <template>
- <el-dialog :model-value="true" title="登记实际收样" class="selection-receipt-dialog" top="20px" width="min(1120px,96vw)" append-to-body :close-on-click-modal="false" :close-on-press-escape="!busy&&!unknown" :before-close="close">
+ <el-dialog :model-value="true" :title='uiText("登记实际收样")' class="selection-receipt-dialog" top="20px" width="min(1120px,96vw)" append-to-body :close-on-click-modal="false" :close-on-press-escape="!busy&&!unknown" :before-close="close">
   <el-alert v-if="actorChanged" :title="error" type="error" :closable="false"/>
   <section v-show="!actorChanged&&phase!=='saved'" class="receipt-form">
-   <p class="receipt-intro">只登记实际收到的样品。日期、位置和保管人填写一次；各款填写实收型号、颜色和数量。</p>
+   <p class="receipt-intro">{{ uiText("只登记实际收到的样品。日期、位置和保管人填写一次；各款填写实收型号、颜色和数量。") }}</p>
    <el-alert v-if="error" :title="error" type="error" :closable="false"/>
    <el-form label-position="top" class="receipt-common" :disabled="busy||loading||unknown">
-    <el-form-item label="实际入库日期 *"><el-date-picker v-model="shared.date" type="date" value-format="YYYY-MM-DD" placeholder="选择实际日期" aria-label="实际入库日期"/></el-form-item>
-    <el-form-item label="存放位置 *"><el-input v-model="shared.location" placeholder="实际存放在哪里" aria-label="存放位置"/></el-form-item>
-    <el-form-item label="保管人 *"><el-input v-model="shared.ownerName" placeholder="实际保管人" aria-label="保管人"/></el-form-item>
+    <el-form-item :label='uiText("实际入库日期 *")'><el-date-picker v-model="shared.date" type="date" value-format="YYYY-MM-DD" :placeholder='uiText("选择实际日期")' :aria-label='uiText("实际入库日期")'/></el-form-item>
+    <el-form-item :label='uiText("存放位置 *")'><el-input v-model="shared.location" :placeholder='uiText("实际存放在哪里")' :aria-label='uiText("存放位置")'/></el-form-item>
+    <el-form-item :label='uiText("保管人 *")'><el-input v-model="shared.ownerName" :placeholder='uiText("实际保管人")' :aria-label='uiText("保管人")'/></el-form-item>
    </el-form>
    <div v-if="showIssues&&preview?.messages?.length" class="receipt-errors" role="alert"><p v-for="message in preview.messages" :key="message">{{message}}</p></div>
    <div v-if="showBulk" class="receipt-bulk">
-    <div class="receipt-bulk-scope"><el-checkbox :model-value="allBulkChecked" :indeterminate="someBulkChecked" :disabled="bulkDisabled" aria-label="全选本次收样规格" @change="checkAllBulk(Boolean($event))">全选</el-checkbox><span>已勾选 {{selectedBulkLines.length}} 条</span></div>
+    <div class="receipt-bulk-scope"><el-checkbox :model-value="allBulkChecked" :indeterminate="someBulkChecked" :disabled="bulkDisabled" :aria-label='uiText("全选本次收样规格")' @change="checkAllBulk(Boolean($event))">{{ uiText("全选") }}</el-checkbox><span>{{ uiText("已勾选 ") }}{{selectedBulkLines.length}}{{ uiText(" 条") }}</span></div>
     <div class="receipt-bulk-specs">
      <div v-for="(spec,index) in bulkSpecs" :key="spec.id" class="receipt-bulk-line">
-      <label class="receipt-bulk-color">颜色<el-input v-model="spec.colorName" size="small" clearable placeholder="如：黑色" :maxlength="255" :aria-label="'批量实收颜色'+(index?index+1:'')" :disabled="bulkDisabled"/></label>
-      <label class="receipt-bulk-qty">每条数量<el-input-number v-model="spec.qty" :key="spec.id+':bulk-qty:'+bulkDisabled" size="small" :min="1" :max="Number.MAX_SAFE_INTEGER" :precision="0" :controls="false" placeholder="选填" :aria-label="'批量实收数量'+(index?index+1:'')" :disabled="bulkDisabled"/></label>
-      <el-button v-if="bulkSpecs.length>1" link type="danger" :aria-label="`移除第${index+1}条批量颜色`" :disabled="bulkDisabled" @click="removeBulkSpec(spec.id)">删除</el-button>
+      <label class="receipt-bulk-color">{{ uiText("颜色") }}<el-input v-model="spec.colorName" size="small" clearable :placeholder='uiText("如：黑色")' :maxlength="255" :aria-label="uiText('批量实收颜色')+(index?index+1:'')" :disabled="bulkDisabled"/></label>
+      <label class="receipt-bulk-qty">{{ uiText("每条数量") }}<el-input-number v-model="spec.qty" :key="spec.id+':bulk-qty:'+bulkDisabled" size="small" :min="1" :max="Number.MAX_SAFE_INTEGER" :precision="0" :controls="false" :placeholder='uiText("选填")' :aria-label="uiText('批量实收数量')+(index?index+1:'')" :disabled="bulkDisabled"/></label>
+      <el-button v-if="bulkSpecs.length>1" link type="danger" :aria-label="uiText('移除第{value0}条批量颜色',{value0:(index+1)})" :disabled="bulkDisabled" @click="removeBulkSpec(spec.id)">{{ uiText("删除") }}</el-button>
      </div>
-     <el-button class="receipt-bulk-add" size="small" link type="primary" :disabled="bulkDisabled" @click="addBulkSpec">增加颜色</el-button>
+     <el-button class="receipt-bulk-add" size="small" link type="primary" :disabled="bulkDisabled" @click="addBulkSpec">{{ uiText("增加颜色") }}</el-button>
     </div>
-    <el-button class="receipt-bulk-apply" size="small" type="primary" :disabled="bulkDisabled||!selectedBulkLines.length||!hasBulkValues" @click="applyBulk">应用到已勾选（{{selectedBulkLines.length}}）</el-button>
+    <el-button class="receipt-bulk-apply" size="small" type="primary" :disabled="bulkDisabled||!selectedBulkLines.length||!hasBulkValues" @click="applyBulk">{{ uiText("应用到已勾选（") }}{{selectedBulkLines.length}}）</el-button>
    </div>
-   <div class="receipt-table" role="table" aria-label="本次实际收样" v-loading="loading">
-    <div class="receipt-head" role="row"><span role="columnheader">图片</span><span role="columnheader">款式</span><span role="columnheader">实收型号</span><span role="columnheader">实收颜色</span><span role="columnheader">实收数量</span><span role="columnheader">操作</span></div>
+   <div class="receipt-table" role="table" :aria-label='uiText("本次实际收样")' v-loading="loading">
+    <div class="receipt-head" role="row"><span role="columnheader">{{ uiText("图片") }}</span><span role="columnheader">{{ uiText("款式") }}</span><span role="columnheader">{{ uiText("实收型号") }}</span><span role="columnheader">{{ uiText("实收颜色") }}</span><span role="columnheader">{{ uiText("实收数量") }}</span><span role="columnheader">{{ uiText("操作") }}</span></div>
     <article v-for="line in lines" :key="line.clientRowId" class="receipt-row" role="row">
-     <div class="receipt-image" role="cell"><PartnerPhoto v-for="file in photos(line).slice(0,1)" :key="file.id" :id="file.id"/><span v-if="!photos(line).length" class="receipt-placeholder">暂无图片</span></div>
-     <div class="receipt-style" role="cell"><span>{{styleLabel(line)}}</span><el-checkbox v-if="showBulk" class="receipt-row-check" :model-value="checkedLines.has(line.clientRowId)" :aria-label="`勾选${styleName(line)}收样规格`" :disabled="bulkDisabled" @change="checkBulkLine(line.clientRowId,Boolean($event))"><strong>{{styleName(line)}}</strong></el-checkbox><strong v-else>{{styleName(line)}}</strong></div>
-     <div class="receipt-model" role="cell"><span class="receipt-label">实收型号</span><strong v-if="info(line)?.phones.length===1" class="receipt-phone-value">{{phoneLabel(line)}}</strong><el-select v-show="info(line)?.phones.length!==1" v-model="line.phoneModelId" filterable placeholder="选择已选型号" :aria-label="`${styleName(line)}实收型号`" :disabled="busy||loading||unknown" @change="phoneChanged(line)"><el-option v-for="phone in info(line)?.phones||[]" :key="phone.phoneModelId" :value="phone.phoneModelId" :label="phone.displayName||phone.modelName"/></el-select></div>
-     <div class="receipt-color" role="cell"><span class="receipt-label">实收颜色</span><el-autocomplete :model-value="colorValue(line)" :fetch-suggestions="colorSuggestions(line)" :debounce="0" clearable fit-input-width :highlight-first-item="false" placeholder="直接填写，如：黑色" :maxlength="255" :aria-label="`${styleName(line)}实收颜色`" :disabled="busy||loading||unknown" @update:model-value="(value:string|number)=>colorInput(line,String(value??''))" @select="(color:Record<string,unknown>)=>selectColor(line,color)"><template #default="{item}"><span class="receipt-color-name">{{item.name}}</span><small v-if="item.description" class="receipt-color-detail">{{item.description}}</small></template></el-autocomplete></div>
-     <div class="receipt-qty" role="cell"><span class="receipt-label">实收数量</span><el-input-number v-model="line.qty" :key="line.clientRowId+':actual:'+(busy||loading||unknown)" :min="1" :max="Number.MAX_SAFE_INTEGER" :precision="0" :controls="false" placeholder="实收" :aria-label="`${styleName(line)}实收数量`" :disabled="busy||loading||unknown"/></div>
-     <div class="receipt-actions" role="cell"><div v-show="phase==='edit'" class="receipt-action-buttons"><el-button link type="primary" :disabled="busy||loading||unknown" @click="addLine(line)">增加规格</el-button><el-button v-if="lines.length>1" link type="danger" :disabled="busy||loading||unknown" @click="removeLine(line)">本次不收</el-button></div></div>
-     <div v-if="line.phoneModelId&&line.colorId" class="receipt-identity"><label>样品码 · 相同物品沿用同一码</label><el-select v-model="line.sampleIdentityId" clearable filterable remote :remote-method="(keyword:string)=>identitiesFor(line,keyword)" :loading="identityLoading.has(line.clientRowId)" :disabled="busy||loading||unknown" placeholder="按真实来源自动复用／保存时新建主码" :aria-label="styleName(line)+'样品码'"><el-option v-for="identity in identityOptions.get(line.clientRowId)||[]" :key="identity.sampleIdentityId" :value="identity.sampleIdentityId" :label="identity.sampleCode+' · '+identity.name+' · '+identity.specName"/></el-select><p v-if="identityReview.get(line.clientRowId)">{{identityReview.get(line.clientRowId)}}</p><el-input v-if="needsIdentityReason(line)" v-model="line.identityReason" :disabled="busy||loading||unknown" placeholder="核对同款、型号、颜色及版本的原因" aria-label="同物核对原因"/></div>
+     <div class="receipt-image" role="cell"><PartnerPhoto v-for="file in photos(line).slice(0,1)" :key="file.id" :id="file.id"/><span v-if="!photos(line).length" class="receipt-placeholder">{{ uiText("暂无图片") }}</span></div>
+     <div class="receipt-style" role="cell"><span>{{styleLabel(line)}}</span><el-checkbox v-if="showBulk" class="receipt-row-check" :model-value="checkedLines.has(line.clientRowId)" :aria-label="uiText('勾选{value0}收样规格',{value0:(styleName(line))})" :disabled="bulkDisabled" @change="checkBulkLine(line.clientRowId,Boolean($event))"><strong>{{styleName(line)}}</strong></el-checkbox><strong v-else>{{styleName(line)}}</strong></div>
+     <div class="receipt-model" role="cell"><span class="receipt-label">{{ uiText("实收型号") }}</span><strong v-if="info(line)?.phones.length===1" class="receipt-phone-value">{{phoneLabel(line)}}</strong><el-select v-show="info(line)?.phones.length!==1" v-model="line.phoneModelId" filterable :placeholder='uiText("选择已选型号")' :aria-label="uiText('{value0}实收型号',{value0:(styleName(line))})" :disabled="busy||loading||unknown" @change="phoneChanged(line)"><el-option v-for="phone in info(line)?.phones||[]" :key="phone.phoneModelId" :value="phone.phoneModelId" :label="phone.displayName||phone.modelName"/></el-select></div>
+     <div class="receipt-color" role="cell"><span class="receipt-label">{{ uiText("实收颜色") }}</span><el-autocomplete :model-value="colorValue(line)" :fetch-suggestions="colorSuggestions(line)" :debounce="0" clearable fit-input-width :highlight-first-item="false" :placeholder='uiText("直接填写，如：黑色")' :maxlength="255" :aria-label="uiText('{value0}实收颜色',{value0:(styleName(line))})" :disabled="busy||loading||unknown" @update:model-value="(value:string|number)=>colorInput(line,String(value??''))" @select="(color:Record<string,unknown>)=>selectColor(line,color)"><template #default="{item}"><span class="receipt-color-name">{{item.name}}</span><small v-if="item.description" class="receipt-color-detail">{{item.description}}</small></template></el-autocomplete></div>
+     <div class="receipt-qty" role="cell"><span class="receipt-label">{{ uiText("实收数量") }}</span><el-input-number v-model="line.qty" :key="line.clientRowId+':actual:'+(busy||loading||unknown)" :min="1" :max="Number.MAX_SAFE_INTEGER" :precision="0" :controls="false" :placeholder='uiText("实收")' :aria-label="uiText('{value0}实收数量',{value0:(styleName(line))})" :disabled="busy||loading||unknown"/></div>
+     <div class="receipt-actions" role="cell"><div v-show="phase==='edit'" class="receipt-action-buttons"><el-button link type="primary" :disabled="busy||loading||unknown" @click="addLine(line)">{{ uiText("增加规格") }}</el-button><el-button v-if="lines.length>1" link type="danger" :disabled="busy||loading||unknown" @click="removeLine(line)">{{ uiText("本次不收") }}</el-button></div></div>
+     <div v-if="line.phoneModelId&&line.colorId" class="receipt-identity"><label>{{ uiText("样品码 · 相同物品沿用同一码") }}</label><el-select v-model="line.sampleIdentityId" clearable filterable remote :remote-method="(keyword:string)=>identitiesFor(line,keyword)" :loading="identityLoading.has(line.clientRowId)" :disabled="busy||loading||unknown" :placeholder='uiText("按真实来源自动复用／保存时新建主码")' :aria-label="styleName(line)+uiText('样品码')"><el-option v-for="identity in identityOptions.get(line.clientRowId)||[]" :key="identity.sampleIdentityId" :value="identity.sampleIdentityId" :label="identity.sampleCode+' · '+identity.name+' · '+identity.specName"/></el-select><p v-if="identityReview.get(line.clientRowId)">{{identityReview.get(line.clientRowId)}}</p><el-input v-if="needsIdentityReason(line)" v-model="line.identityReason" :disabled="busy||loading||unknown" :placeholder='uiText("核对同款、型号、颜色及版本的原因")' :aria-label='uiText("同物核对原因")'/></div>
      <div v-if="showIssues&&info(line)?.messages.length" class="receipt-row-errors" role="alert"><p v-for="message in info(line)?.messages" :key="message">{{message}}</p></div>
     </article>
    </div>
-   <p class="receipt-summary">本次 {{lines.length}} 条实收规格，合计 {{totalQty}} 件。保存后生成各自的真实样品批次号。</p>
+   <p class="receipt-summary">{{ uiText("本次 ") }}{{lines.length}}{{ uiText(" 条实收规格，合计 ") }}{{totalQty}}{{ uiText(" 件。保存后生成各自的真实样品批次号。") }}</p>
   </section>
   <section v-if="phase==='saved'&&!actorChanged" class="receipt-saved">
-   <el-alert title="实际收样已保存" type="success" :closable="false"/>
-   <p class="receipt-intro">已保存实际数量；同物沿用样品码，收样批次留作内部追溯。</p>
-   <el-button v-if="printLabels.length" type="primary" size="small" @click="printOpen=true">打印二维码标签</el-button><div class="receipt-results"><article v-for="batch in result?.batches||[]" :key="batch.id"><strong>{{batch.sampleCode||batch.name}} · {{batch.name}}</strong><span>{{batch.phoneName}} · {{batch.colorName}} · {{batch.qty}} 件</span><el-button v-if="batch.sampleIdentityId" link type="primary" @click="viewIdentity(batch.sampleIdentityId)">查看样品台账</el-button><el-button link @click="viewBatch(batch.id)">内部收样原记录</el-button></article></div>
+   <el-alert :title='uiText("实际收样已保存")' type="success" :closable="false"/>
+   <p class="receipt-intro">{{ uiText("已保存实际数量；同物沿用样品码，收样批次留作内部追溯。") }}</p>
+   <el-button v-if="printLabels.length" type="primary" size="small" @click="printOpen=true">{{ uiText("打印二维码标签") }}</el-button><div class="receipt-results"><article v-for="batch in result?.batches||[]" :key="batch.id"><strong>{{batch.sampleCode||batch.name}} · {{batch.name}}</strong><span>{{batch.phoneName}} · {{batch.colorName}} · {{batch.qty}}{{ uiText(" 件") }}</span><el-button v-if="batch.sampleIdentityId" link type="primary" @click="viewIdentity(batch.sampleIdentityId)">{{ uiText("查看样品台账") }}</el-button><el-button link @click="viewBatch(batch.id)">{{ uiText("内部收样原记录") }}</el-button></article></div>
   </section>
-  <template #footer><div class="receipt-footer"><el-button v-if="actorChanged" @click="close">关闭</el-button><el-button v-if="!actorChanged&&phase==='saved'" type="primary" @click="close">完成</el-button><el-button v-if="!actorChanged&&phase==='edit'" :disabled="busy||unknown" @click="close">取消</el-button><el-button v-if="!actorChanged&&phase==='edit'" type="primary" :loading="busy" :disabled="loading||!lines.length" @click="save">{{unknown?'核对本次保存结果':'保存实际收样'}}</el-button></div></template>
+  <template #footer><div class="receipt-footer"><el-button v-if="actorChanged" @click="close">{{ uiText("关闭") }}</el-button><el-button v-if="!actorChanged&&phase==='saved'" type="primary" @click="close">{{ uiText("完成") }}</el-button><el-button v-if="!actorChanged&&phase==='edit'" :disabled="busy||unknown" @click="close">{{ uiText("取消") }}</el-button><el-button v-if="!actorChanged&&phase==='edit'" type="primary" :loading="busy" :disabled="loading||!lines.length" @click="save">{{unknown?uiText('核对本次保存结果'):uiText('保存实际收样')}}</el-button></div></template>
  </el-dialog>
  <SampleLabelPrint v-model="printOpen" :samples="printLabels"/>
 </template>

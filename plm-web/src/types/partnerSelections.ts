@@ -10,6 +10,7 @@ export interface SelectionSampleBatch { id:number; code:string; label?:string; d
 export interface SupplierQuoteFields { unitPrice?:string|number|null;currency?:string;currencySource?:'explicit'|'business_default'|'historical_unknown';priceUnit?:string;moqQuantity?:string|number|null;moqUnit?:string;moqScope?:string;moqNote?:string }
 export interface SupplierPriceOption extends SupplierQuoteFields { label?:string;priceNote?:string;moq?:string;packaging?:string }
 export interface SelectionRow {
+  currentCatalog?:Record<string,unknown>;recordedName?:string
   rowId:string; rowVersion?:number;canReviseSelection?:boolean;selectionChangeBlockedReason?:string; selected:boolean; name:string; series:string; supplierCode:string; supplierItemCode:string
   material:string; specification:string; color:string; modelText:string; phoneModelIds:number[]
   phoneScopeDeclaration?:'not_provided'|''
@@ -23,7 +24,7 @@ export interface SelectionRow {
   phones?:CompatiblePhone[]; availablePhones?:CompatiblePhone[]; unavailablePhones?:CompatiblePhone[]
   rangeRefs:SupplierRangeReference[]; rangeSnapshots?:SelectionRangeSnapshot[]; pairings:SupplyPair[]
   rangeVersionAcknowledgements?:{id:number;version:number;currentVersion:number}[]
-  selectedPairs:{phoneModelId:number;colorId:number}[]; supplierColorIds?:number[]; styleKey?:string; configKey?:string; quoteVersion?:string
+  selectedPairs:{phoneModelId:number;colorId:number}[]; supplierColorIds?:number[]; supplierColors?:{id:number;name:string;supplierColorCode?:string}[];newSupplierColors?:string[]; styleKey?:string; configKey?:string; quoteVersion?:string
   productCode?:string; sampleBatches?:SelectionSampleBatch[]
   fileDetails?:PartnerFile[];sampleBatchCodes?:string[]
   specLinks?:{specId:number;productId:number;phoneModelId:number;colorId:number;specName:string}[];specIds?:number[]

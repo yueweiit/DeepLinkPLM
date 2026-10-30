@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { getApprovalTasks } from '@/api/modules/approval'
@@ -27,11 +29,11 @@ onMounted(async () => { await refresh(); mounted = true }); onActivated(() => { 
 
 <template>
   <section class="tasks-page compact-ledger">
-    <header><h2>我的待办</h2><span>按真实账号、负责人及职责分配；未保存草稿不会完成任务</span><el-button size="small" @click="refresh();partnerTasks?.refresh()">刷新</el-button></header>
+    <header><h2>{{ uiText("我的待办") }}</h2><span>{{ uiText("按真实账号、负责人及职责分配；未保存草稿不会完成任务") }}</span><el-button size="small" @click="refresh();partnerTasks?.refresh()">{{ uiText("刷新") }}</el-button></header>
     <el-alert v-if="request.error.value || approvalError" :title="request.error.value || approvalError" type="error" :closable="false" />
     <PartnerTaskPanel v-if="user.hasPermission('partner:view')" ref="partnerTasks"/>
     <FixedTableViewport v-if="user.hasPermission('schedule:read')" fill><template #default="{tableHeight}"><MoldTaskList :tasks="tasks" :loading="request.loading.value" :height="Math.max(100,tableHeight-40)" :total="total" :page="page" :size="size" @select="open" @page="page=$event;load()" @size="size=$event" /></template></FixedTableViewport>
-    <details v-if="user.hasPermission('approval:view')"><summary>流程审批待办 {{ approvals.length }}</summary><pre>{{ JSON.stringify(approvals,null,2) }}</pre></details>
+    <details v-if="user.hasPermission('approval:view')"><summary>{{ uiText("流程审批待办 ") }}{{ approvals.length }}</summary><pre>{{ JSON.stringify(approvals,null,2) }}</pre></details>
   </section>
 </template>
 

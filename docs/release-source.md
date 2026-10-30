@@ -1,15 +1,17 @@
-# 发布源码
+# Public source release
 
-当前冻结输入清单 SHA-256：`34c1caf125489d5709fbf7caa55e842ddecb6a471dfb9988bb0481aa0639361a`，1328项。公开仓库从该冻结源建立，排除私有环境、构建缓存和运行数据，补入构建文件与Python子服务源码。公开的前后端业务源码与实际发布保持原字节。三份含真实物料、库存记录或初始化账号的历史迁移仅公开文件名、校验清单和恢复工具；公司生产复建必须从私有发布JAR恢复这三份原始字节。
+This repository contains the public source for the deployed PLM program release `20261030-development-model-de132431fd79-r1` (30 October 2026, Asia/Shanghai).
 
-2026-10-29已发布 `20261029-mold-sheet-sync-7d02891c118e-r1`：后端JAR SHA-256 `7d02891c118e2fb9ba857957daa30c7cb3d79c09324b222fa79158148e4c696e`，前端index SHA-256 `57313676b970ffa91eb7a45e7f2d79e7b34eaf0404f89bf423a19acd7cce79c5`。保留品牌、未定编码新品送审、目录款式改名和样品能力，新增在线开模表读取、手动更新、定时更新与人工日期保护。正常Java17构建，108份旧迁移、95个依赖和原应用配置保持；新增一份V20261029_0930迁移。新增结构在独立数据库上实际恢复、迁移并完成当前旧版与新版本兼容验证，再切换生产。
+- Private build input manifest: `7eaf9b448cb15cda8b909abbca9004a5b4a5370a5cedcfa7d42068f97727777e` (1,362 inputs).
+- Deployed backend JAR SHA-256: `de132431fd791b64ff35027562a8b6e12cb9a0e35ee4bbdadb8d852198229a98`.
+- Deployed frontend index SHA-256: `dc4cb56d08953ab9dd388fb59b9d1471047d2c67fb20a05ce155ad87db661f8f`.
 
-相对实际父版18份文件：新增15、修改3、删除0；实现新增563行、测试新增252行。沿用既有协作服务更新日期，没有复制模具主数据写入。原人工编辑和OA来源仍有调用，继续兼容保留，不用在线表替代其审批历史。
+This update includes Chinese/Spanish preferences, supplier catalog improvements, separate 3D source/render evidence, the existing approval and coding workflow, clearer research status and refusal information, same-page approval details, other-model draft continuation, and development-model terminology. Unreleased sample-location work is not included.
 
-完整后端1719项：1031实际通过、688按可选环境条件跳过，0失败或错误；其中14项排程PostgreSQL测试真实执行。可选来源资料目录只读审计未执行，不计通过。联合前端1541全部通过，类型检查和构建通过；最终469前端输入与该轮测试字节一致，复用其结果。最初日期保护的3个失败执行保留，修正显式关联前人工日期与未关联人工清空后通过；内部待关联保护不冒充来源匹配。
+The latest terminology-only delta passed the affected 164 frontend and 46 backend unit tests, type checking, and normal builds. The preceding integrated research release passed 1,630 frontend and 226 backend tests; those earlier results are not presented as a new full run for this wording update. Production program hashes and health were checked. Real approval submissions or business data are not part of this source publication.
 
-实际上线后从正常账号页面完成目录名称维护与在线表手动更新。未制造生产测试日期或审批，未导入QA数据库、测试账号、产品或样品批次。正常账号先以15分钟开启自动更新，服务器于13:19:45自然执行完成；重复读取同一来源没有再次更新日期。之后从正常页面保存为60分钟，自动更新保持启用。未改数据库计时字段或直接调用定时方法代替验收。
+## Private resources
 
-按用户清理要求，已删除多余旧备份及停止的验收缓存，磁盘实测释放约138.4 GB，保留一份此前已验证可恢复的完整备份和必要旧程序。本次收尾没有新增数据库、附件或镜像备份；被删除副本不可恢复，正式原始资料与附件保留。
+Production environment files, credentials, databases, business documents, original attachments, runtime files, local acceptance evidence, and internal deployment notes are excluded. Existing public configuration placeholders remain in place.
 
-公开仓库不包含生产凭证、数据库、业务Excel/PDF、运行图片与附件、日志、缓存、旧Git历史或私有发布证据。没有自动部署配置；各环境自行提供数据库、存储和集成配置。
+Three historical migrations contain private business or initial account data and remain excluded. See [private migration resources](private-migration-resources.md) and the existing restoration helper for their exact identities and checksums. Restore authorized original bytes privately when required; do not replace them with empty migrations or change their checksums.

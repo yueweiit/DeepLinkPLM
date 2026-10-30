@@ -24,7 +24,8 @@ public class SupplierRangeService {
     }
     private void write(String supplier) { permissions.engineer();view(supplier); }
 
-    public Map<String,Object> colors(String supplier,Map<String,String> query) { return page(supplier,query,false); }
+    private static final List<String> COMMON_COLORS=List.of("黑色","白色","透明","磨砂透明","烟灰色","灰色","银色","金色","香槟金","玫瑰金","红色","酒红色","粉色","玫红色","橙色","黄色","绿色","薄荷绿","蓝色","藏蓝色","紫色","浅紫色","棕色","卡其色");
+    public Map<String,Object> colors(String supplier,Map<String,String> query) { var result=new LinkedHashMap<>(page(supplier,query,false));result.put("commonColors",COMMON_COLORS);return result; }
     public Map<String,Object> ranges(String supplier,Map<String,String> query) { return page(supplier,query,true); }
     private Map<String,Object> page(String supplier,Map<String,String> query,boolean range) {
         var owner=view(supplier);String table=range?"plm_supplier_range":"plm_supplier_color",id=range?"range_id":"color_id";
@@ -32,6 +33,7 @@ public class SupplierRangeService {
         String word=text(query.get("keyword"));if(!word.isEmpty()){where.add("(name ilike ? or code ilike ? or "+(range?"exists(select 1 from jsonb_array_elements_text(coalesce(data->'aliases','[]')) a where a ilike ?)":"supplier_color_code ilike ?")+")");for(int i=0;i<3;i++)args.add("%"+word+"%");}
         if(range&&!text(query.get("type")).isEmpty()){where.add("type=?");args.add(type(query.get("type")));}
         if(!text(query.get("status")).isEmpty()){where.add("status=?");args.add(query.get("status"));}
+        if(!range&&"general".equals(query.get("scope")))where.add("style_key='' and config_key=''");
         long page=Math.max(1,number(query.getOrDefault("page","1"))),size=Math.max(1,Math.min(200,number(query.getOrDefault("size","50"))));
         require(page<=100000000,"页码超出范围");String condition=String.join(" and ",where);
         long total=store.jdbc.queryForObject("select count(*) from "+table+" where "+condition,Long.class,args.toArray());
@@ -95,6 +97,9 @@ public class SupplierRangeService {
                 long standard=number(item.get("standardColorId"));if(standard>0)require(Boolean.TRUE.equals(store.jdbc.queryForObject("select exists(select 1 from plm_code_item where code_item_id=? and code_type='color' and deleted_flag=0)",Boolean.class,standard)),"标准颜色引用不存在；不自动创建颜色码");
                 var data=new LinkedHashMap<String,Object>();data.put("standardColorId",standard);data.put("notes",text(item.get("notes")));data.put("refs",fileRefs(item.get("refs")));
                 var identical=store.jdbc.queryForList("select color_id from plm_supplier_color where supplier_code=? and color_id<>? and lower(name)=lower(?) and supplier_color_code=? and style_key=? and config_key=? and data->'refs'=?::jsonb",Long.class,supplier,id,name,external,style,config,encode(store.json,data.get("refs")));
+                if(id==0&&Boolean.TRUE.equals(input.get("reuseExisting"))&&!identical.isEmpty()){
+                    require(identical.size()==1,"这个颜色有多条记录，请选择对应色号或色卡");result.add(color(supplier,identical.get(0),true));continue;
+                }
                 require(identical.isEmpty(),"该供方原色已存在，请明确选中已有颜色，不重复创建");
                 if(id==0)id=store.jdbc.queryForObject("insert into plm_supplier_color(supplier_code,code,name,supplier_color_code,style_key,config_key,status,data,created_by,updated_by) values(?,?,?,?,?,?,?,?::jsonb,?,?) returning color_id",Long.class,supplier,UUID.randomUUID().toString(),name,external,style,config,status,encode(store.json,data),actor(),actor());
                 else store.jdbc.update("update plm_supplier_color set name=?,supplier_color_code=?,style_key=?,config_key=?,status=?,data=?::jsonb,version=version+1,updated_at=now(),updated_by=? where color_id=?",name,external,style,config,status,encode(store.json,data),actor(),id);
@@ -103,6 +108,17 @@ public class SupplierRangeService {
             }
             return Map.of("content",result,"supplier",view(supplier));
         });
+    }
+    public List<Map<String,Object>> catalogColors(String supplier,Object rawIds,Object rawNames,List<Long> previousIds,String style,String config){
+        require(rawIds==null||rawIds instanceof List<?>,"供应商颜色须为列表");require(rawNames==null||rawNames instanceof List<?>,"新增颜色须为名称列表");
+        var ids=new LinkedHashSet<>(PartnerSelectionService.scopeIds(rawIds));List<?> names=rawNames==null?List.of():(List<?>)rawNames;require(ids.size()+names.size()<=100,"一次最多选择100个颜色");
+        if(!names.isEmpty()){
+            List<Map<String,Object>> incoming=new ArrayList<>();for(Object name:names){require(name instanceof String,"颜色名称须为文字");incoming.add(Map.of("name",name));}
+            var saved=saveColors(supplier,Map.of("requestId",UUID.randomUUID().toString(),"reason","保存产品时新增供应商颜色；不创建标准色码或供货配对","reuseExisting",true,"items",incoming));
+            for(var color:maps(saved.get("content")))ids.add(number(color.get("id")));
+        }
+        var values=colorMembers(supplier,new ArrayList<>(ids),true);List<Map<String,Object>> result=new ArrayList<>();
+        for(long id:ids){var color=values.get(id);require(previousIds.contains(id)||"active".equals(color.get("status")),"供应商颜色已停用，不能新增选用");require(applies(color,style,config),"颜色不适用于本款产品，请选择通用颜色或对应色卡");result.add(color);}return result;
     }
 
     @Transactional public Map<String,Object> saveRanges(String supplier,Map<String,Object> input) {

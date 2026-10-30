@@ -1,6 +1,6 @@
 <template>
   <div class="layout-shell" :class="{'mobile-navigation-open':app.mobileNavigationOpen}">
-    <button v-if="app.mobileNavigationOpen" class="mobile-navigation-backdrop" aria-label="关闭手机导航" @click="app.closeMobileNavigation()"/>
+    <button v-if="app.mobileNavigationOpen" class="mobile-navigation-backdrop" :aria-label='uiText("关闭手机导航")' @click="app.closeMobileNavigation()"/>
     <Sidebar />
     <div class="layout-shell__main">
       <Navbar />
@@ -10,6 +10,8 @@
 </template>
 
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import ContentArea from './ContentArea.vue'
 import Navbar from './Navbar.vue'
 import Sidebar from './Sidebar.vue'

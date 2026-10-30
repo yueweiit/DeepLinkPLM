@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import {computed,ref,watch} from 'vue'
 import {ElMessage} from 'element-plus'
 import {useUserStore} from '@/stores/user'
@@ -25,20 +27,20 @@ async function save(){
   if(!reason.value.trim()||!pendingItems.value.length)return
   const epoch=generation,token=user.token,signature=props.items.map(i=>i.id).join(','),wasOpen=props.modelValue;busy.value=true;error.value=''
   const items=pendingItems.value
-  try{const rows=await saveProductionMetadata(props.kind,items,reason.value.trim());if(epoch!==generation||token!==user.token||!wasOpen||!props.modelValue||signature!==props.items.map(i=>i.id).join(','))return;workspace.changed();emit('saved',rows);visible.value=false;ElMessage.success('生产标识已保存，既有业务和流程状态未改变')}
+  try{const rows=await saveProductionMetadata(props.kind,items,reason.value.trim());if(epoch!==generation||token!==user.token||!wasOpen||!props.modelValue||signature!==props.items.map(i=>i.id).join(','))return;workspace.changed();emit('saved',rows);visible.value=false;ElMessage.success(uiText('生产标识已保存，既有业务和流程状态未改变'))}
   catch(e){if(epoch===generation&&token===user.token&&props.modelValue)error.value=e instanceof Error?e.message:'保存失败，请刷新核对；本批未部分保存'}
   finally{if(epoch===generation)busy.value=false}
 }
 </script>
 <template>
-  <el-dialog v-model="visible" append-to-body title="维护生产状态" width="min(560px,94vw)" :close-on-click-modal="false">
-    <p class="scope">{{items.length===1?items[0]?.label:`已选择 ${items.length} 条`}} · {{kind==='phone'?'整组配套产品':'独立产品'}}标识</p>
-    <el-alert title="仅标识和提醒，不阻止新业务，不改变归档、冻结、库存或订单。" type="info" :closable="false"/>
-    <el-form label-position="top" class="metadata-form"><el-form-item label="生产状态"><el-select v-model="state" aria-label="生产状态选择" placeholder="保持原状态"><el-option v-if="items.length>1" value="" label="保持原状态"/><el-option v-for="s in productionStatusOptions" :key="s.value" :value="s.value" :label="s.label"/></el-select></el-form-item>
-      <template v-if="kind==='phone'"><el-checkbox v-model="updateBrands">同时维护人工品牌分类</el-checkbox><el-select v-if="updateBrands" v-model="brandIds" multiple filterable aria-label="编码组品牌" placeholder="选择品牌，留空可清除人工分类"><el-option v-for="b in brands" :key="b.brandId" :value="b.brandId" :label="b.name" :disabled="disabledBrand(b)"/></el-select><p v-if="updateBrands" class="scope">将替换所选组的人工品牌分类；标准成员已确认的品牌自动保留，不拆分型号名称。</p></template>
-      <el-form-item label="变更原因（必填）"><el-input v-model="reason" type="textarea" aria-label="生产状态变更原因" :rows="2" maxlength="1000" show-word-limit/></el-form-item></el-form>
+  <el-dialog v-model="visible" append-to-body :title='uiText("维护生产状态")' width="min(560px,94vw)" :close-on-click-modal="false">
+    <p class="scope">{{items.length===1?items[0]?.label:uiText('已选择 {value0} 条',{value0:(items.length)})}} · {{kind==='phone'?uiText('整组配套产品'):uiText('独立产品')}}{{ uiText("标识") }}</p>
+    <el-alert :title='uiText("仅标识和提醒，不阻止新业务，不改变归档、冻结、库存或订单。")' type="info" :closable="false"/>
+    <el-form label-position="top" class="metadata-form"><el-form-item :label='uiText("生产状态")'><el-select v-model="state" :aria-label='uiText("生产状态选择")' :placeholder='uiText("保持原状态")'><el-option v-if="items.length>1" value="" :label='uiText("保持原状态")'/><el-option v-for="s in productionStatusOptions" :key="s.value" :value="s.value" :label="uiText(s.label)"/></el-select></el-form-item>
+      <template v-if="kind==='phone'"><el-checkbox v-model="updateBrands">{{ uiText("同时维护人工品牌分类") }}</el-checkbox><el-select v-if="updateBrands" v-model="brandIds" multiple filterable :aria-label='uiText("编码组品牌")' :placeholder='uiText("选择品牌，留空可清除人工分类")'><el-option v-for="b in brands" :key="b.brandId" :value="b.brandId" :label="b.name" :disabled="disabledBrand(b)"/></el-select><p v-if="updateBrands" class="scope">{{ uiText("将替换所选组的人工品牌分类；标准成员已确认的品牌自动保留，不拆分型号名称。") }}</p></template>
+      <el-form-item :label='uiText("变更原因（必填）")'><el-input v-model="reason" type="textarea" :aria-label='uiText("生产状态变更原因")' :rows="2" maxlength="1000" show-word-limit/></el-form-item></el-form>
     <el-alert v-if="error" :title="error" type="error" :closable="false"/>
-    <template #footer><el-button :disabled="busy" @click="visible=false">取消</el-button><el-button type="primary" :loading="busy" :disabled="!reason.trim()||!pendingItems.length" @click="save">保存生产标识</el-button></template>
+    <template #footer><el-button :disabled="busy" @click="visible=false">{{ uiText("取消") }}</el-button><el-button type="primary" :loading="busy" :disabled="!reason.trim()||!pendingItems.length" @click="save">{{ uiText("保存生产标识") }}</el-button></template>
   </el-dialog>
 </template>
 <style scoped>.scope{font-size:12px;line-height:1.6;overflow-wrap:anywhere;color:var(--el-text-color-secondary)}.metadata-form{margin-top:12px}.el-select{width:100%}.el-checkbox{margin-bottom:8px}</style>

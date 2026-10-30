@@ -17,7 +17,7 @@ final class PartnerSelectionRows {
  private record Filter(String sql,List<Object> args){}
  private Filter filter(long id,Map<String,String> q){
   var args=new ArrayList<Object>();args.add(id);String sql="record_id=?";
-  String k=text(q.get("keyword"));if(!k.isEmpty()){sql+=" and (data->>'name' ilike ? or data->>'supplierItemCode' ilike ? or data->>'modelText' ilike ? or data->>'color' ilike ? or data->>'productCode' ilike ?)";for(int i=0;i<5;i++)args.add("%"+k+"%");}
+  String k=text(q.get("keyword"));if(!k.isEmpty()){String style="(select current_binding.style_id::text from plm_partner_catalog_style_source current_binding where current_binding.source_kind='selection' and current_binding.record_id=plm_partner_selection_row.record_id and current_binding.row_id=plm_partner_selection_row.row_id)";sql+=" and (data->>'name' ilike ? or data->>'supplierItemCode' ilike ? or data->>'modelText' ilike ? or data->>'color' ilike ? or data->>'productCode' ilike ? or "+new PartnerCatalogStyles(store).currentNameSearch(style)+")";for(int i=0;i<6;i++)args.add("%"+k+"%");}
   for(String key:List.of("supplierCode","quoteId"))if(!text(q.get(key)).isEmpty()){sql+=" and data->>'"+key+"'=?";args.add(q.get(key));}
   if(text(q.get("supplierMissing")).equals("true"))sql+=" and coalesce(data->>'supplierCode','')=''";
   for(String key:List.of("selected","discarded"))if(Set.of("true","false").contains(text(q.get(key)))){sql+=" and coalesce(data->>'"+key+"','false')=?";args.add(q.get(key));}

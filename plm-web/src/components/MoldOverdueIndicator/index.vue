@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed } from 'vue'
 import type { CollaborationRow } from '@/types/collaboration'
 const props = defineProps<{ row: CollaborationRow }>()
@@ -6,8 +8,8 @@ const tasks = computed(() => (props.row.overdueTasks || []).filter(task => task.
 </script>
 <template>
   <el-popover v-if="tasks.length" trigger="click" placement="bottom" :width="330">
-    <template #reference><button class="overdue-badge" :aria-label="`查看 ${row.assetNumber} 逾期节点`" :title="`${tasks.length} 项已过计划期限，待完成或待确认`">逾期</button></template>
-    <div class="overdue-details" :data-overdue-mold="row.moldSetId"><strong>已保存计划 · {{ tasks.length }} 项逾期</strong><p v-for="task in tasks" :key="task.taskKey"><span>{{ task.title }}</span><small>计划 {{ task.dueDate }}<template v-if="task.overdueDays"> · 逾期 {{ task.overdueDays }} 天</template></small></p><p class="saved-note">按已保存记录判断；历史漏填请核对，草稿保存后更新。</p></div>
+    <template #reference><button class="overdue-badge" :aria-label="uiText('查看 {value0} 逾期节点',{value0:(row.assetNumber)})" :title="uiText('{value0} 项已过计划期限，待完成或待确认',{value0:(tasks.length)})">{{ uiText("逾期") }}</button></template>
+    <div class="overdue-details" :data-overdue-mold="row.moldSetId"><strong>{{ uiText("已保存计划 · ") }}{{ tasks.length }}{{ uiText(" 项逾期") }}</strong><p v-for="task in tasks" :key="task.taskKey"><span>{{ task.title }}</span><small>{{ uiText("计划 ") }}{{ task.dueDate }}<template v-if="task.overdueDays">{{ uiText(" · 逾期 ") }}{{ task.overdueDays }}{{ uiText(" 天") }}</template></small></p><p class="saved-note">{{ uiText("按已保存记录判断；历史漏填请核对，草稿保存后更新。") }}</p></div>
   </el-popover>
 </template>
 <style scoped>

@@ -51,7 +51,7 @@ public class LaunchDevelopmentWorkflow {
         if(!parallel&&!"launch".equals(action))service.requireDevelopmentEditable(id);
         if(action.equals("plan_draft")){
             require(stage(p,s)==1||stage(p,s)==2||stage(p,s)==5||stage(p,s)==7,"开发计划请在立项或画3D产品图维护");var old=map(s.get("plan"));
-            if(stage(p,s)>=5)require(Objects.equals(LaunchReviewWorkflow.planBasis(Map.of("plan",old)),LaunchReviewWorkflow.planBasis(Map.of("plan",d))),"模具设计不能改变已确认的代表型号或开发路径，请返回画图步骤调整");
+            if(stage(p,s)>=5)require(Objects.equals(LaunchReviewWorkflow.planBasis(Map.of("plan",old)),LaunchReviewWorkflow.planBasis(Map.of("plan",d))),"模具设计不能改变已确认的开发型号或开发路径，请返回画图步骤调整");
             var selectedPhones=ids(d.get("phoneModelIds"));var priorPhones=new LinkedHashSet<>(ids(map(s.get("planDraft")).get("phoneModelIds")));priorPhones.addAll(ids(old.get("phoneModelIds")));d.put("phones",phoneSnapshots(selectedPhones,new ArrayList<>(priorPhones)));
             require(Set.of("own_mold","supplier","direct").contains(text(d.get("method")))||text(d.get("method")).isBlank(),"开发方式无效");
             if(s.containsKey("stage2Basis")&&!old.isEmpty()&&!Objects.equals(LaunchReviewWorkflow.planBasis(Map.of("plan",old)),LaunchReviewWorkflow.planBasis(Map.of("plan",d))))filled(d.get("reason"),"计划调整原因");
@@ -66,15 +66,14 @@ public class LaunchDevelopmentWorkflow {
             atStage(p.getCurrentStepNo(),s,5);long moldId=number(d.get("moldSetId")),appId=number(d.get("applicationId"));
             if(appId>0){var apps=jdbc.queryForList("select application_id,mold_set_id,phone_model_id from plm_mold_application where application_id=? and deleted_flag=0 and (project_id=? or product_line_id=?)",appId,id,id);require(!apps.isEmpty(),"请选择属于本项目的原开模申请");var app=apps.get(0);require(ids(map(s.get("plan")).get("phoneModelIds")).contains(number(app.get("phone_model_id"))),"申请机型不在当前计划内");moldId=number(app.get("mold_set_id"));d.put("applicationSnapshot",app);}
             require(moldId>0||appId>0,"请选择模具或原开模申请");
-            if(moldId>0){var row=molds.snapshotForDevelopment(moldId);verifyMoldScope(moldId,s);if(Boolean.TRUE.equals(d.get("reuseConfirmed"))){filled(d.get("reason"),"已有模具采用依据");require("ready".equals(row.get("pcStatus"))&&"ready".equals(row.get("tpuStatus")),"已有模具PC／TPU尚未确认可用");requireReusableMold(id,moldId,s);}d.put("moldSetId",moldId);d.put("moldSnapshot",row);}
-            var links=records(s.get("moldLinks"));final long selected=moldId;
-            require(links.stream().noneMatch(m->selected>0?number(m.get("moldSetId"))==selected:appId>0&&number(m.get("applicationId"))==appId),"此模具／申请已经关联");links.add(new LinkedHashMap<>(d));s.put("moldLinks",links);s.remove("noMold");s.remove("finalized");
+            if(moldId>0){var row=molds.snapshotForDevelopment(moldId);verifyMoldScope(id,moldId,s);if(Boolean.TRUE.equals(d.get("reuseConfirmed"))){filled(d.get("reason"),"已有模具采用依据");require("ready".equals(row.get("pcStatus"))&&"ready".equals(row.get("tpuStatus")),"已有模具PC／TPU尚未确认可用");requireReusableMold(id,moldId,s);}d.put("moldSetId",moldId);d.put("moldSnapshot",row);}
+            require(appendMoldLink(s,d),"此模具／申请已经关联");
         }else if(action.equals("mold_unlink")){
             atStage(p.getCurrentStepNo(),s,5);filled(d.get("reason"),"取消关联原因");
             var links=records(s.get("moldLinks"));require(links.removeIf(link->number(link.get("moldSetId"))==number(d.get("moldSetId"))&&number(link.get("applicationId"))==number(d.get("applicationId"))),"关联不存在");s.put("moldLinks",links);s.remove("finalized");
         }else if(action.equals("mold_node")||action.equals("mold_restart")){
             int current=stage(p,s);require(current==6,"请在开模步骤办理制作、试模和改模节点");
-            requireMoldLink(id,s,number(d.get("moldSetId")));verifyMoldScope(number(d.get("moldSetId")),s);
+            requireMoldLink(id,s,number(d.get("moldSetId")));verifyMoldScope(id,number(d.get("moldSetId")),s);
             var evidence=new LinkedHashMap<String,Object>();
             var refs=service.snapshotReferences(id,service.refs(d.get("references")));
             if("making".equals(d.get("node"))||"rework".equals(d.get("node"))||action.equals("mold_restart")){var design=reviews.requireDesign(id,s,null,service);evidence.put("designReview",design);if(Boolean.TRUE.equals(d.get("confirm")))service.sameTechnical(design.get("references"),refs);}
@@ -159,10 +158,13 @@ public class LaunchDevelopmentWorkflow {
         var candidates=service.allRounds(id).stream().filter(r->number(r.get("roundId"))>number(s.get("prototypeAfterRoundId"))&&"sample".equals(r.get("kind"))&&"prototype_3d".equals(map(r.get("details")).get("samplePurpose"))&&"confirmed".equals(r.get("status"))&&!LaunchReviewWorkflow.roundVoided(s,number(r.get("roundId")))).toList();
         var row=candidates.stream().filter(r->selected==0||number(r.get("roundId"))==selected).findFirst().orElseThrow(()->invalid("请登记本次3D打样的实际收样"));
         require(service.compatibleRequirement(s,map(row.get("details")).get("requirementVersion")),"3D样采用的需求已变化，请重新打样确认");
-        require(!records(map(s.get("stage2Basis")).get("references")).isEmpty(),"采用的3D图纸依据缺失，请返回画3D产品图确认版本");
-        service.sameTechnical(map(s.get("stage2Basis")).get("references"),row.get("references"));
+        var source=records(map(s.get("stage2Basis")).get("references"));
+        // Each first 3D kind may follow receipt; already adopted technical versions remain exact.
+        boolean hadSource=source.stream().anyMatch(DevelopmentRules::product3dSource),hadRender=source.stream().anyMatch(DevelopmentRules::product3dRender);
+        var compared=records(row.get("references")).stream().filter(r->(hadSource||!product3dSource(r))&&(hadRender||!product3dRender(r))).toList();
+        service.sameTechnical(source,compared);
         require(records(row.get("references")).stream().anyMatch(r->"sample_image".equals(r.get("category"))),"请关联本轮实际收样照片");
-        require(ids(map(row.get("details")).get("phoneModelIds")).containsAll(ids(map(s.get("plan")).get("phoneModelIds"))),"3D样未覆盖本次代表型号");
+        require(ids(map(row.get("details")).get("phoneModelIds")).containsAll(ids(map(s.get("plan")).get("phoneModelIds"))),"3D样未覆盖本次开发型号");
         return row;
     }
     private List<Long> resolvedMolds(long id,Map<String,Object>s){return records(s.get("moldLinks")).stream().map(link->reviews.resolveMold(id,link)).filter(m->m>0).distinct().toList();}
@@ -222,13 +224,14 @@ public class LaunchDevelopmentWorkflow {
         require(step>=1&&step<=8,"步骤无效");
         if(step==1){checks.addAll(requirementChecks(map(state.get("profileDraft")),false));checks.addAll(planChecks(state));checks.add(check("INIT_OWNER_CONFIRMATION","项目负责人确认立项","owner",()->service.requireResponsibleConfirmation(state)));return checks;}
         if(step==2){
-            var plan=map(state.get("planDraft"));checks.add(check("REPRESENTATIVE_PHONES","本次代表型号","phones",()->{require(!ids(plan.get("phoneModelIds")).isEmpty(),"请选择本次代表型号");phoneSnapshots(ids(plan.get("phoneModelIds")));}));
-            checks.add(check("PRODUCT_3D_DRAWING","采用的3D产品图版本","drawings",()->require(stageReferences(id,2,state,service).stream().anyMatch(r->"drawing".equals(r.get("category"))&&Set.of("step","stp","stl","igs","iges","sldprt","sldasm","x_t","x_b","3dm","obj","3mf","prt").contains(text(r.get("fileExt")).replace(".","").toLowerCase(Locale.ROOT))),"请上传并采用3D产品图版本")));
+            var plan=map(state.get("planDraft"));checks.add(check("REPRESENTATIVE_PHONES","本次开发型号","phones",()->{require(!ids(plan.get("phoneModelIds")).isEmpty(),"请选择本次开发型号");phoneSnapshots(ids(plan.get("phoneModelIds")));}));
+            checks.add(check("PRODUCT_3D_DRAWING","采用的3D产品图版本","drawings",false,()->require(stageReferences(id,2,state,service).stream().anyMatch(DevelopmentRules::product3dDrawing),"3D产品图可后补，不影响本步；可在图片与附件上传3D源文件，或由工程师指定PNG／JPG／PDF效果图并采用具体版本")));
             return checks;
         }
         if(step==3){
-            if(records(map(state.get("stage2Basis")).get("references")).isEmpty())checks.add(check("PROTOTYPE_DRAWING","已采用的3D图纸依据","previous-stage",()->{throw invalid("请返回画3D产品图确认采用版本");}));
-            else checks.add(check("PROTOTYPE_RECEIPT","本轮3D样实际收样","sample",()->currentPrototype(id,state,service)));return checks;
+            var sample=new LinkedHashMap<String,Object>();
+            checks.add(check("PROTOTYPE_RECEIPT","本轮3D样实际收样","sample",()->sample.putAll(currentPrototype(id,state,service))));
+            checks.add(check("PROTOTYPE_DRAWING","已采用的3D图纸依据","drawings",false,()->require(records(map(state.get("stage2Basis")).get("references")).stream().anyMatch(DevelopmentRules::product3dDrawing)||records(sample.get("references")).stream().anyMatch(DevelopmentRules::product3dDrawing),"3D产品图可后补，不影响本步；可在图片与附件上传3D源文件，或由工程师指定PNG／JPG／PDF效果图并采用具体版本")));return checks;
         }
         if(step==4){checks.add(check("PROTOTYPE_CONFIRMATION","产品开发负责人确认代表样","review:design",()->reviews.requireDesign(id,state,currentPrototype(id,state,service),service)));return checks;}
         if(step==5){
@@ -311,7 +314,19 @@ public class LaunchDevelopmentWorkflow {
         }
         require(matched,"已有模具须按明确的实物及PC／TPU逐套适配依据确认复用");
     }
-    private List<Long> verifyMoldScope(long moldId,Map<String,Object>s){access.requireMold(moldId);var rows=jdbc.queryForList("select phone_model_id from plm_collaboration_phone_set_compatibility where mold_set_id=?",Long.class,moldId);require(rows.stream().anyMatch(ids(map(s.get("plan")).get("phoneModelIds"))::contains),"模具与本项目机型没有实际适配关系");return rows;}
+    boolean appendMoldLink(Map<String,Object> state,Map<String,Object> data){
+        var links=records(state.get("moldLinks"));long mold=number(data.get("moldSetId")),application=number(data.get("applicationId"));
+        if(links.stream().anyMatch(link->application>0&&number(link.get("applicationId"))==application||mold>0&&number(link.get("moldSetId"))==mold))return false;
+        links.add(new LinkedHashMap<>(data));state.put("moldLinks",links);state.remove("noMold");state.remove("finalized");return true;
+    }
+    private List<Long> verifyMoldScope(long projectId,long moldId,Map<String,Object> state){
+        access.requireMold(moldId);var rows=new LinkedHashSet<>(jdbc.queryForList("select phone_model_id from plm_collaboration_phone_set_compatibility where mold_set_id=?",Long.class,moldId));
+        var authority=new com.yuewei.plm.module.collaboration.MoldWorkflowRepository(jdbc);
+        for(var application:jdbc.queryForList("select application_id,phone_model_id from plm_mold_application where mold_set_id=? and deleted_flag=0 and (project_id=? or product_line_id=?)",moldId,projectId,projectId))
+            if(authority.isAuthorized(number(application.get("application_id")),projectId,moldId))rows.add(number(application.get("phone_model_id")));
+        require(rows.stream().anyMatch(ids(map(state.get("plan")).get("phoneModelIds"))::contains),"模具与本次开发型号没有已授权或已确认的关联");
+        return new ArrayList<>(rows);
+    }
     private void requireMoldLink(long id,Map<String,Object>s,long moldId){require(records(s.get("moldLinks")).stream().anyMatch(m->number(m.get("moldSetId"))==moldId||number(m.get("applicationId"))>0&&jdbc.queryForObject("select count(*) from plm_mold_application where application_id=? and mold_set_id=? and deleted_flag=0 and (project_id=? or product_line_id=?)",Long.class,number(m.get("applicationId")),moldId,id,id)>0),"此模具未关联本项目");}
     List<Map<String,Object>> phoneSnapshots(List<Long> selected){return phoneSnapshots(selected,List.of());}
     /** Retained draft selections remain correctable; a new scope or confirmation rechecks active IDs. */

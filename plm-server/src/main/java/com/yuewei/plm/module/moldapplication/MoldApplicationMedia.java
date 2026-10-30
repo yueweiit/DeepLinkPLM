@@ -26,13 +26,16 @@ public class MoldApplicationMedia {
     public List<Map<String,Object>> list(long id){return jdbc.queryForList("""
         select attachment_id as "attachmentId",file_category as category,original_file_name as "fileName",
           file_size as "fileSize",content_type as "contentType",content_sha256 as sha256,
-          download_status as "downloadStatus",source_component_id as "componentId",
+          download_status as "downloadStatus",case when download_status='download_failed' then remark end as "archiveError",source_component_id as "componentId",
           case when source_file_id like 'selection:%' then substring(source_file_id from 11) end as "selectionId",
           case when source_file_id like 'research-file:%' then substring(source_file_id from 15)::bigint end as "sourceAttachmentId",version_no as "versionNo"
         from plm_attachment where owner_object_type='MoldApplication' and owner_object_id=? and deleted_flag=0 order by attachment_id
         """,id);}
     public List<Map<String,Object>> internal(long id){return jdbc.queryForList("select * from plm_attachment where owner_object_type='MoldApplication' and owner_object_id=? and deleted_flag=0 order by attachment_id",id);}
     public long store(long id,String component,String category,String name,String sourceId,String sourceUrl,byte[] bytes,String contentType,String actor,String downloadStatus) {
+        return store(id,component,category,name,sourceId,sourceUrl,bytes,contentType,actor,downloadStatus,null);
+    }
+    private long store(long id,String component,String category,String name,String sourceId,String sourceUrl,byte[] bytes,String contentType,String actor,String downloadStatus,Long sourceSize) {
         String sha=bytes==null?null:hash(bytes);String ext=Optional.ofNullable(name).orElse("file.bin").replaceAll(".*\\.","").toLowerCase(Locale.ROOT);
         if(!ext.matches("[a-z0-9]{1,8}"))ext="bin";
         String storage=bytes==null?"dingtalk://"+sourceId:"mold-applications/"+sha+"."+ext;
@@ -43,12 +46,17 @@ public class MoldApplicationMedia {
               source_system,source_file_id,source_url,version_no,status,download_status,source_component_id,created_by,updated_by)
             values('MoldApplication',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'V1','draft',?,?,?,?)
             on conflict(owner_object_id,source_component_id,source_file_id) where owner_object_type='MoldApplication' and deleted_flag=0
-            do update set file_size=excluded.file_size,content_sha256=excluded.content_sha256,checksum=excluded.checksum,
-              storage_type=excluded.storage_type,storage_key=excluded.storage_key,download_status=excluded.download_status,
-              content_type=excluded.content_type,preview_type=excluded.preview_type,
-              dingtalk_storage_json=case when plm_attachment.content_sha256 is distinct from excluded.content_sha256 then null else plm_attachment.dingtalk_storage_json end,updated_at=now()
+            do update set file_size=case when plm_attachment.download_status='downloaded' and excluded.download_status<>'downloaded' then plm_attachment.file_size else excluded.file_size end,
+              content_sha256=case when plm_attachment.download_status='downloaded' and excluded.download_status<>'downloaded' then plm_attachment.content_sha256 else excluded.content_sha256 end,
+              checksum=case when plm_attachment.download_status='downloaded' and excluded.download_status<>'downloaded' then plm_attachment.checksum else excluded.checksum end,
+              storage_type=case when plm_attachment.download_status='downloaded' and excluded.download_status<>'downloaded' then plm_attachment.storage_type else excluded.storage_type end,
+              storage_key=case when plm_attachment.download_status='downloaded' and excluded.download_status<>'downloaded' then plm_attachment.storage_key else excluded.storage_key end,
+              download_status=case when plm_attachment.download_status='downloaded' and excluded.download_status<>'downloaded' then plm_attachment.download_status else excluded.download_status end,
+              content_type=case when plm_attachment.download_status='downloaded' and excluded.download_status<>'downloaded' then plm_attachment.content_type else excluded.content_type end,
+              preview_type=case when plm_attachment.download_status='downloaded' and excluded.download_status<>'downloaded' then plm_attachment.preview_type else excluded.preview_type end,
+              dingtalk_storage_json=case when plm_attachment.download_status='downloaded' and excluded.download_status<>'downloaded' then plm_attachment.dingtalk_storage_json when plm_attachment.content_sha256 is distinct from excluded.content_sha256 then null else plm_attachment.dingtalk_storage_json end,updated_at=now()
             returning attachment_id
-            """,Long.class,id,category,name,name,ext,contentType,bytes==null?null:bytes.length,sha,sha,bytes==null?"dingtalk":"local",storage,
+            """,Long.class,id,category,name,name,ext,contentType,bytes==null?sourceSize:Long.valueOf(bytes.length),sha,sha,bytes==null?"dingtalk":"local",storage,
             contentType!=null&&contentType.startsWith("image/")?"image":"unsupported","ready",sourceId.startsWith("plm:")||sourceId.startsWith("selection:")?"plm":"dingtalk",sourceId,sourceUrl,downloadStatus,component,actor,actor);
     }
     /** Adopt the explicitly selected original revision; reuse its immutable storage object, never copy bytes or choose latest. */
@@ -134,25 +142,57 @@ public class MoldApplicationMedia {
                 bytes,m.path("contentType").asText("application/octet-stream"),"dingtalk-import",m.path("downloadStatus").asText("pending_authorization"));
         }
     }
-    public void archiveRemote(long id,JsonNode detail) {
-        for(var f:detail.path("form_component_values")) {
-            String type=f.path("component_type").asText();if(!Set.of("DDPhotoField","DDAttachment").contains(type)||text(f.path("value"))==null)continue;
+    public void archiveRemote(long id,JsonNode detail) {archiveRemote(id,detail,null);}
+    /** Only an explicit archive action supplies the scoped official file resolver; scheduled sync never grants downloads. */
+    public void archiveRemote(long id,JsonNode detail,java.util.function.Function<String,String> officialFileUrl) {
+        for(var field:detail.path("form_component_values")) {
+            String type=field.path("component_type").asText();if(!Set.of("DDPhotoField","DDAttachment").contains(type)||text(field.path("value"))==null)continue;
             try {
-                var items=json.readTree(f.path("value").asText());for(var m:items) {
-                    String url=m.isTextual()?m.asText():m.path("downloadUrl").asText();String sourceId=m.path("fileId").asText(hash(url.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-                    if(Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from plm_attachment where owner_object_type='MoldApplication' and owner_object_id=? and source_component_id=? and source_file_id=? and download_status='downloaded' and deleted_flag=0)",Boolean.class,id,f.path("id").asText(),sourceId)))continue;
-                    byte[] bytes=null;String mime="application/octet-stream";String name=m.path("fileName").asText("钉钉文件");
-                    try {
-                        URI uri=URI.create(url);String host=Objects.toString(uri.getHost(),"");
-                        if(!"https".equals(uri.getScheme())||uri.getUserInfo()!=null||!(host.endsWith(".dingtalk.com")||host.endsWith(".alicdn.com")))throw invalid("不允许的审批附件域名");
-                        var response=http.send(HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(20)).GET().build(),SafeHttpTransport.boundedBody(MAX));
-                        if(response.statusCode()!=200)throw invalid("附件下载失败");bytes=response.body();mime=response.headers().firstValue("Content-Type").orElse(mime);
-                        if(m.isTextual())name=Path.of(uri.getPath()).getFileName().toString();
-                    }catch(Exception ignored){}
-                    String component=f.path("id").asText();String category=component.equals(COMPONENTS.get("keyPhotos"))?"key_photo":type.equals("DDPhotoField")?"sample_photo":"attachment";
-                    store(id,component,category,name,sourceId,url,bytes,mime,"dingtalk-sync",bytes==null?"pending_authorization":"downloaded");
-                }
-            }catch(Exception ignored){}
+                var items=json.readTree(field.path("value").asText());if(items==null||!items.isArray())throw invalid("审批附件字段不是文件列表，请核对原审批资料后重试");
+                for(var item:items)archiveFile(id,field,item,type,officialFileUrl);
+            }catch(Exception failure){
+                // Normal OA sync remains best-effort; malformed media must not block approval synchronization or provisioning.
+                if(officialFileUrl!=null)throw failure instanceof com.yuewei.plm.common.exception.BusinessException business?business:invalid("审批附件字段无法解析，请核对原审批资料后重试");
+            }
         }
+    }
+    private void archiveFile(long id,JsonNode field,JsonNode item,String type,java.util.function.Function<String,String> officialFileUrl) {
+        String direct=item.isTextual()?text(item):text(item.path("downloadUrl"));String fileId=text(item.path("fileId"));
+        if(fileId==null&&direct==null)throw invalid("原审批附件缺少fileId及下载地址，请核对原文件");
+        String sourceId=fileId==null?hash(direct.getBytes(java.nio.charset.StandardCharsets.UTF_8)):fileId,component=field.path("id").asText();
+        if(Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from plm_attachment where owner_object_type='MoldApplication' and owner_object_id=? and source_component_id=? and source_file_id=? and download_status='downloaded' and deleted_flag=0)",Boolean.class,id,component,sourceId)))return;
+        String name=item.path("fileName").asText("钉钉文件"),category=component.equals(COMPONENTS.get("keyPhotos"))?"key_photo":type.equals("DDPhotoField")?"sample_photo":"attachment";
+        byte[] bytes=null;String mime="application/octet-stream",error=null;
+        try {
+            boolean authorized="DDAttachment".equals(type)&&fileId!=null&&officialFileUrl!=null;
+            String address=authorized?officialFileUrl.apply(fileId):direct;
+            if(text(address)==null)throw invalid("原审批仅提供文件ID，请管理员点击归档原审批附件");
+            URI uri=archiveUri(address,authorized);
+            var response=http.send(HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(30)).GET().build(),SafeHttpTransport.boundedBody(MAX));
+            if(response.statusCode()!=200)throw invalid("附件下载返回HTTP "+response.statusCode()+"，请重试原审批附件归档");
+            bytes=response.body();if(bytes.length==0)throw invalid("原审批附件内容为空，请核对原文件");
+            mime=archivedContentType(bytes,response.headers().firstValue("Content-Type").orElse(mime));
+            if(item.isTextual())name=Path.of(uri.getPath()).getFileName().toString();
+        }catch(Exception failure){
+            if(failure instanceof InterruptedException)Thread.currentThread().interrupt();
+            error=failure instanceof com.yuewei.plm.common.exception.BusinessException||failure instanceof MoldDingTalkClient.RemoteFailure?failure.getMessage():"附件下载超时、连接失败或超过50MB限制，请重试归档";
+        }
+        // Signed URLs are transient. The original file ID and local SHA remain the durable provenance.
+        long attachment=store(id,component,category,name,sourceId,direct,bytes,mime,"dingtalk-sync",error==null?"downloaded":"download_failed",item.path("fileSize").asLong(-1)>=0?item.path("fileSize").asLong():null);
+        jdbc.update("update plm_attachment set remark=? where attachment_id=? and download_status=?",error,attachment,error==null?"downloaded":"download_failed");
+    }
+    static URI archiveUri(String address,boolean official) {
+        URI uri;try{uri=URI.create(address);}catch(Exception malformed){throw invalid("审批附件下载地址格式无效");}
+        String host=Objects.toString(uri.getHost(),"").toLowerCase(Locale.ROOT);
+        boolean cdn=host.endsWith(".dingtalk.com")||host.endsWith(".alicdn.com"),oss=official&&host.matches("[a-z0-9.-]+\\.oss-[a-z0-9-]+\\.aliyuncs\\.com");
+        if(uri.getUserInfo()!=null||uri.getFragment()!=null||uri.getPort()!=-1&&uri.getPort()!=443||!cdn&&!oss)throw invalid("不允许的审批附件下载域名");
+        if(oss&&"http".equals(uri.getScheme()))uri=URI.create("https:"+uri.toASCIIString().substring(5));
+        if(!"https".equals(uri.getScheme()))throw invalid("审批附件下载必须使用HTTPS");return uri;
+    }
+    static String archivedContentType(byte[] bytes,String declared) {
+        if(bytes.length>=8&&Arrays.equals(Arrays.copyOf(bytes,8),new byte[]{(byte)137,80,78,71,13,10,26,10}))return "image/png";
+        if(bytes.length>=3&&(bytes[0]&255)==255&&(bytes[1]&255)==216&&(bytes[2]&255)==255)return "image/jpeg";
+        if(bytes.length>=12&&new String(bytes,0,4,java.nio.charset.StandardCharsets.US_ASCII).equals("RIFF")&&new String(bytes,8,4,java.nio.charset.StandardCharsets.US_ASCII).equals("WEBP"))return "image/webp";
+        return declared.split(";",2)[0].trim().toLowerCase(Locale.ROOT);
     }
 }

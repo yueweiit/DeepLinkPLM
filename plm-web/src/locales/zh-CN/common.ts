@@ -1,4 +1,8 @@
 export default {
+  'language.label': '界面语言',
+  'language.default': '默认语言',
+  'language.saveFailed': '语言保存失败，请重试',
+  'language.saved': '语言已保存',
   'common.appName': 'DeepLinkPLM',
   'common.dashboard': '工作台',
   'common.product': '产品主数据',

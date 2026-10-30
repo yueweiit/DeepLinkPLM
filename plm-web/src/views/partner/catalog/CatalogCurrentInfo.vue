@@ -1,0 +1,6 @@
+<script setup lang="ts">
+import {t} from '@/locales'
+defineProps<{value?:Record<string,unknown>;recordedName?:string}>()
+</script>
+<template><details v-if="value" class="catalog-current-info"><summary>{{t('目录当前资料')}}<span v-if="value.available===false"> · {{t('来源产品已删除')}}</span></summary><dl><template v-if="recordedName&&recordedName!==value.name"><dt>{{t('当时名称')}}</dt><dd>{{recordedName}}</dd></template><dt>{{t('当前名称')}}</dt><dd>{{value.name||'—'}}</dd><dt>{{t('目录颜色')}}</dt><dd>{{value.color||'—'}}</dd><dt>{{t('目录材质')}}</dt><dd>{{value.material||'—'}}</dd><template v-if="value.unitPrice!==undefined"><dt>{{t('当前目录报价')}}</dt><dd>{{value.unitPrice==null||value.unitPrice===''?t('未填写'):value.unitPrice}} {{value.currency||''}}</dd></template></dl><small>{{t('以上为当前目录资料，不改已确认报价、实收颜色、数量或历史依据。')}}</small></details></template>
+<style scoped>.catalog-current-info{padding:8px 10px;margin:8px 0;border:1px solid var(--el-border-color-lighter);font-size:12px;line-height:1.6}.catalog-current-info summary{cursor:pointer;font-weight:600}.catalog-current-info dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:3px 12px;margin:8px 0}.catalog-current-info dd{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.catalog-current-info dt,.catalog-current-info small{color:var(--el-text-color-secondary)}</style>

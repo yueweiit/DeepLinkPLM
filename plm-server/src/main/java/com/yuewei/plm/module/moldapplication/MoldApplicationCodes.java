@@ -33,6 +33,18 @@ public class MoldApplicationCodes {
         for(var material:materials)requireMaterialPart(material.path("code").asText(),material.path("partType").asText());
         result.put("materials",materials);return result;
     }
+    public Map<String,Object> researchMaterials(long project){
+        Set<String> configured=null;
+        for(var row:repo.jdbc().queryForList("select material_codes::text as materials from plm_mold_application_config where product_line_id=? and active=true",project)){
+            var current=new TreeSet<String>();
+            for(var material:repo.node(row.get("materials"))){String code=material.path("code").asText();try{requireMaterialPart(code,material.path("partType").asText());}catch(BusinessException invalid){return Map.of("materialCodes",List.of(),"conflict","原产品开模材质配置待核对");}current.add(code);}
+            if(current.isEmpty()||configured!=null&&!configured.equals(current))return Map.of("materialCodes",List.of(),"conflict","原产品存在不一致的开模材质配置，请核对后自动续办");configured=current;
+        }
+        var products=repo.jdbc().queryForList("select material from plm_product where product_id=? and deleted_flag=0",project);var declared=new TreeSet<String>();
+        if(products.size()==1&&text(products.get(0).get("material"))!=null){var tokens=text(products.get(0).get("material")).toUpperCase(Locale.ROOT).split("[\\s+＋/、,，;；|&-]+");if(Arrays.stream(tokens).allMatch(value->Set.of("PC","TPU").contains(value)))for(String value:tokens)declared.add("PC".equals(value)?"20":"10");}
+        if(configured!=null&&!declared.isEmpty()&&!configured.equals(declared))return Map.of("materialCodes",List.of(),"conflict","原产品材质与开模材质配置冲突，请核对后自动续办");
+        return Map.of("materialCodes",new ArrayList<>(configured==null?declared:configured),"conflict","");
+    }
     public List<Map<String,Object>> configs(){return repo.jdbc().queryForList("select c.tipo,c.product_line_id as \"productLineId\",p.product_name as \"productName\",c.product_specific_code as \"productSpecificCode\",c.material_codes::text as \"materialsJson\",c.version_no as version from plm_mold_application_config c join plm_product p on p.product_id=c.product_line_id where c.active=true order by c.tipo").stream().peek(r->r.put("materials",repo.node(r.remove("materialsJson")))).toList();}
     void requireOnSaleProduct(Long line,String tipo) {
         var ids=new TreeSet<Long>();if(line!=null)ids.add(line);
@@ -65,14 +77,30 @@ public class MoldApplicationCodes {
     public Map<String,Object> reserve(Request request,String actor) {return reserve(request,actor,null);}
     @Transactional
     public Map<String,Object> reserve(Request request,String actor,Long newSetItemId) {
+        return reserveConfigured(request,actor,newSetItemId,config(request.tipo()),false);
+    }
+    @Transactional
+    public Map<String,Object> reserveResearch(Request request,long project,List<String> materialCodes,String actor,Long newSetItemId) {
+        if(request.phoneModelId()==null||request.phoneCodeItemId()==null)throw invalid("标准手机及原编码待补齐，不能自动分配新编号");
+        references.requireSelectedPhone(request.phoneModelId(),request.phoneCodeItemId(),null,request.model());
+        var products=repo.jdbc().queryForList("select product_specific_code from plm_product where product_id=? and product_type='product_line' and development_mode='launch_v1' and deleted_flag=0",project);
+        if(products.size()!=1)throw invalid("原新品项目不存在");String prefix=text(products.get(0).get("product_specific_code"));
+        if(prefix==null||!prefix.matches("[A-Z]{2}"))throw invalid("产品特定编码待补齐");
+        if(materialCodes==null||materialCodes.isEmpty())throw invalid("请选择开模材质");
+        List<Map<String,String>> materials=new ArrayList<>();for(String code:new TreeSet<>(materialCodes)){String part=ProductBusinessCodeGenerator.moldPartType(code);requireMaterialPart(code,part);materials.add(Map.of("code",code,"partType",part));}
+        return reserveConfigured(request,actor,newSetItemId,Map.of("productLineId",project,"productSpecificCode",prefix,"materials",json.valueToTree(materials)),true);
+    }
+    private Map<String,Object> reserveConfigured(Request request,String actor,Long newSetItemId,Map<String,Object> config,boolean research) {
         if(request.requestId()==null||!request.requestId().matches("[A-Za-z0-9:_-]{8,128}"))throw invalid("请提供有效请求ID");
         if(text(request.model())==null||request.model().length()>255)throw invalid("请填写型号");
         repo.jdbc().execute("select pg_advisory_xact_lock(66817399)");
         repo.jdbc().queryForObject("select pg_advisory_xact_lock(610131102)",(rs,n)->true);
         boolean reuse=request.itemId()!=null||request.moldSetId()!=null||request.compatibilityDigest()!=null;
         Object fingerprint=reuse||request.phoneModelId()!=null?request:new LegacyRequest(request.requestId(),request.tipo(),request.model(),request.phoneCodeItemId(),request.applicationId());
-        String hash=MoldApplicationMedia.hash(repo.json(newSetItemId==null?fingerprint:Map.of("request",fingerprint,"newSetItemId",newSetItemId)).getBytes(StandardCharsets.UTF_8));
-        var config=config(request.tipo());requireOnSaleProduct(((Number)config.get("productLineId")).longValue(),null);
+        if(newSetItemId!=null)fingerprint=Map.of("request",fingerprint,"newSetItemId",newSetItemId);
+        if(research)fingerprint=Map.of("request",fingerprint,"config",config);
+        String hash=MoldApplicationMedia.hash(repo.json(fingerprint).getBytes(StandardCharsets.UTF_8));
+        requireOnSaleProduct(((Number)config.get("productLineId")).longValue(),null);
         var prior=repo.jdbc().queryForList("select request_hash,response::text response from plm_mold_code_reservation where request_id=?",request.requestId());
         if(!prior.isEmpty()) {
             if(!hash.equals(prior.get(0).get("request_hash")))throw new BusinessException(40901,"请求ID已对应另一份编码申请");

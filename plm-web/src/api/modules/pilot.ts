@@ -1,6 +1,8 @@
 import request, { unwrapPage, unwrapResponse } from '../request'
 import type { PilotRoleDefinition, PilotUser, PilotUserInput, PilotEntity, PilotTask, PilotFile } from '@/types/pilot'
 import type { RowPatch, RowResult } from '@/types/collaboration'
+import type { Language } from '@/locales/language'
+export async function saveUserLanguage(id: number, language: Language, originalLanguage: Language): Promise<{preferredLanguage: Language}> { return unwrapResponse(await request.patch(`/pilot/users/${id}/language`,{language,originalLanguage})) }
 export async function getPilotUsers(): Promise<PilotUser[]> { return unwrapResponse(await request.get('/pilot/users')) }
 export async function getPilotRoles(): Promise<PilotRoleDefinition[]> { return unwrapResponse(await request.get('/pilot/roles')) }
 export async function savePilotUser(id: number | null, data: PilotUserInput): Promise<{ userId: number; saved: boolean }> { return unwrapResponse(id ? await request.put(`/pilot/users/${id}`, data) : await request.post('/pilot/users', data)) }

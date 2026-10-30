@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 // Historical code groups are not standard phone IDs: preserve combined names and original code anchors.
 import { computed, inject, ref, watch } from 'vue'
 import { formContextKey } from 'element-plus'
@@ -38,9 +40,9 @@ watch(()=>user.token,()=>{generation++;brandGeneration++;rows.value=[];brands.va
 </script>
 <template>
   <div v-if="user.token" class="phone-code-selector">
-    <el-select size="small" v-if="!brandId" class="code-brand" :model-value="brand" filterable clearable :aria-label="`${ariaLabel || '手机编码'}品牌`" :disabled="disabled" placeholder="先选择品牌" @update:model-value="changeBrand"><el-option v-for="b in brands" :key="b.brandId" :value="b.brandId" :label="b.name" :disabled="b.status==='disabled'"/><el-option :value="0" label="未归类（历史编码）"/></el-select>
-    <el-select size="small" class="code-model" :model-value="modelValue" clearable filterable remote :fit-input-width="true" :remote-method="search" :loading="loading" :disabled="disabled || (brand===null && !modelValue)" :aria-label="ariaLabel || '手机编码'" :placeholder="brand===null?'请先选择品牌':'选择型号／原编码，可搜索'" @update:model-value="choose" @visible-change="$event && search(keyword)"><el-option v-for="c in choices" :key="c.codeItemId" class="code-option" :value="c.codeItemId" :label="`${c.codeValue} · ${c.codeName}${productionHint(c.productionStatus)}${c.status==='disabled'?' · 停用，历史引用':''}`" :disabled="c.status==='disabled' && c.codeItemId!==modelValue"/><template v-if="total>rows.length || error" #footer><el-button link :loading="loading" :disabled="disabled" @click="query(page+1)">{{error?'重试读取编码':`加载更多（已加载 ${rows.length} / ${total}）`}}</el-button></template></el-select>
-    <div v-if="error || brandError" class="code-error" role="alert">{{brandError || error}}<el-button link :disabled="disabled" @click="brandError?loadBrands():search(keyword)">重试</el-button></div>
+    <el-select size="small" v-if="!brandId" class="code-brand" :model-value="brand" filterable clearable :aria-label="uiText('{value0}品牌',{value0:(ariaLabel || '手机编码')})" :disabled="disabled" :placeholder='uiText("先选择品牌")' @update:model-value="changeBrand"><el-option v-for="b in brands" :key="b.brandId" :value="b.brandId" :label="b.name" :disabled="b.status==='disabled'"/><el-option :value="0" :label='uiText("未归类（历史编码）")'/></el-select>
+    <el-select size="small" class="code-model" :model-value="modelValue" clearable filterable remote :fit-input-width="true" :remote-method="search" :loading="loading" :disabled="disabled || (brand===null && !modelValue)" :aria-label="ariaLabel || uiText('手机编码')" :placeholder="brand===null?uiText('请先选择品牌'):uiText('选择型号／原编码，可搜索')" @update:model-value="choose" @visible-change="$event && search(keyword)"><el-option v-for="c in choices" :key="c.codeItemId" class="code-option" :value="c.codeItemId" :label="uiText('{value0} · {value1}{value2}{value3}',{value0:(c.codeValue),value1:(c.codeName),value2:(productionHint(c.productionStatus)),value3:(c.status==='disabled'?' · 停用，历史引用':'')})" :disabled="c.status==='disabled' && c.codeItemId!==modelValue"/><template v-if="total>rows.length || error" #footer><el-button link :loading="loading" :disabled="disabled" @click="query(page+1)">{{error?uiText('重试读取编码'):uiText('加载更多（已加载 {value0} / {value1}）',{value0:(rows.length),value1:(total)})}}</el-button></template></el-select>
+    <div v-if="error || brandError" class="code-error" role="alert">{{brandError || error}}<el-button link :disabled="disabled" @click="brandError?loadBrands():search(keyword)">{{ uiText("重试") }}</el-button></div>
   </div>
 </template>
 <style scoped>

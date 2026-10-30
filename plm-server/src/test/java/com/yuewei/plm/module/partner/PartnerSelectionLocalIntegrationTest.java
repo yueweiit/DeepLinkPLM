@@ -11,6 +11,8 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.*;
@@ -24,7 +26,7 @@ import static com.yuewei.plm.module.partner.PartnerValues.*;
 import static com.yuewei.plm.module.partner.PartnerSelectionService.scopeIds;
 
 /** Real PostgreSQL transactions, restricted to a disposable schema in a fixed loopback QA database. */
-@EnabledIfEnvironmentVariable(named="PLM_SELECTION_TEST_URL",matches="(?:jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/plm_selection_range_qa|jdbc:postgresql://127\\.0\\.0\\.1:15483/plm_foundation_crud_it\\?currentSchema=plm)")
+@EnabledIfEnvironmentVariable(named="PLM_SELECTION_TEST_URL",matches="(?:jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/plm_selection_range_qa|jdbc:postgresql://127\\.0\\.0\\.1:15504/catalog_nonempty_filter_tests|jdbc:postgresql://127\\.0\\.0\\.1:15483/plm_foundation_crud_it\\?currentSchema=plm)")
 class PartnerSelectionLocalIntegrationTest {
  private JdbcTemplate jdbc,admin;private TransactionTemplate tx;private String schema;
  private PartnerSelectionService selections;private PartnerProductService products;private PartnerSampleService samples;
@@ -68,6 +70,25 @@ class PartnerSelectionLocalIntegrationTest {
  private Map<String,Object> op(String rowId,Map<String,Object> changes){return values("rowId",rowId,"rowVersion",0,"op","upsert","changes",changes);}
  private void add(List<Map<String,Object>> operations){head=tx.execute(s->selections.patchRows(id(),values("version",head.get("version"),"requestId",UUID.randomUUID().toString(),"operations",operations)));}
  private Map<String,Object> baseline(String rowId){return selections.importedRowBaseline(id(),rowId);}
+ @ParameterizedTest
+ @CsvSource({"patchRows,supplierCode,SUP-B","batch,supplierCode,SUP-B","patchRows,styleKey,case-B","batch,styleKey,case-B","patchRows,configKey,cfg-B","batch,configKey,cfg-B"})
+ void contextOnlyColourChangesUseTheRealSavePathsAndRollbackTheWholeRequest(String path,String field,String value){
+  jdbc.update("insert into plm_supplier_profile(supplier_code,supplier_name) values('SUP-B','另一供方')");
+  var saved=tx.execute(s->ranges.saveColors("XD-SUP",values("requestId","scoped-color","reason","QA专用色卡","items",List.of(values("name","专用黑色","styleKey","case-A","configKey","cfg-A")))));long color=number(maps(saved.get("content")).get(0).get("id"));
+  String first=UUID.randomUUID().toString(),bound=UUID.randomUUID().toString();add(List.of(op(first,values("name","原文草稿","supplierCode","XD-SUP","color","旧颜色／原备注")),op(bound,values("name","带颜色草稿","supplierCode","XD-SUP","styleKey","case-A","configKey","cfg-A","supplierColorIds",List.of(color)))));
+  var firstBefore=baseline(first);var boundBefore=baseline(bound);long version=number(head.get("version")),events=count("plm_partner_event"),revisions=count("plm_partner_selection_row_revision"),requests=count("plm_supplier_range_request");
+  var changes=values(field,value);String request="reject-context";
+  RuntimeException error=assertThrows(RuntimeException.class,()->tx.execute(s->path.equals("patchRows")?selections.patchRows(id(),values("version",version,"requestId",request,"operations",List.of(values("rowId",first,"rowVersion",firstBefore.get("rowVersion"),"changes",values(field,value,"newSupplierColors",List.of("不应残留的新色"))),values("rowId",bound,"rowVersion",boundBefore.get("rowVersion"),"changes",changes)))):selections.batch(id(),values("version",version,"requestId",request,"rowIds",List.of(first,bound),"changes",changes))));
+  assertTrue(error.getMessage().contains(field.equals("supplierCode")?"不属于":"不适用"),error.getMessage());assertEquals(firstBefore,baseline(first));assertEquals(boundBefore,baseline(bound));assertEquals(version,number(selections.detail(id()).get("version")));assertEquals(events,count("plm_partner_event"));assertEquals(revisions,count("plm_partner_selection_row_revision"));assertEquals(requests,count("plm_supplier_range_request"));assertEquals(1L,count("plm_supplier_color"));
+  changes.put("supplierColorIds",List.of());head=tx.execute(s->path.equals("patchRows")?selections.patchRows(id(),values("version",version,"requestId","clear-before-context","operations",List.of(values("rowId",bound,"rowVersion",boundBefore.get("rowVersion"),"changes",changes)))):selections.batch(id(),values("version",version,"requestId","clear-before-context","rowIds",List.of(first,bound),"changes",changes)));
+  var current=baseline(bound);assertEquals(value,current.get(field));assertTrue(scopeIds(current.get("supplierColorIds")).isEmpty());assertTrue(maps(current.get("supplierColors")).isEmpty());assertEquals("专用黑色",current.get("color"));assertEquals("旧颜色／原备注",baseline(first).get("color"));assertEquals(1L,count("plm_supplier_color"));
+  var history=decode(store.json,jdbc.queryForObject("select data::text from plm_partner_selection_row_revision where row_id=?::uuid and row_version=1",String.class,bound));assertEquals(List.of(color),scopeIds(history.get("supplierColorIds")));assertEquals("专用黑色",maps(history.get("supplierColors")).get(0).get("name"));
+ }
+ @Test void genericColourRemainsUsableAcrossStyleAndConfigurationChangesThroughPatchAndBatch(){
+  var saved=tx.execute(s->ranges.saveColors("XD-SUP",values("requestId","generic-color","reason","QA通用色","items",List.of(Map.of("name","通用黑色")))));long color=number(maps(saved.get("content")).get(0).get("id"));String row=UUID.randomUUID().toString();add(List.of(op(row,values("name","通用色草稿","supplierCode","XD-SUP","styleKey","case-A","configKey","cfg-A","supplierColorIds",List.of(color)))));
+  head=tx.execute(s->selections.patchRows(id(),values("version",head.get("version"),"requestId","generic-style","operations",List.of(values("rowId",row,"rowVersion",baseline(row).get("rowVersion"),"changes",Map.of("styleKey","case-B"))))));
+  head=tx.execute(s->selections.batch(id(),values("version",head.get("version"),"requestId","generic-config","rowIds",List.of(row),"changes",Map.of("configKey","cfg-B"))));var current=baseline(row);assertEquals("case-B",current.get("styleKey"));assertEquals("cfg-B",current.get("configKey"));assertEquals(List.of(color),scopeIds(current.get("supplierColorIds")));assertEquals("通用黑色",current.get("color"));assertEquals(1L,count("plm_supplier_color"));
+ }
  private Map<String,Object> ready(String rowId,String color){
   var saved=tx.execute(s->ranges.saveColors("XD-SUP",values("requestId",UUID.randomUUID().toString(),"reason","QA真实流程测试","items",List.of(Map.of("name",color)))));long colorId=number(maps(saved.get("content")).get(0).get("id"));
   return values("name","熊抱支架款","supplierCode","XD-SUP","material","TPU","specification",color,"color",color,"phoneModelIds",List.of(12L),"selected",true,"styleKey","case-A","configKey",color,"quoteVersion","V1","sampleQty",2,"selectedPairs",List.of(Map.of("phoneModelId",12L,"colorId",colorId)),"pairings",List.of(values("supplierCode","XD-SUP","styleKey","case-A","configKey",color,"quoteVersion","V1","phoneModelId",12L,"colorId",colorId,"state","available","evidence","QA供方清单核对")));

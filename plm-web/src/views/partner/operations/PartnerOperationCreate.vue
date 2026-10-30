@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, ref } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
@@ -25,10 +27,10 @@ const fields = computed<BusinessField[]>(() => {
   return f
 })
 async function save() { fieldErrors.value={};for(const f of fields.value.filter(f=>f.required))if(form.value[f.key]===undefined||form.value[f.key]===null||String(form.value[f.key]).trim()==='')fieldErrors.value[f.key]=`请填写${f.label}`;if(Object.keys(fieldErrors.value).length){error.value='请补充标出的基本资料；检验结果等后续内容可以稍后填写。';return}busy.value = true; error.value = ''; try { const row = await createOperation(props.kind, form.value); dirty.value = false; emit('saved', row) } catch (e) { error.value = partnerError(e) } finally { busy.value = false } }
-async function discardAllowed(){if(!dirty.value)return true;try{await ElMessageBox.confirm('放弃本次未保存的填写？','未保存内容');return true}catch{return false}}
+async function discardAllowed(){if(!dirty.value)return true;try{await ElMessageBox.confirm(uiText('放弃本次未保存的填写？'),uiText('未保存内容'));return true}catch{return false}}
 async function close() { if(await discardAllowed())emit('close') }
 onBeforeRouteLeave(discardAllowed)
 defineExpose({ dirty,close })
 </script>
-<template><el-form label-position="top" class="operation-create" @input="dirty = true" @change="dirty = true"><p class="hint">只引用实际资料，不创建客户销售订单，不执行付款或外部写入。保存后可添加原件。</p><BusinessFields :model="form" :fields="fields" :errors="fieldErrors"/><el-form-item v-if="kind === 'supplier_quote'" label="关联已有规格（可选；未选不创建产品）"><OperationSpecPicker v-model="form.specId" :supplier-code="form.supplierCode"/></el-form-item><section v-if="kind === 'fulfilment'"><h4>本批明确规格与数量</h4><div v-for="(line, i) in form.lines" :key="i" class="line"><OperationSpecPicker v-model="line.specId" :supplier-code="form.supplierCode"/><el-input-number v-model="line.qty" :min="1" :precision="0" placeholder="数量"/><el-button :disabled="form.lines.length === 1" @click="form.lines.splice(i, 1); dirty = true">移除</el-button></div><el-button @click="form.lines.push({}); dirty = true">添加规格</el-button></section><el-alert v-if="error" :title="error" type="error" :closable="false"/><footer><el-button @click="close">取消</el-button><el-button type="primary" :loading="busy" @click="save">保存实际记录</el-button></footer></el-form></template>
+<template><el-form label-position="top" class="operation-create" @input="dirty = true" @change="dirty = true"><p class="hint">{{ uiText("只引用实际资料，不创建客户销售订单，不执行付款或外部写入。保存后可添加原件。") }}</p><BusinessFields :model="form" :fields="fields" :errors="fieldErrors"/><el-form-item v-if="kind === 'supplier_quote'" :label='uiText("关联已有规格（可选；未选不创建产品）")'><OperationSpecPicker v-model="form.specId" :supplier-code="form.supplierCode"/></el-form-item><section v-if="kind === 'fulfilment'"><h4>{{ uiText("本批明确规格与数量") }}</h4><div v-for="(line, i) in form.lines" :key="i" class="line"><OperationSpecPicker v-model="line.specId" :supplier-code="form.supplierCode"/><el-input-number v-model="line.qty" :min="1" :precision="0" :placeholder='uiText("数量")'/><el-button :disabled="form.lines.length === 1" @click="form.lines.splice(i, 1); dirty = true">{{ uiText("移除") }}</el-button></div><el-button @click="form.lines.push({}); dirty = true">{{ uiText("添加规格") }}</el-button></section><el-alert v-if="error" :title="error" type="error" :closable="false"/><footer><el-button @click="close">{{ uiText("取消") }}</el-button><el-button type="primary" :loading="busy" @click="save">{{ uiText("保存实际记录") }}</el-button></footer></el-form></template>
 <style scoped>.operation-create{min-width:0}.hint{font-size:13px;color:#6e7e92;line-height:1.6}.line{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}.line>:first-child{flex:1;min-width:min(220px,100%)}footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}h4{font-size:14px}</style>

@@ -18,7 +18,8 @@ class ProductStageReadinessTest {
     final ProductRepository products=mock(ProductRepository.class);
     final MoldScheduleService molds=mock(MoldScheduleService.class);
     final LaunchReviewWorkflow reviews=mock(LaunchReviewWorkflow.class);
-    final LaunchDevelopmentWorkflow launch=new LaunchDevelopmentWorkflow(jdbc,new ObjectMapper(),access,store,molds,mock(com.yuewei.plm.module.development.DevelopmentFinanceService.class),reviews,mock(com.yuewei.plm.module.moldreference.PhoneModelReferenceService.class));
+    final com.yuewei.plm.module.moldreference.PhoneModelReferenceService phones=mock(com.yuewei.plm.module.moldreference.PhoneModelReferenceService.class);
+    final LaunchDevelopmentWorkflow launch=new LaunchDevelopmentWorkflow(jdbc,new ObjectMapper(),access,store,molds,mock(com.yuewei.plm.module.development.DevelopmentFinanceService.class),reviews,phones);
     final ProductDevelopmentService service=spy(new ProductDevelopmentService(jdbc,new ObjectMapper(),access,products,mock(com.yuewei.plm.module.attachment.repository.AttachmentRepository.class),mock(com.yuewei.plm.module.operationlog.service.OperationLogService.class),store,mock(com.yuewei.plm.module.inventory.service.InventorySupplierService.class),launch,reviews,mock(DevelopmentUnitCostWorkflow.class)));
     { org.springframework.test.util.ReflectionTestUtils.setField(service,"engineering",mock(EngineeringBasisService.class)); }
     Map<String,Object> state(int stage,boolean needsMold){
@@ -43,6 +44,45 @@ class ProductStageReadinessTest {
     void readonly(String before,Map<String,Object> state)throws Exception{
         assertThat(new ObjectMapper().writeValueAsString(state)).isEqualTo(before);
         verify(store,never()).save(anyLong(),anyMap());verify(jdbc,never()).update(anyString(),any(Object[].class));
+    }
+    @Test void missing3dFileIsAFollowupAndBothReadinessAndStageConfirmationAllowTheActualRepresentativeScope()throws Exception{
+        var state=state(2,false);state.put("planDraft",state.get("plan"));
+        when(phones.members(List.of(10L),true)).thenReturn(Map.of(10L,Map.of("phoneModelId",10L,"modelName","真实代表型号")));
+        String before=new ObjectMapper().writeValueAsString(state);var result=preview(2);
+        assertThat(result.get("ready")).isEqualTo(true);
+        var followup=checks(result).stream().filter(c->"PRODUCT_3D_DRAWING".equals(c.code())).findFirst().orElseThrow();
+        assertThat(followup.complete()).isFalse();assertThat(followup.blocking()).isFalse();assertThat(followup.message()).contains("可后补","图片与附件");readonly(before,state);
+        when(access.actor()).thenReturn(new com.yuewei.plm.common.security.CurrentUser(7L,"developer","工程师",false));
+        service.confirmStage(42L,"LAUNCH_DRAWING",3L);
+        assertThat(DevelopmentWorkflowStore.map(state.get("stage2Basis"))).containsEntry("references",List.of()).containsEntry("phoneModelIds",List.of(10L));
+        verify(store).check(state,3L);verify(store).save(42L,state);verify(access).requirePermission("documents:write");
+    }
+    @Test void absentDrawingDoesNotHideMissingPrototypeReceiptOrTurnItIntoAPassedGate()throws Exception{
+        var state=state(3,false);doReturn(List.of()).when(service).allRounds(42L);
+        String before=new ObjectMapper().writeValueAsString(state);var result=preview(3);
+        assertThat(result.get("ready")).isEqualTo(false);
+        assertThat(checks(result)).extracting(DevelopmentRules.ReadinessCheck::code).containsExactly("PROTOTYPE_RECEIPT","PROTOTYPE_DRAWING");
+        assertThat(checks(result)).extracting(DevelopmentRules.ReadinessCheck::blocking).containsExactly(true,false);
+        assertThatThrownBy(()->launch.confirmStage(42L,3,state,service)).hasMessageContaining("实际收样");readonly(before,state);
+    }
+    @Test void explicitlyAdoptedRenderCompletesTheProductDrawingReminderWithoutBecomingANativeCadFile(){
+        var state=state(2,false);state.put("planDraft",state.get("plan"));
+        when(phones.members(List.of(10L),true)).thenReturn(Map.of(10L,Map.of("phoneModelId",10L,"modelName","真实代表型号")));
+        var render=Map.<String,Object>of("type","file","id",31L,"familyId",31L,"category","render_3d","fileExt","pdf","versionNo","V1");
+        doReturn(List.of(render)).when(service).snapshotReferences(eq(42L),anyList());
+        var result=preview(2);assertThat(result.get("ready")).isEqualTo(true);
+        var drawing=checks(result).stream().filter(c->"PRODUCT_3D_DRAWING".equals(c.code())).findFirst().orElseThrow();
+        assertThat(drawing.complete()).isTrue();assertThat(drawing.blocking()).isFalse();assertThat(DevelopmentRules.product3dSource(render)).isFalse();
+        launch.confirmStage(42L,2,state,service);assertThat(DevelopmentWorkflowStore.map(state.get("stage2Basis"))).containsEntry("references",List.of(render));
+    }
+    @Test void realPrototypeReceiptCanBeConfirmedWithANonblockingDrawingFollowupWithoutChangingEarlierEvidence()throws Exception{
+        var state=state(3,false);
+        var sample=Map.<String,Object>of("roundId",11L,"kind","sample","status","confirmed","references",List.of(Map.of("type","file","id",91L,"category","sample_image")),"details",Map.of("samplePurpose","prototype_3d","phoneModelIds",List.of(10L),"requirementVersion",1L));
+        doReturn(List.of(sample)).when(service).allRounds(42L);String before=new ObjectMapper().writeValueAsString(state);
+        var result=preview(3);assertThat(result.get("ready")).isEqualTo(true);readonly(before,state);
+        assertThat(checks(result).get(0).complete()).isTrue();assertThat(checks(result).get(1).complete()).isFalse();assertThat(checks(result).get(1).blocking()).isFalse();
+        launch.confirmStage(42L,3,state,service);assertThat(DevelopmentWorkflowStore.map(state.get("stage3Basis"))).containsEntry("sample",sample);
+        assertThat(state).doesNotContainKey("stage2Basis");
     }
     @Test void noMoldBasisIsAnExplicitOriginalConfirmationAndPreviewCannotCreateIt()throws Exception{
         var state=state(6,false);sample(state);String before=new ObjectMapper().writeValueAsString(state);

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { Download, Refresh, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onMounted, reactive, ref } from 'vue'
@@ -70,13 +72,13 @@ async function downloadTemplate() {
 
 async function runPreview() {
   if (!selectedFile.value) {
-    ElMessage.warning('请选择要导入的 .xlsx 文件')
+    ElMessage.warning(uiText('请选择要导入的 .xlsx 文件'))
     return
   }
   previewLoading.value = true
   try {
     preview.value = await previewImport(activeObjectType.value, selectedFile.value)
-    ElMessage.success('预览校验完成')
+    ElMessage.success(uiText('预览校验完成'))
   } finally {
     previewLoading.value = false
   }
@@ -84,9 +86,9 @@ async function runPreview() {
 
 async function runCommit() {
   if (!preview.value?.importToken) return
-  await ElMessageBox.confirm('确认提交校验通过的数据吗？提交后会写入业务表并记录导入批次。', '提交导入', {
-    confirmButtonText: '提交导入',
-    cancelButtonText: '取消',
+  await ElMessageBox.confirm(uiText('确认提交校验通过的数据吗？提交后会写入业务表并记录导入批次。'), uiText('提交导入'), {
+    confirmButtonText: uiText('提交导入'),
+    cancelButtonText: uiText('取消'),
     type: 'warning'
   })
   commitLoading.value = true
@@ -94,7 +96,7 @@ async function runCommit() {
     preview.value = await commitImport(preview.value.importToken)
     selectedFile.value = null
     await loadBatches()
-    ElMessage.success('导入提交完成')
+    ElMessage.success(uiText('导入提交完成'))
   } finally {
     commitLoading.value = false
   }
@@ -127,7 +129,7 @@ onMounted(loadBatches)
 </script>
 
 <template>
-  <PageContainer title="数据导入导出" description="按核心对象导入历史基础资料，预览通过后再提交落库。">
+  <PageContainer :title='uiText("数据导入导出")' :description='uiText("按核心对象导入历史基础资料，预览通过后再提交落库。")'>
     <section class="page-panel import-export-layout">
       <aside class="import-object-list">
         <button
@@ -138,7 +140,7 @@ onMounted(loadBatches)
           :class="{ 'is-active': activeObjectType === item.value }"
           @click="switchObjectType(item.value)"
         >
-          <strong>{{ item.label }}</strong>
+          <strong>{{ uiText(String((item.label) ?? '')) }}</strong>
           <span class="subtle-text">{{ item.desc }}</span>
         </button>
       </aside>
@@ -149,49 +151,49 @@ onMounted(loadBatches)
             <h3 class="section-title">{{ activeObject.label }}</h3>
             <p class="page-panel-desc">{{ activeObject.desc }}</p>
           </div>
-          <el-button :icon="Download" :loading="templateLoading" @click="downloadTemplate">下载模板</el-button>
+          <el-button :icon="Download" :loading="templateLoading" @click="downloadTemplate">{{ uiText("下载模板") }}</el-button>
         </div>
 
         <section class="import-step-panel">
-          <h4>导入预览</h4>
+          <h4>{{ uiText("导入预览") }}</h4>
           <div class="import-upload-row">
             <input data-test="import-export-file" type="file" accept=".xlsx" @change="handleFileChange" />
-            <el-button type="primary" :icon="UploadFilled" :loading="previewLoading" @click="runPreview">上传预览</el-button>
-            <el-button type="success" :disabled="!canCommit" :loading="commitLoading" @click="runCommit">提交导入</el-button>
+            <el-button type="primary" :icon="UploadFilled" :loading="previewLoading" @click="runPreview">{{ uiText("上传预览") }}</el-button>
+            <el-button type="success" :disabled="!canCommit" :loading="commitLoading" @click="runCommit">{{ uiText("提交导入") }}</el-button>
           </div>
 
           <div v-if="preview" class="import-preview-summary">
-            <div><span class="subtle-text">总行数</span><strong>{{ preview.totalCount }}</strong></div>
-            <div><span class="subtle-text">可导入</span><strong>{{ preview.successCount }}</strong></div>
-            <div><span class="subtle-text">失败</span><strong>{{ preview.failCount }}</strong></div>
-            <div><span class="subtle-text">文件</span><strong>{{ preview.fileName }}</strong></div>
+            <div><span class="subtle-text">{{ uiText("总行数") }}</span><strong>{{ preview.totalCount }}</strong></div>
+            <div><span class="subtle-text">{{ uiText("可导入") }}</span><strong>{{ preview.successCount }}</strong></div>
+            <div><span class="subtle-text">{{ uiText("失败") }}</span><strong>{{ preview.failCount }}</strong></div>
+            <div><span class="subtle-text">{{ uiText("文件") }}</span><strong>{{ preview.fileName }}</strong></div>
           </div>
 
           <el-table v-if="preview" :data="preview.rows" border stripe size="small" max-height="300">
-            <el-table-column prop="rowNo" label="行号" width="80" />
-            <el-table-column prop="businessKey" label="业务键" min-width="160" />
-            <el-table-column label="状态" width="110">
+            <el-table-column prop="rowNo" :label='uiText("行号")' width="80" />
+            <el-table-column prop="businessKey" :label='uiText("业务键")' min-width="160" />
+            <el-table-column :label='uiText("状态")' width="110">
               <template #default="{ row }">
-                <el-tag :type="row.status === 'ready' ? 'success' : 'danger'" effect="light">{{ row.status === 'ready' ? '可导入' : '错误' }}</el-tag>
+                <el-tag :type="row.status === 'ready' ? 'success' : 'danger'" effect="light">{{ row.status === 'ready' ? uiText('可导入') : uiText('错误') }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="message" label="提示" min-width="220" />
+            <el-table-column prop="message" :label='uiText("提示")' min-width="220" />
           </el-table>
         </section>
 
         <section class="import-step-panel">
           <div class="toolbar-row">
             <div>
-              <h4>导出</h4>
-              <p class="page-panel-desc">支持当前筛选导出，也支持全量导出。</p>
+              <h4>{{ uiText("导出") }}</h4>
+              <p class="page-panel-desc">{{ uiText("支持当前筛选导出，也支持全量导出。") }}</p>
             </div>
-            <el-button :icon="Refresh" :loading="loading" @click="loadBatches">刷新批次</el-button>
+            <el-button :icon="Refresh" :loading="loading" @click="loadBatches">{{ uiText("刷新批次") }}</el-button>
           </div>
           <div class="export-filter-row">
-            <el-input v-model="exportFilters.keyword" clearable placeholder="编码 / 名称 / 文件名" />
-            <el-input v-model="exportFilters.status" clearable placeholder="状态" />
-            <el-button :loading="exportLoading" @click="runExport(false)">按筛选导出</el-button>
-            <el-button type="primary" :loading="exportLoading" @click="runExport(true)">全量导出</el-button>
+            <el-input v-model="exportFilters.keyword" clearable :placeholder='uiText("编码 / 名称 / 文件名")' />
+            <el-input v-model="exportFilters.status" clearable :placeholder='uiText("状态")' />
+            <el-button :loading="exportLoading" @click="runExport(false)">{{ uiText("按筛选导出") }}</el-button>
+            <el-button type="primary" :loading="exportLoading" @click="runExport(true)">{{ uiText("全量导出") }}</el-button>
           </div>
         </section>
       </main>
@@ -200,26 +202,26 @@ onMounted(loadBatches)
     <section class="page-panel" v-loading="loading">
       <div class="toolbar-row import-batch-head">
         <div>
-          <h3 class="section-title">导入批次</h3>
-          <p class="page-panel-desc">展示最近 50 条导入批次，便于追溯历史资料入库结果。</p>
+          <h3 class="section-title">{{ uiText("导入批次") }}</h3>
+          <p class="page-panel-desc">{{ uiText("展示最近 50 条导入批次，便于追溯历史资料入库结果。") }}</p>
         </div>
-        <strong>{{ batches.length }} 批</strong>
+        <strong>{{ batches.length }}{{ uiText(" 批") }}</strong>
       </div>
       <FixedTableViewport v-slot="{ tableHeight }" compact :refresh-key="batches">
       <el-table :data="batches" :height="tableHeight" border stripe>
-        <el-table-column prop="importBatchId" label="批次ID" width="90" />
-        <el-table-column prop="objectType" label="对象" width="120" />
-        <el-table-column prop="fileName" label="文件名" min-width="220" />
-        <el-table-column prop="totalCount" label="总数" width="80" />
-        <el-table-column prop="successCount" label="成功" width="80" />
-        <el-table-column prop="failCount" label="失败" width="80" />
-        <el-table-column label="状态" width="110">
+        <el-table-column prop="importBatchId" :label='uiText("批次ID")' width="90" />
+        <el-table-column prop="objectType" :label='uiText("对象")' width="120" />
+        <el-table-column prop="fileName" :label='uiText("文件名")' min-width="220" />
+        <el-table-column prop="totalCount" :label='uiText("总数")' width="80" />
+        <el-table-column prop="successCount" :label='uiText("成功")' width="80" />
+        <el-table-column prop="failCount" :label='uiText("失败")' width="80" />
+        <el-table-column :label='uiText("状态")' width="110">
           <template #default="{ row }"><el-tag effect="light">{{ row.status }}</el-tag></template>
         </el-table-column>
-        <el-table-column label="导入时间" width="160">
+        <el-table-column :label='uiText("导入时间")' width="160">
           <template #default="{ row }">{{ formatDate(row.createdAt) }}</template>
         </el-table-column>
-        <el-table-column prop="createdBy" label="操作人" width="120" />
+        <el-table-column prop="createdBy" :label='uiText("操作人")' width="120" />
       </el-table>
       </FixedTableViewport>
     </section>

@@ -1,4 +1,5 @@
 import type { CommonStatus, ObjectType } from '@/types/common'
+import { t } from '@/locales'
 
 export const STATUS_LABEL_MAP: Record<ObjectType, Partial<Record<CommonStatus, string>>> = {
   customer: {
@@ -88,7 +89,7 @@ export const STATUS_COLOR_MAP: Partial<Record<CommonStatus, string>> = {
 }
 
 export function getStatusLabel(status: CommonStatus, objectType: ObjectType = 'product') {
-  return STATUS_LABEL_MAP[objectType][status] || status
+  return t(STATUS_LABEL_MAP[objectType][status] || status)
 }
 
 export function getStatusColor(status: CommonStatus) {

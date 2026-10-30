@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -301,7 +303,7 @@ function tagType(text: string) {
   <PageContainer :title="current.title" :description="current.summary">
     <section class="metric-grid">
       <button v-for="metric in current.metrics" :key="metric.label" class="metric-card module-button" type="button" @click="openTarget(metric.targetPath)">
-        <p class="metric-card__label">{{ metric.label }}</p>
+        <p class="metric-card__label">{{ uiText(String((metric.label) ?? '')) }}</p>
         <p class="metric-card__value">{{ metric.value }}</p>
         <div class="module-card-footer">
           <span>{{ metric.hint }}</span>
@@ -313,15 +315,15 @@ function tagType(text: string) {
     <section class="page-panel">
       <div class="toolbar-row">
         <div>
-          <h3 class="section-title">业务承载范围</h3>
+          <h3 class="section-title">{{ uiText("业务承载范围") }}</h3>
           <p class="page-panel-desc">{{ current.objectScope }}</p>
         </div>
-        <el-tag type="info" effect="light">接口未接入</el-tag>
+        <el-tag type="info" effect="light">{{ uiText("接口未接入") }}</el-tag>
       </div>
     </section>
 
     <section class="page-panel">
-      <h3 class="section-title">阶段节点</h3>
+      <h3 class="section-title">{{ uiText("阶段节点") }}</h3>
       <div class="stage-grid">
         <button v-for="stage in current.stages" :key="`${stage.stage}-${stage.dueDate}`" class="stage-item module-button" type="button" @click="openTarget(stage.targetPath)">
           <div class="toolbar-row">
@@ -330,7 +332,7 @@ function tagType(text: string) {
           </div>
           <p class="subtle-text">{{ stage.owner }}</p>
           <div class="module-card-footer">
-            <span>截止 {{ stage.dueDate }}</span>
+            <span>{{ uiText("截止 ") }}{{ stage.dueDate }}</span>
             <el-icon><ArrowRight /></el-icon>
           </div>
         </button>
@@ -339,38 +341,38 @@ function tagType(text: string) {
 
     <section class="split-grid">
       <article class="page-panel">
-        <h3 class="section-title">业务列表</h3>
+        <h3 class="section-title">{{ uiText("业务列表") }}</h3>
         <FixedTableViewport v-slot="{ tableHeight }" :refresh-key="current.records">
         <el-table :data="current.records" :height="tableHeight" border stripe @row-click="(row: RecordItem) => openTarget(row.targetPath)">
-          <el-table-column prop="code" label="编码" min-width="180" />
-          <el-table-column prop="name" label="名称" min-width="220" />
-          <el-table-column prop="object" label="承载对象" min-width="150" />
-          <el-table-column prop="status" label="状态" width="120">
+          <el-table-column prop="code" :label='uiText("编码")' min-width="180" />
+          <el-table-column prop="name" :label='uiText("名称")' min-width="220" />
+          <el-table-column prop="object" :label='uiText("承载对象")' min-width="150" />
+          <el-table-column prop="status" :label='uiText("状态")' width="120">
             <template #default="{ row }">
               <el-tag :type="tagType(row.status)" effect="light">{{ row.status }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="owner" label="责任人" width="130" />
-          <el-table-column prop="nextAction" label="下一步动作" min-width="220" />
+          <el-table-column prop="owner" :label='uiText("责任人")' width="130" />
+          <el-table-column prop="nextAction" :label='uiText("下一步动作")' min-width="220" />
         </el-table>
         </FixedTableViewport>
       </article>
 
       <article class="page-panel">
-        <h3 class="section-title">风险提醒</h3>
+        <h3 class="section-title">{{ uiText("风险提醒") }}</h3>
         <button v-for="risk in current.risks" :key="risk.title" class="risk-item module-button" type="button" @click="openTarget(risk.targetPath)">
           <div class="toolbar-row">
             <strong>{{ risk.title }}</strong>
             <el-tag :type="risk.level === '高' ? 'danger' : risk.level === '中' ? 'warning' : 'info'" effect="light">{{ risk.level }}</el-tag>
           </div>
-          <p class="page-panel-desc">责任人：{{ risk.owner }}</p>
+          <p class="page-panel-desc">{{ uiText("责任人：") }}{{ risk.owner }}</p>
           <div class="module-card-footer">
             <span>{{ risk.action }}</span>
             <el-icon><ArrowRight /></el-icon>
           </div>
         </button>
 
-        <h3 class="section-title checklist-title">需求校验点</h3>
+        <h3 class="section-title checklist-title">{{ uiText("需求校验点") }}</h3>
         <button v-for="item in current.checks" :key="item" class="check-item module-button" type="button">
           <span>{{ item }}</span>
         </button>

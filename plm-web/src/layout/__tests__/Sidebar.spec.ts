@@ -4,6 +4,7 @@ import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
+import { setLanguage } from '@/locales'
 import Sidebar from '../Sidebar.vue'
 import { getMoldApplicationConfig } from '@/api/modules/moldApplications'
 
@@ -14,7 +15,7 @@ vi.mock('@/api/modules/moldApplications',()=>({getMoldApplicationConfig:vi.fn().
 
 let wrapper: VueWrapper | undefined
 
-afterEach(() => {wrapper?.unmount();vi.mocked(getMoldApplicationConfig).mockResolvedValue({enabled:false})})
+afterEach(() => {setLanguage('zh-CN');wrapper?.unmount();vi.mocked(getMoldApplicationConfig).mockResolvedValue({enabled:false})})
 
 async function start(permissions = ['*'], path = '/molds', roleCode = '') {
   const pinia = createPinia()
@@ -37,6 +38,20 @@ async function start(permissions = ['*'], path = '/molds', roleCode = '') {
 }
 
 describe('mold ledger navigation', () => {
+  it('switches displayed navigation in place without changing the open group, route or permissions',async()=>{
+    const {wrapper,router}=await start(['*'],'/partner-products')
+    const groups=wrapper.findAll('.sidebar__group').length
+    setLanguage('es');await flushPromises()
+    expect(wrapper.get('.sidebar__group.is-active-group .sidebar__group-label').text()).toBe('Productos de proveedores')
+    expect(wrapper.get('.sidebar__item.is-active').text()).toBe('Catálogo de proveedores')
+    expect(wrapper.get('.sidebar__collapse-trigger').text()).toBe('Contraer menú')
+    expect(wrapper.get('.sidebar__title').text()).toContain('Desarrollo y colaboración')
+    expect(router.currentRoute.value.path).toBe('/partner-products');expect(wrapper.findAll('.sidebar__group')).toHaveLength(groups)
+    setLanguage('zh-CN');await flushPromises()
+    expect(wrapper.get('.sidebar__item.is-active').text()).toBe('供应商产品目录')
+    expect(useUserStore().permissions).toEqual(['*'])
+  })
+
   it('keeps the three catalogue entries ordered and highlights listing evidence under the listed catalogue',async()=>{const {wrapper,router}=await start(['*'],'/partner-listings');const group=wrapper.get('.sidebar__group.is-active-group');expect(group.findAll('.sidebar__item').map(item=>item.text())).toEqual(['供应商产品目录','选品目录','样品管理','上架产品目录','委外与交付']);await router.push('/partner-operations/listing/88');await flushPromises();expect(wrapper.findAll('.sidebar__item.is-active').map(item=>item.text())).toEqual(['上架产品目录'])})
   it('opens partner products independently and keeps samples under workbench',async()=>{const {wrapper,router}=await start(['*'],'/partner-products');expect(wrapper.get('.sidebar__group.is-active-group .sidebar__group-label').text()).toBe('合作产品');expect(wrapper.get('.sidebar__item.is-active').text()).toBe('供应商产品目录');await router.push('/samples?id=11');await flushPromises();expect(wrapper.get('.sidebar__group.is-active-group .sidebar__group-label').text()).toBe('工作台');expect(wrapper.get('.sidebar__item.is-active').text()).toBe('样品管理')})
 

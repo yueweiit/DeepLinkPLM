@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PartnerWorkspace from './PartnerWorkspace.vue'
@@ -11,7 +13,7 @@ const productView = computed(() => Boolean(route.query.id) || route.query.view =
 
 <template>
   <div v-if="productView" class="product-catalog-entry">
-    <div class="catalog-return"><el-button link type="primary" @click="router.push('/partner-products')">供应商款式</el-button><span>我方产品</span></div>
+    <div class="catalog-return"><el-button link type="primary" @click="router.push('/partner-products')">{{ uiText("供应商款式") }}</el-button><span>{{ uiText("我方产品") }}</span></div>
     <PartnerWorkspace />
   </div>
   <SupplierCatalogWorkspace v-else />

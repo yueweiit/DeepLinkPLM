@@ -3,6 +3,7 @@ import {ref} from 'vue'
 import ElementPlus,{ElCheckbox,ElDialog,ElPagination} from 'element-plus'
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
 import PartnerFiles from '../PartnerFiles.vue'
+import PartnerFilePreview from '../PartnerFilePreview.vue'
 import {authorizedBlobs} from '@/utils/authorizedBlobQueue'
 const api=vi.hoisted(()=>({uploadPartnerFile:vi.fn(),fileBlob:vi.fn(),saveBlob:vi.fn()}))
 const measuredWidth=ref(980)
@@ -66,12 +67,12 @@ describe('full-size preview feedback',()=>{
   let resolve!:(blob:Blob)=>void;api.fileBlob.mockReturnValue(new Promise<Blob>(yes=>{resolve=yes}))
   start();await wrapper.findAll('button').find(button=>button.text()==='预览')!.trigger('click');await flushPromises()
   const signal=api.fileBlob.mock.calls[0][2].signal as AbortSignal
-  wrapper.getComponent(ElDialog).vm.$emit('close');await flushPromises();expect(signal.aborted).toBe(true);expect(wrapper.getComponent(ElDialog).props('modelValue')).toBe(false)
+  wrapper.getComponent(ElDialog).vm.$emit('close');await flushPromises();expect(signal.aborted).toBe(true);expect(wrapper.findComponent(PartnerFilePreview).exists()).toBe(false)
   resolve(new Blob(['image'],{type:'image/png'}));await flushPromises();expect(create).not.toHaveBeenCalled()
  })
  it('closes the old object preview on business-id change and releases a displayed URL',async()=>{
   api.fileBlob.mockResolvedValue(new Blob(['image'],{type:'image/png'}));start();await wrapper.findAll('button').find(button=>button.text()==='预览')!.trigger('click');await flushPromises()
   const src=document.body.querySelector('.preview-image')!.getAttribute('src');await wrapper.setProps({id:8});await flushPromises()
-  expect(wrapper.getComponent(ElDialog).props('modelValue')).toBe(false);expect(revoke).toHaveBeenCalledWith(src)
+  expect(wrapper.findComponent(PartnerFilePreview).exists()).toBe(false);expect(revoke).toHaveBeenCalledWith(src)
  })
 })

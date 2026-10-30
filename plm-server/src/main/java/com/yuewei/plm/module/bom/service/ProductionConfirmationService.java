@@ -646,9 +646,50 @@ public class ProductionConfirmationService {
     }
 
     private Product createSku(Product project, ProductProductionColorDecision decision, LocalDateTime now) {
+        Product sku = skuFields(project, decision, now);
+        sku.setProductCode(uniqueSkuProductCode(project, decision));
+        sku.setFinishedProductCode(availableFinishedProductCode(project, resolveFinishedProductCode(project, decision.getColorCode()), null));
+        sku.setStatus("released");
+        sku.setReleasedAt(now);
+        sku.setReleasedBy("system");
+        return sku;
+    }
+
+    public record ResearchSkuDraftResult(Product product, boolean created) {}
+
+    /** Only a newly inserted identity can receive creation scope; an existing result requires its original object scope. */
+    public ResearchSkuDraftResult researchSkuDraft(Product project, CodeItem color, String operationCode, String operator) {
+        String code = businessCodeGenerator.generateProductStateCode(project.getProductSpecificCode(), operationCode,
+            project.getPhoneModelCode(), color.getCodeValue());
+        var decision = new ProductProductionColorDecision();
+        decision.setColorCode(color.getCodeValue());
+        decision.setColorName(firstText(color.getCodeName(), color.getCodeNameZh()));
+        Product existing = findSku(project, decision);
+        if (existing != null) {
+            if (Set.of("archived", "abandoned").contains(Objects.toString(existing.getStatus(), ""))
+                || Set.of("frozen", "abandoned").contains(Objects.toString(existing.getLockStatus(), ""))
+                || !Objects.equals(existing.getProductSpecificCode(), project.getProductSpecificCode())
+                || !Objects.equals(existing.getPhoneModelMemberId(), project.getPhoneModelMemberId())
+                || !Objects.equals(normalizeCompactCode(existing.getPhoneModelCode()), project.getPhoneModelCode())
+                || !Objects.equals(normalizeCompactCode(existing.getColorCode()), color.getCodeValue())
+                || !Objects.equals(existing.getFinishedProductCode(), code)) return null;
+            return new ResearchSkuDraftResult(existing, false);
+        }
+        if (!safe(productRepository.selectList(new LambdaQueryWrapper<Product>()
+            .and(q -> q.eq(Product::getFinishedProductCode, code).or().eq(Product::getProductCode, code)))).isEmpty()) return null;
+        Product sku = skuFields(project, decision, LocalDateTime.now());
+        sku.setProductCode(uniqueSkuProductCode(project, decision));
+        sku.setFinishedProductCode(code);
+        sku.setStatus("draft");
+        sku.setCreatedBy(operator);
+        sku.setUpdatedBy(operator);
+        productRepository.insert(sku);
+        return new ResearchSkuDraftResult(sku, true);
+    }
+
+    private Product skuFields(Product project, ProductProductionColorDecision decision, LocalDateTime now) {
         Product sku = new Product();
         sku.setParentProductId(project.getProductId());
-        sku.setProductCode(uniqueSkuProductCode(project, decision));
         sku.setProductName(skuName(project, decision.getColorName()));
         sku.setProductType("sku");
         sku.setSeriesName(project.getSeriesName());
@@ -658,7 +699,6 @@ public class ProductionConfirmationService {
         sku.setProductSpecificCode(project.getProductSpecificCode());
         sku.setPhoneModelCode(project.getPhoneModelCode());
         sku.setPhoneModelMemberId(project.getPhoneModelMemberId());
-        sku.setFinishedProductCode(resolveAvailableFinishedProductCode(project, decision.getColorCode(), null));
         sku.setImportShortCode(project.getImportShortCode());
         sku.setMaterial(project.getMaterial());
         sku.setPackageType(project.getPackageType());
@@ -666,9 +706,6 @@ public class ProductionConfirmationService {
         sku.setCoreProcess(project.getCoreProcess());
         sku.setComposition(project.getComposition());
         sku.setVersionNo(project.getVersionNo());
-        sku.setStatus("released");
-        sku.setReleasedAt(now);
-        sku.setReleasedBy("system");
         sku.setCreatedAt(now);
         sku.setCreatedBy("system");
         sku.setUpdatedAt(now);
@@ -686,6 +723,11 @@ public class ProductionConfirmationService {
         if (phone != null && StringUtils.hasText(sku.getPhoneModelCode()) && !Objects.equals(sku.getPhoneModelCode(), project.getPhoneModelCode())) {
             throw new BusinessException(40001, "SKU 原手机编码与所属项目不一致，请先核对，不能自动换码");
         }
+        String expectedCode = resolveFinishedProductCode(project, decision.getColorCode());
+        String priorCode = normalizeCompactCode(sku.getFinishedProductCode());
+        boolean completePrior = priorCode != null && priorCode.matches(ProductBusinessCodeGenerator.PRODUCT_STATE_CODE_REGEX);
+        if (completePrior && StringUtils.hasText(expectedCode) && !priorCode.equals(expectedCode))
+            throw new BusinessException(40001, "SKU 原编码 " + sku.getFinishedProductCode() + " 与当前工序生成的 " + expectedCode + " 不一致，原码保留，请核对原工序配置");
         if (phone != null && sku.getPhoneModelMemberId() == null) {
             sku.setPhoneModelMemberId(phone);
             changed = true;
@@ -694,8 +736,8 @@ public class ProductionConfirmationService {
         changed |= setIfDifferent(sku::getColorCode, sku::setColorCode, normalizeCompactCode(decision.getColorCode()));
         changed |= setIfDifferent(sku::getProductSpecificCode, sku::setProductSpecificCode, project.getProductSpecificCode());
         changed |= setIfDifferent(sku::getPhoneModelCode, sku::setPhoneModelCode, project.getPhoneModelCode());
-        String targetFinishedProductCode = resolveAvailableFinishedProductCode(project, decision.getColorCode(), sku.getProductId());
-        if (StringUtils.hasText(targetFinishedProductCode) || !StringUtils.hasText(sku.getFinishedProductCode())) {
+        String targetFinishedProductCode = availableFinishedProductCode(project, expectedCode, sku.getProductId());
+        if (!completePrior && (StringUtils.hasText(targetFinishedProductCode) || !StringUtils.hasText(sku.getFinishedProductCode()))) {
             changed |= setIfDifferent(sku::getFinishedProductCode, sku::setFinishedProductCode, targetFinishedProductCode);
         }
         changed |= setIfDifferent(sku::getImportShortCode, sku::setImportShortCode, project.getImportShortCode());
@@ -729,8 +771,7 @@ public class ProductionConfirmationService {
         return changed;
     }
 
-    private String resolveAvailableFinishedProductCode(Product project, String colorCode, Long currentSkuId) {
-        String generated = resolveFinishedProductCode(project, colorCode);
+    private String availableFinishedProductCode(Product project, String generated, Long currentSkuId) {
         if (!StringUtils.hasText(generated)) {
             return null;
         }
@@ -797,9 +838,15 @@ public class ProductionConfirmationService {
             productSpecificCode,
             normalizeCompactCode(project.getPhoneModelCode())
         );
-        return StringUtils.hasText(operationFromFinishedCode)
-            ? operationFromFinishedCode
-            : ProductBusinessCodeGenerator.DEFAULT_FINAL_OPERATION_CODE;
+        if (StringUtils.hasText(operationFromFinishedCode)) return operationFromFinishedCode;
+        var assigned = safe(productRepository.selectList(new LambdaQueryWrapper<Product>()
+            .eq(Product::getParentProductId, project.getProductId()).eq(Product::getProductType, "sku")
+            .eq(Product::getProductSpecificCode, productSpecificCode).eq(Product::getPhoneModelCode, project.getPhoneModelCode())
+            .eq(Product::getDeletedFlag, 0))).stream()
+            .map(sku -> resolveFullFinishedOperationCode(sku.getFinishedProductCode(), productSpecificCode, normalizeCompactCode(project.getPhoneModelCode())))
+            .filter(StringUtils::hasText).collect(Collectors.toSet());
+        if (assigned.size() > 1) throw new BusinessException(40001, "同一型号已有不同工序的完整N编码，原码保留，请核对已有编码");
+        return assigned.isEmpty() ? ProductBusinessCodeGenerator.DEFAULT_FINAL_OPERATION_CODE : assigned.iterator().next();
     }
 
     private String resolveProductLineOperationCode(String productCode, String productSpecificCode) {

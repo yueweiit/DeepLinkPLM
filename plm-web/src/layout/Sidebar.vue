@@ -177,7 +177,7 @@ function handleMenuItemClick(item: MenuItem, groupTitle: string) {
       <img class="sidebar__logo" :src="brandLogo" :alt="t('common.appName')" width="40" height="40" />
       <div v-if="!collapsed" class="sidebar__title">
         <strong>{{ t('common.appName') }}</strong>
-        <span>产品研发协同</span>
+        <span>{{ t('产品研发协同') }}</span>
       </div>
     </div>
 
@@ -189,7 +189,7 @@ function handleMenuItemClick(item: MenuItem, groupTitle: string) {
           type="button"
           @click="handleGroupClick(group)"
         >
-          <span v-if="!collapsed" class="sidebar__group-label">{{ group.title }}</span>
+          <span v-if="!collapsed" class="sidebar__group-label">{{ t(group.title) }}</span>
           <el-icon v-else class="sidebar__group-icon">
             <component :is="resolveDynamicComponent(group.items[0].icon)" />
           </el-icon>
@@ -207,7 +207,7 @@ function handleMenuItemClick(item: MenuItem, groupTitle: string) {
               @click="handleMenuItemClick(item, group.title)"
             >
               <el-icon class="sidebar__item-icon"><component :is="resolveDynamicComponent(item.icon)" /></el-icon>
-              <span v-if="!collapsed">{{ item.title }}</span>
+              <span v-if="!collapsed">{{ t(item.title) }}</span>
             </button>
           </template>
         </div>
@@ -219,7 +219,7 @@ function handleMenuItemClick(item: MenuItem, groupTitle: string) {
         <el-icon class="sidebar__collapse-icon">
           <component :is="collapsed ? ArrowRightBold : ArrowLeftBold" />
         </el-icon>
-        <span v-if="!collapsed">收起侧栏</span>
+        <span v-if="!collapsed">{{ t('收起侧栏') }}</span>
       </button>
     </div>
   </aside>

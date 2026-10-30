@@ -5,6 +5,7 @@ import com.yuewei.plm.common.util.RequestIdUtil;
 import com.yuewei.plm.common.vo.ResponseVO;
 import com.yuewei.plm.module.auth.dto.LoginDTO;
 import com.yuewei.plm.module.auth.service.AuthService;
+import com.yuewei.plm.module.auth.service.UserLanguageService;
 import com.yuewei.plm.module.auth.vo.CurrentUserVO;
 import com.yuewei.plm.module.auth.vo.LoginVO;
 import jakarta.servlet.http.HttpServletRequest;
@@ -13,6 +14,7 @@ import java.time.OffsetDateTime;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -24,6 +26,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
+    private final UserLanguageService languages;
+
+    @PatchMapping("/language")
+    public ResponseVO<UserLanguageService.Result> language(@Valid @RequestBody UserLanguageService.Input input,
+                                                          HttpServletRequest request) {
+        return ResponseVO.success(languages.save(null, input, request), RequestIdUtil.getRequestId(request), OffsetDateTime.now());
+    }
 
     @PostMapping("/login")
     public ResponseVO<LoginVO> login(@Valid @RequestBody LoginDTO loginDTO, HttpServletRequest request) {

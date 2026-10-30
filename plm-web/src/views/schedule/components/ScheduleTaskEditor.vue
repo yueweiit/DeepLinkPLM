@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -40,7 +42,7 @@ const arrivalField=computed(()=>allFields.value.find(f=>f.key==='plannedFactoryA
 async function refresh(){const token=user.token,ticket=++generation;row.value=undefined;error.value='';detailLoading.value=true;try{const data=await api.getSchedule(props.task.moldSetId);if(token===user.token&&ticket===generation)row.value=data}catch{if(token===user.token&&ticket===generation)error.value='当前任务资料加载失败，请重试'}finally{if(ticket===generation)detailLoading.value=false}}
 watch(()=>props.task,()=>{extra.value=false;emit('scope',props.task.moldSetId,scopedKeys.value);void refresh()},{immediate:true})
 watch(()=>user.token,()=>{generation++;row.value=undefined;error.value='';saving.value=false;extra.value=false},{flush:'sync'})
-function edit(f:PlanField,text:string,quiet=false){if(!row.value||!can(f))return;try{drafts.set(row.value,f.key,parseCell(f,text))}catch(e){if(!quiet)ElMessage.warning(e instanceof Error?e.message:'格式不正确')}}
+function edit(f:PlanField,text:string,quiet=false){if(!row.value||!can(f))return;try{drafts.set(row.value,f.key,parseCell(f,text))}catch(e){if(!quiet)ElMessage.warning(e instanceof Error?e.message:uiText('格式不正确'))}}
 function paste(f:PlanField,event:ClipboardEvent){
   if((event.target as HTMLElement|null)?.tagName==='TEXTAREA')return
   const text=event.clipboardData?.getData('text/plain')||'';if(!/[\t\n\r]/.test(text))return;event.preventDefault()
@@ -48,9 +50,9 @@ function paste(f:PlanField,event:ClipboardEvent){
     const current=[...mainFields.value,...(extra.value?additionalFields.value:[]),...writingFields.value],start=current.findIndex(field=>field.key===f.key)
     const changes=cells[0].map((text,i)=>{const field=current[start+i];if(!field||!can(field))throw new Error('粘贴超出当前任务或包含只读字段');return {field,value:parseCell(field,text)}})
     if(row.value)changes.forEach(c=>drafts.set(row.value!,c.field.key,c.value))
-  }catch(e){ElMessage.warning(e instanceof Error?e.message:'粘贴失败')}
+  }catch(e){ElMessage.warning(e instanceof Error?e.message:uiText('粘贴失败'))}
 }
-function adoptArrival(){const f=arrivalField.value;if(!row.value||!f||!can(f)||!arrivalSuggestion.value)return;if(value(f.key)){ElMessage.warning('已有到厂计划，建议不会覆盖，请手工修改并说明原因');return}drafts.set(row.value,f.key,arrivalSuggestion.value,true)}
+function adoptArrival(){const f=arrivalField.value;if(!row.value||!f||!can(f)||!arrivalSuggestion.value)return;if(value(f.key)){ElMessage.warning(uiText('已有到厂计划，建议不会覆盖，请手工修改并说明原因'));return}drafts.set(row.value,f.key,arrivalSuggestion.value,true)}
 function confirmArrival(){const f=arrivalField.value;if(row.value&&f&&can(f)&&value(f.key))drafts.set(row.value,f.key,value(f.key),true)}
 async function save(){
   if(!row.value||!patches.value.length||!user.token)return
@@ -59,11 +61,11 @@ async function save(){
   try{const results=await api.saveScheduleRows(submitted);if(token!==user.token)return
     results.forEach(r=>{drafts.apply(r,submitted.find(p=>p.id===r.id));if(r.status==='saved'&&r.row&&row.value?.moldSetId===r.id)row.value=r.row as ScheduleRow})
     if(results.some(r=>r.status!=='saved'))error.value='当前任务未保存，校验结果和草稿已保留'
-    else{workspace.changed();emit('saved');ElMessage.success('已保存，待办按正式记录重新判断')}
+    else{workspace.changed();emit('saved');ElMessage.success(uiText('已保存，待办按正式记录重新判断'))}
   }catch{if(token===user.token)error.value='保存未确认完成，当前任务草稿已保留'}finally{if(token===user.token)saving.value=false}
 }
-async function discard(){if(!dirtyCount.value)return;try{await ElMessageBox.confirm('仅撤销当前任务字段的未保存修改；其他任务及模块草稿保留。','撤销当前任务');drafts.clear(scope.value);error.value=''}catch{}}
-async function reason(){if(!row.value)return;const draft=drafts.rows.get(rowKey(row.value));if(!draft)return;try{const r=await ElMessageBox.prompt('填写本次更正或核对说明，随当前任务字段保存。','更正说明',{inputType:'textarea',inputValue:draft.reason});draft.reason=r.value.trim()}catch{}}
+async function discard(){if(!dirtyCount.value)return;try{await ElMessageBox.confirm(uiText('仅撤销当前任务字段的未保存修改；其他任务及模块草稿保留。'),uiText('撤销当前任务'));drafts.clear(scope.value);error.value=''}catch{}}
+async function reason(){if(!row.value)return;const draft=drafts.rows.get(rowKey(row.value));if(!draft)return;try{const r=await ElMessageBox.prompt(uiText('填写本次更正或核对说明，随当前任务字段保存。'),uiText('更正说明'),{inputType:'textarea',inputValue:draft.reason});draft.reason=r.value.trim()}catch{}}
 function resolve(field:string,keepMine:boolean){if(!row.value)return;const current=result.value?.conflicts.find(c=>c.field===field)?.current;drafts.resolve(rowKey(row.value),field,keepMine);if(current!==undefined)row.value[field]=current}
 function navigate(path:string){void router.push({path,query:{moldSetId:props.task.moldSetId,...(path==='/mold-schedules'?{tab:'sets'}:{})}})}
 defineExpose({refresh})
@@ -75,69 +77,69 @@ defineExpose({refresh})
       <header class="task-context">
         <div class="editor-heading">
           <h3>{{ task.title }}</h3>
-          <el-tag :type="task.overdue?'danger':'info'">{{ task.overdue?`延期 ${task.overdueDays || 1} 天`:task.category==='review'?'待核对':task.category==='missing'?'待补填':'待完成' }}</el-tag>
+          <el-tag :type="task.overdue?'danger':'info'">{{ task.overdue?uiText('延期 {value0} 天',{value0:(task.overdueDays || 1)}):task.category==='review'?uiText('待核对'):task.category==='missing'?uiText('待补填'):uiText('待完成') }}</el-tag>
         </div>
         <div class="task-identity">
           <span :title="row.styleName">{{ archivePlatformName(row) }}</span>
           <span :title="row.compatibleModels">{{ archiveModelName(row) }}</span>
           <button @click="navigate('/molds')">{{ row.assetNumber }}</button>
         </div>
-        <div class="task-meta">{{ groupNames[task.group as keyof typeof groupNames] || task.group }} · {{ task.ownerUserId ? options?.users?.find(u=>u.userId===task?.ownerUserId)?.displayName || `账号 #${task.ownerUserId}` : '按职责分配' }} · {{ task.dueDate?`期限 ${task.dueDate}`:'无独立期限，不作逾期提醒' }}</div>
+        <div class="task-meta">{{ groupNames[task.group as keyof typeof groupNames] || task.group }} · {{ task.ownerUserId ? options?.users?.find(u=>u.userId===task?.ownerUserId)?.displayName || uiText('账号 #{value0}',{value0:(task.ownerUserId)}) : uiText('按职责分配') }} · {{ task.dueDate?uiText('期限 {value0}',{value0:(task.dueDate)}):uiText('无独立期限，不作逾期提醒') }}</div>
       </header>
 
       <div class="task-form">
         <div v-if="mainFields.length" class="task-fields">
           <label v-for="f in mainFields" :key="f.key" class="task-field" :data-task-field="f.key">
-            <span>{{ f.label }}</span>
+            <span>{{ uiText(String((f.label) ?? '')) }}</span>
             <CollaborationCell :field="f" :value="value(f.key)" :editable="can(f)" :dirty="dirty(f.key)" :users="options?.users" @edit="edit(f,$event)" @preview="edit(f,$event,true)" @paste="paste(f,$event)" />
           </label>
         </div>
         <div v-if="inputKeys.includes('plannedFactoryArrivalDate')" class="arrival-confirmation">
-          <span v-if="arrivalSuggestion">建议 {{ arrivalSuggestion }}（计划交付＋7天）</span>
-          <el-button v-if="arrivalSuggestion && !value('plannedFactoryArrivalDate')" :disabled="!arrivalField || !can(arrivalField)" data-test="adopt-task-arrival" @click="adoptArrival">确认采用建议</el-button>
-          <template v-if="task.taskKey==='arrival_review'"><span>计划交付变化，请核对已有到厂日期；不会自动覆盖。</span><span>上次依据 {{ row.arrivalConfirmedBasisDate || '未确认' }}</span><el-button v-if="value('plannedFactoryArrivalDate')" :disabled="!arrivalField || !can(arrivalField)" data-test="confirm-task-arrival" @click="confirmArrival">确认当前到厂计划</el-button></template>
+          <span v-if="arrivalSuggestion">{{ uiText("建议 ") }}{{ arrivalSuggestion }}{{ uiText("（计划交付＋7天）") }}</span>
+          <el-button v-if="arrivalSuggestion && !value('plannedFactoryArrivalDate')" :disabled="!arrivalField || !can(arrivalField)" data-test="adopt-task-arrival" @click="adoptArrival">{{ uiText("确认采用建议") }}</el-button>
+          <template v-if="task.taskKey==='arrival_review'"><span>{{ uiText("计划交付变化，请核对已有到厂日期；不会自动覆盖。") }}</span><span>{{ uiText("上次依据 ") }}{{ row.arrivalConfirmedBasisDate || uiText('未确认') }}</span><el-button v-if="value('plannedFactoryArrivalDate')" :disabled="!arrivalField || !can(arrivalField)" data-test="confirm-task-arrival" @click="confirmArrival">{{ uiText("确认当前到厂计划") }}</el-button></template>
         </div>
         <details v-if="additionalFields.length" class="task-additional" :open="extra" @toggle="extra=($event.target as HTMLDetailsElement).open">
-          <summary>补充周期、预测与负责人</summary>
+          <summary>{{ uiText("补充周期、预测与负责人") }}</summary>
           <div class="task-fields">
             <label v-for="f in additionalFields" :key="f.key" class="task-field" :data-task-field="f.key">
-              <span>{{ f.label }}</span>
+              <span>{{ uiText(String((f.label) ?? '')) }}</span>
               <CollaborationCell :field="f" :value="value(f.key)" :editable="can(f)" :dirty="dirty(f.key)" :users="options?.users" @edit="edit(f,$event)" @preview="edit(f,$event,true)" @paste="paste(f,$event)" />
             </label>
           </div>
         </details>
         <div v-if="writingFields.length" class="task-writing">
           <label v-for="f in writingFields" :key="f.key" class="task-field task-writing-field" :data-task-field="f.key">
-            <span class="writing-label"><span>{{ f.label }}</span><small v-if="f.maxLength">{{ String(value(f.key) ?? '').length }} / {{ f.maxLength }}</small></span>
+            <span class="writing-label"><span>{{ uiText(String((f.label) ?? '')) }}</span><small v-if="f.maxLength">{{ String(value(f.key) ?? '').length }} / {{ f.maxLength }}</small></span>
             <CollaborationCell :field="f" :value="value(f.key)" :editable="can(f)" :dirty="dirty(f.key)" :users="options?.users" @edit="edit(f,$event)" @preview="edit(f,$event,true)" @paste="paste(f,$event)" />
           </label>
         </div>
-        <p v-if="!inputFields.length && !writingFields.length" class="empty-note">此任务暂未提供可填写字段，请刷新或前往排程查看。不会开放其他职责字段。</p>
+        <p v-if="!inputFields.length && !writingFields.length" class="empty-note">{{ uiText("此任务暂未提供可填写字段，请刷新或前往排程查看。不会开放其他职责字段。") }}</p>
         <section v-if="result && result.status!=='saved'" class="task-conflicts">
           <strong>{{ result.message }}</strong>
-          <div v-for="c in relevantConflicts" :key="c.field">{{ c.label }}：当前 {{ c.current ?? '未填写' }}；{{ expectedOnly(c.field)?'原核对依据':'待保存' }} {{ (expectedOnly(c.field)?c.before:c.attempted) ?? '未填写' }}<template v-if="expectedOnly(c.field)"><el-button :data-test="`review-expected-${c.field}`" @click="resolve(c.field,true)">已核对最新依据</el-button></template><template v-else><el-button @click="resolve(c.field,false)">采用当前值</el-button><el-button @click="resolve(c.field,true)">确认保留我的修改</el-button></template></div>
+          <div v-for="c in relevantConflicts" :key="c.field">{{ uiText(String((c.label) ?? '')) }}{{ uiText("：当前 ") }}{{ c.current ?? uiText('未填写') }}；{{ expectedOnly(c.field)?uiText('原核对依据'):uiText('待保存') }} {{ (expectedOnly(c.field)?c.before:c.attempted) ?? uiText('未填写') }}<template v-if="expectedOnly(c.field)"><el-button :data-test="`review-expected-${c.field}`" @click="resolve(c.field,true)">{{ uiText("已核对最新依据") }}</el-button></template><template v-else><el-button @click="resolve(c.field,false)">{{ uiText("采用当前值") }}</el-button><el-button @click="resolve(c.field,true)">{{ uiText("确认保留我的修改") }}</el-button></template></div>
         </section>
       </div>
 
       <footer class="task-footer">
-        <p class="draft-note">浅黄色为尚未保存的修改。</p>
-        <p v-if="scopedKeys.some(k=>/MexicoArrival|FactoryArrival|Acceptance/.test(k))" class="draft-note">抵墨不等同于到厂或验收；正式计划基准在开模时间管控确认。</p>
+        <p class="draft-note">{{ uiText("浅黄色为尚未保存的修改。") }}</p>
+        <p v-if="scopedKeys.some(k=>/MexicoArrival|FactoryArrival|Acceptance/.test(k))" class="draft-note">{{ uiText("抵墨不等同于到厂或验收；正式计划基准在开模时间管控确认。") }}</p>
         <div class="task-actions">
-          <span class="save-state" :class="{'has-changes':dirtyCount}" aria-live="polite">{{ dirtyCount ? `${dirtyCount} 个字段待保存` : '当前没有未保存的修改' }}</span>
+          <span class="save-state" :class="{'has-changes':dirtyCount}" aria-live="polite">{{ dirtyCount ? uiText('{value0} 个字段待保存',{value0:(dirtyCount)}) : uiText('当前没有未保存的修改') }}</span>
           <div class="save-buttons">
-            <el-button :disabled="!dirtyCount || saving" @click="reason">更正说明</el-button>
-            <el-button :disabled="!dirtyCount || saving" data-test="discard-current-task" @click="discard">撤销当前任务</el-button>
-            <el-button type="primary" :disabled="!dirtyCount || saving" :loading="saving" data-test="save-current-task" @click="save">保存当前任务</el-button>
+            <el-button :disabled="!dirtyCount || saving" @click="reason">{{ uiText("更正说明") }}</el-button>
+            <el-button :disabled="!dirtyCount || saving" data-test="discard-current-task" @click="discard">{{ uiText("撤销当前任务") }}</el-button>
+            <el-button type="primary" :disabled="!dirtyCount || saving" :loading="saving" data-test="save-current-task" @click="save">{{ uiText("保存当前任务") }}</el-button>
           </div>
         </div>
         <div class="editor-links">
-          <el-button link @click="navigate('/mold-schedules')">打开本套排程</el-button>
-          <el-button link @click="navigate('/molds')">打开模具台账</el-button>
-          <el-button link @click="emit('history',row)">修改历史</el-button>
+          <el-button link @click="navigate('/mold-schedules')">{{ uiText("打开本套排程") }}</el-button>
+          <el-button link @click="navigate('/molds')">{{ uiText("打开模具台账") }}</el-button>
+          <el-button link @click="emit('history',row)">{{ uiText("修改历史") }}</el-button>
         </div>
       </footer>
     </template>
-    <div v-else-if="!detailLoading" class="task-empty"><p>任务资料尚未加载，不开放其他职责字段。</p><el-button @click="refresh">重试</el-button></div>
+    <div v-else-if="!detailLoading" class="task-empty"><p>{{ uiText("任务资料尚未加载，不开放其他职责字段。") }}</p><el-button @click="refresh">{{ uiText("重试") }}</el-button></div>
   </section>
 </template>
 <style scoped>

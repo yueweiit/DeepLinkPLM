@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import {ref,watch,defineAsyncComponent} from 'vue'
 import {useRoute,useRouter} from 'vue-router'
 import {getProductResearchDetail} from '@/api/modules/productResearch'
@@ -18,4 +20,4 @@ watch(()=>[route.query.productId,route.query.flow],async()=>{
  finally{if(current===generation)loading.value=false}
 },{immediate:true})
 </script>
-<template><div v-if="loading" v-loading="true" style="height:100%"/><div v-else-if="error"><el-alert :title="error" type="error" :closable="false"/><el-button @click="router.replace('/product-research')">返回新品研发</el-button></div><Launch v-else/></template>
+<template><div v-if="loading" v-loading="true" style="height:100%"/><div v-else-if="error"><el-alert :title="error" type="error" :closable="false"/><el-button @click="router.replace('/product-research')">{{ uiText("返回新品研发") }}</el-button></div><Launch v-else/></template>

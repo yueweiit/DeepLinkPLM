@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import {t as uiText} from '@/locales'
+
 import { computed } from 'vue'
 import PhoneObjectSelect from '@/components/PhoneObjectSelect/index.vue'
 import type { PhoneObjectOption, PhoneObjectProvider } from '@/components/PhoneObjectSelect/types'
@@ -11,4 +13,4 @@ const provider:PhoneObjectProvider={
   phones:q=>getCollaborationReferencePhones({...q,productLineId:props.productLineId||q.productLineId})
 }
 </script>
-<template><PhoneObjectSelect :model-value="modelValue" :provider="provider" :kinds="[{key:type,type,productType:type==='product'?'model_variant':undefined,label:type==='item'?'模具档案':'型号项目',phoneFirst:true}]" :multiple="multiple" :disabled="disabled" :scope-key="scopeKey" :aria-label="ariaLabel || (type==='item'?'关联模具档案':'关联型号项目')" @update:model-value="emit('update:modelValue',$event)"/></template>
+<template><PhoneObjectSelect :model-value="modelValue" :provider="provider" :kinds="[{key:type,type,productType:type==='product'?'model_variant':undefined,label:type==='item'?'模具档案':'型号项目',phoneFirst:true}]" :multiple="multiple" :disabled="disabled" :scope-key="scopeKey" :aria-label="ariaLabel || (type==='item'?uiText('关联模具档案'):uiText('关联型号项目'))" @update:model-value="emit('update:modelValue',$event)"/></template>

@@ -4,6 +4,10 @@ import type { ComponentCustomProperties } from 'vue'
 import zhCNCommon from './zh-CN/common'
 import zhCNCustomer from './zh-CN/customer'
 import zhCNProduct from './zh-CN/product'
+import es from './es'
+import { currentLanguage } from './language'
+export { currentLanguage, setLanguage, normalizeLanguage, languages } from './language'
+export type { Language } from './language'
 
 const messages = {
   ...zhCNCommon,
@@ -11,14 +15,15 @@ const messages = {
   ...zhCNProduct
 } as Record<string, string>
 
-export function t(key: string, params?: Record<string, string | number>): string {
-  const template = messages[key] || key
+export function t(key: string, params?: Record<string, string | number | null | undefined>): string {
+  const chinese = messages[key] || key
+  const template = currentLanguage.value === 'es' ? (es[key] || es[chinese] || es[chinese.trim().replace(/\s+/g,' ')] || chinese) : chinese
   if (!params) {
     return template
   }
 
   return Object.entries(params).reduce((content, [paramKey, value]) => {
-    return content.replace(new RegExp(`{${paramKey}}`, 'g'), String(value))
+    return content.replace(new RegExp(`{${paramKey}}`, 'g'), () => String(value))
   }, template)
 }
 

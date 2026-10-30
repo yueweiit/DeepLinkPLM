@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -86,7 +88,7 @@ async function loadReleaseGate() {
   try {
     gate.value = await checkProjectReleaseGate(props.projectId)
   } catch (error) {
-    ElMessage.error(getErrorMessage(error, '发布门禁预检失败'))
+    ElMessage.error(getErrorMessage(error, uiText('发布门禁预检失败')))
   } finally {
     loading.value = false
   }
@@ -95,18 +97,18 @@ async function loadReleaseGate() {
 async function handleFreeze() {
   if (actionLoading.value || isLifecycleReadonly.value) return
   try {
-    await ElMessageBox.confirm('冻结会锁定当前 Product 资料状态，用于发布前版本留痕。', '确认冻结', {
-      confirmButtonText: '冻结',
-      cancelButtonText: '取消',
+    await ElMessageBox.confirm(uiText('冻结会锁定当前 Product 资料状态，用于发布前版本留痕。'), uiText('确认冻结'), {
+      confirmButtonText: uiText('冻结'),
+      cancelButtonText: uiText('取消'),
       type: 'warning'
     })
     actionLoading.value = 'freeze'
     await freezeProject(props.projectId, { reason: '前端项目中心冻结' })
-    ElMessage.success('冻结成功')
+    ElMessage.success(uiText('冻结成功'))
     emit('changed')
     await loadReleaseGate()
   } catch (error) {
-    if (error !== 'cancel' && error !== 'close') ElMessage.error(getErrorMessage(error, '冻结失败'))
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(getErrorMessage(error, uiText('冻结失败')))
   } finally {
     actionLoading.value = false
   }
@@ -114,17 +116,17 @@ async function handleFreeze() {
 
 async function handlePublish() {
   if (actionLoading.value || !canPublish.value) {
-    if (isReleased.value) ElMessage.info('产品已发布，无需重复发布，可按需归档')
+    if (isReleased.value) ElMessage.info(uiText('产品已发布，无需重复发布，可按需归档'))
     return
   }
   try {
     if (hasBlockingIssues.value) {
-      ElMessage.error('当前流程尚未满足发布条件，请先完成基础流程')
+      ElMessage.error(uiText('当前流程尚未满足发布条件，请先完成基础流程'))
       return
     }
-    await ElMessageBox.confirm(releaseConfirmMessage(), hasReleaseRisks.value ? '确认带风险发布' : '确认发布', {
-      confirmButtonText: '发布',
-      cancelButtonText: '取消',
+    await ElMessageBox.confirm(releaseConfirmMessage(), hasReleaseRisks.value ? uiText('确认带风险发布') : uiText('确认发布'), {
+      confirmButtonText: uiText('发布'),
+      cancelButtonText: uiText('取消'),
       type: 'warning'
     })
     actionLoading.value = 'publish'
@@ -132,7 +134,7 @@ async function handlePublish() {
       reason: '前端项目中心发布',
       riskConfirmed: hasReleaseRisks.value
     })
-    ElMessage.success(`发布成功，当前状态：${result.status}`)
+    ElMessage.success(uiText('发布成功，当前状态：{value0}',{value0:(result.status)}))
     emit('changed')
     await loadReleaseGate()
   } catch (error) {
@@ -141,12 +143,12 @@ async function handlePublish() {
       gate.value = gateFromError
       ElMessage.error(
         getReleaseGateFromErrorCode(error) === 40308
-          ? '检测到发布资料风险，请确认后重试'
-          : '当前流程尚未满足发布条件'
+          ? uiText('检测到发布资料风险，请确认后重试')
+          : uiText('当前流程尚未满足发布条件')
       )
       return
     }
-    if (error !== 'cancel' && error !== 'close') ElMessage.error(getErrorMessage(error, '发布失败'))
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(getErrorMessage(error, uiText('发布失败')))
   } finally {
     actionLoading.value = false
   }
@@ -159,17 +161,17 @@ function getReleaseGateFromErrorCode(error: unknown) {
 async function handleArchive() {
   if (actionLoading.value || isArchived.value) return
   try {
-    const { value } = await ElMessageBox.prompt('请输入归档原因，便于后续追溯。', '归档项目', {
-      confirmButtonText: '归档',
-      cancelButtonText: '取消',
-      inputPlaceholder: '例如：发布版本已停用，进入历史归档'
+    const { value } = await ElMessageBox.prompt(uiText('请输入归档原因，便于后续追溯。'), uiText('归档项目'), {
+      confirmButtonText: uiText('归档'),
+      cancelButtonText: uiText('取消'),
+      inputPlaceholder: uiText('例如：发布版本已停用，进入历史归档')
     })
     actionLoading.value = 'archive'
     await archiveProject(props.projectId, { reason: String(value || '').trim() || '前端项目中心归档' })
-    ElMessage.success('归档成功')
+    ElMessage.success(uiText('归档成功'))
     emit('changed')
   } catch (error) {
-    if (error !== 'cancel' && error !== 'close') ElMessage.error(getErrorMessage(error, '归档失败'))
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(getErrorMessage(error, uiText('归档失败')))
   } finally {
     actionLoading.value = false
   }
@@ -178,18 +180,18 @@ async function handleArchive() {
 async function handleAbandon() {
   if (actionLoading.value || isReleased.value || isArchived.value) return
   try {
-    const { value } = await ElMessageBox.prompt('请输入停止原因。停止后项目会进入已停止/归档，并同步关闭关联 Order。', '停止项目', {
-      confirmButtonText: '确认停止',
-      cancelButtonText: '取消',
-      inputPlaceholder: '例如：客户取消需求，项目停止推进',
-      inputValidator: (value) => Boolean(value?.trim()) || '请填写停止原因'
+    const { value } = await ElMessageBox.prompt(uiText('请输入停止原因。停止后项目会进入已停止/归档，并同步关闭关联 Order。'), uiText('停止项目'), {
+      confirmButtonText: uiText('确认停止'),
+      cancelButtonText: uiText('取消'),
+      inputPlaceholder: uiText('例如：客户取消需求，项目停止推进'),
+      inputValidator: (value) => Boolean(value?.trim()) || uiText('请填写停止原因')
     })
     actionLoading.value = 'abandon'
     await abandonProject(props.projectId, { reason: value.trim() })
-    ElMessage.success('项目已停止并归档')
+    ElMessage.success(uiText('项目已停止并归档'))
     emit('changed')
   } catch (error) {
-    if (error !== 'cancel' && error !== 'close') ElMessage.error(getErrorMessage(error, '停止失败'))
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(getErrorMessage(error, uiText('停止失败')))
   } finally {
     actionLoading.value = false
   }
@@ -211,10 +213,10 @@ watch(
   <section class="release-gate-panel">
     <div class="release-gate-panel__head">
       <div>
-        <h4 class="release-gate-panel__title">项目发布风险</h4>
-        <p class="release-gate-panel__desc">检查当前流程与资料完整度；仅硬门禁不通过时阻塞发布，资料缺口作为非阻塞提醒确认。</p>
+        <h4 class="release-gate-panel__title">{{ uiText("项目发布风险") }}</h4>
+        <p class="release-gate-panel__desc">{{ uiText("检查当前流程与资料完整度；仅硬门禁不通过时阻塞发布，资料缺口作为非阻塞提醒确认。") }}</p>
       </div>
-      <el-button size="small" :loading="loading" @click="loadReleaseGate">重新预检</el-button>
+      <el-button size="small" :loading="loading" @click="loadReleaseGate">{{ uiText("重新预检") }}</el-button>
     </div>
 
     <el-alert
@@ -222,36 +224,36 @@ watch(
       type="success"
       show-icon
       :closable="false"
-      title="产品已发布，无需重复发布，可按需归档"
+      :title='uiText("产品已发布，无需重复发布，可按需归档")'
     />
     <el-alert
       v-else-if="gate && hasBlockingIssues"
       type="error"
       show-icon
       :closable="false"
-      title="当前流程尚未满足发布条件"
+      :title='uiText("当前流程尚未满足发布条件")'
     />
     <el-alert
       v-else-if="gate && hasReleaseRisks"
       type="warning"
       show-icon
       :closable="false"
-      title="存在非阻塞提醒，确认后仍可发布"
+      :title='uiText("存在非阻塞提醒，确认后仍可发布")'
     />
     <el-alert
       v-else-if="gate"
       type="success"
       show-icon
       :closable="false"
-      title="资料齐备，可以发布"
+      :title='uiText("资料齐备，可以发布")'
     />
-    <el-alert v-else type="info" show-icon :closable="false" title="正在读取发布门禁状态" />
+    <el-alert v-else type="info" show-icon :closable="false" :title='uiText("正在读取发布门禁状态")' />
 
     <el-collapse v-model="expandedRiskPanels" class="release-gate-panel__collapse" data-test="release-gate-risk-collapse">
       <el-collapse-item name="risk">
         <template #title>
           <div class="release-gate-panel__collapse-title">
-            <span>风险明细</span>
+            <span>{{ uiText("风险明细") }}</span>
             <el-tag size="small" :type="riskSummaryType" effect="light">{{ riskSummaryText }}</el-tag>
           </div>
         </template>
@@ -263,14 +265,14 @@ watch(
               <span>{{ item.message }}</span>
             </li>
           </ul>
-          <el-empty v-else description="暂无发布风险" :image-size="64" />
+          <el-empty v-else :description='uiText("暂无发布风险")' :image-size="64" />
 
           <div v-if="gate" class="release-gate-panel__stats">
             <span>BOM：{{ gate.frozenBomCount }}</span>
-            <span>工艺路线：{{ gate.lockedProcessRouteCount }}</span>
-            <span>图纸：{{ gate.drawingFileCount }}</span>
+            <span>{{ uiText("工艺路线：") }}{{ gate.lockedProcessRouteCount }}</span>
+            <span>{{ uiText("图纸：") }}{{ gate.drawingFileCount }}</span>
             <span>SOP/SIP：{{ sopOrSipCount }}</span>
-            <span>测试资料：{{ gate.testingFileCount }}</span>
+            <span>{{ uiText("测试资料：") }}{{ gate.testingFileCount }}</span>
           </div>
         </div>
       </el-collapse-item>
@@ -282,9 +284,7 @@ watch(
         :loading="actionLoading === 'freeze'"
         :disabled="Boolean(actionLoading) || isLifecycleReadonly"
         @click="handleFreeze"
-      >
-        冻结
-      </el-button>
+      >{{ uiText(" 冻结 ") }}</el-button>
       <el-button
         data-test="release-gate-publish"
         type="primary"
@@ -292,16 +292,14 @@ watch(
         :disabled="Boolean(actionLoading) || !canPublish"
         @click="handlePublish"
       >
-        {{ isReleased ? '已发布' : '发布 Product' }}
+        {{ isReleased ? uiText('已发布') : uiText('发布 Product') }}
       </el-button>
       <el-button
         data-test="release-gate-archive"
         :loading="actionLoading === 'archive'"
         :disabled="Boolean(actionLoading) || isArchived"
         @click="handleArchive"
-      >
-        归档
-      </el-button>
+      >{{ uiText(" 归档 ") }}</el-button>
       <el-button
         data-test="release-gate-abandon"
         type="danger"
@@ -309,9 +307,7 @@ watch(
         :loading="actionLoading === 'abandon'"
         :disabled="Boolean(actionLoading) || isReleased || isArchived"
         @click="handleAbandon"
-      >
-        停止项目
-      </el-button>
+      >{{ uiText(" 停止项目 ") }}</el-button>
     </div>
   </section>
 </template>

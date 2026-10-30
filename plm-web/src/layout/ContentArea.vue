@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
@@ -25,8 +27,8 @@ watch(() => userStore.token, () => positions.clear())
 
 <template>
   <main ref="content" class="content-area" :class="{ 'content-area--collaboration': ['/partner-selections','/partner-products','/partner-listings','/partner-sales','/partner-fulfilments','/samples','/model-samples','/research-samples','/partner-samples','/customers','/suppliers','/inventories','/code-center','/files','/my-tasks','/production-totals','/molds','/phone-model-codes','/market-watch','/mold-applications','/mold-schedules','/development-budgets','/development-expenses','/product-research',...RESEARCH_BUSINESS.map(item=>item.path)].includes(route.path) || route.path.startsWith('/partner-operations/') || route.path==='/skus' || route.path==='/projects' }">
-    <div v-if="researchReturn" class="research-return"><el-button link type="primary" @click="router.push(researchReturn)">返回新品项目 · {{ RESEARCH_BUSINESS.find(item=>item.kind===route.query.researchWorkspace)?.title }}</el-button><span>当前查看关联业务原记录</span></div>
-    <div v-if="partnerReturn" class="research-return"><el-button link type="primary" @click="router.push(partnerReturn)">返回来源页面</el-button></div>
+    <div v-if="researchReturn" class="research-return"><el-button link type="primary" @click="router.push(researchReturn)">{{ uiText("返回新品项目 · ") }}{{ uiText(String((RESEARCH_BUSINESS.find(item=>item.kind===route.query.researchWorkspace)?.title) ?? '')) }}</el-button><span>{{ uiText("当前查看关联业务原记录") }}</span></div>
+    <div v-if="partnerReturn" class="research-return"><el-button link type="primary" @click="router.push(partnerReturn)">{{ uiText("返回来源页面") }}</el-button></div>
     <div class="content-body">
     <router-view v-slot="{ Component }">
       <KeepAlive :key="userStore.token" :include="['InventoryCenterView', 'BomCenterView', 'ProductionTotalsView', 'MoldManagementView', 'MoldScheduleView', 'DevelopmentBudgetView', 'DevelopmentExpenseView']" :max="9">

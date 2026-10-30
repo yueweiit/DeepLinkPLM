@@ -1,4 +1,6 @@
 ﻿<script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
@@ -219,26 +221,26 @@ function submitAction() {
   if (!dialogState.confirmed) {
     ElMessage.warning(
       dialogState.mode === 'force'
-        ? '请先确认已经了解强制推进带来的风险。'
+        ? uiText('请先确认已经了解强制推进带来的风险。')
         : dialogState.mode === 'reject'
-          ? '请先确认当前节点需要驳回处理。'
-          : '请先确认当前节点的推进前检查项已完成。'
+          ? uiText('请先确认当前节点需要驳回处理。')
+          : uiText('请先确认当前节点的推进前检查项已完成。')
     )
     return
   }
 
   if (dialogState.mode === 'force' && !dialogState.note.trim()) {
-    ElMessage.warning('强制推进必须填写原因，便于后续审计追踪。')
+    ElMessage.warning(uiText('强制推进必须填写原因，便于后续审计追踪。'))
     return
   }
 
   if (dialogState.mode === 'reject') {
     if (!dialogState.rejectTo) {
-      ElMessage.warning('请选择驳回到的目标节点。')
+      ElMessage.warning(uiText('请选择驳回到的目标节点。'))
       return
     }
     if (!dialogState.note.trim()) {
-      ElMessage.warning('驳回时请填写驳回原因和需要补齐的内容。')
+      ElMessage.warning(uiText('驳回时请填写驳回原因和需要补齐的内容。'))
       return
     }
   }
@@ -275,18 +277,18 @@ onMounted(loadData)
 
 <template>
   <PageContainer
-    :title="presentation?.title || '产品详情'"
-    :description="presentation?.summary || '聚焦项目推进、版本资料、模具治具、成本与质量记录。'"
+    :title="presentation?.title || uiText('产品详情')"
+    :description="presentation?.summary || uiText('聚焦项目推进、版本资料、模具治具、成本与质量记录。')"
   >
     <template #actions>
-      <el-button v-if="userStore.hasPermission('file:read')" @click="router.push({path:'/files',query:{referenceType:product?.productType === 'sku' ? 'sku' : 'product',referenceId:productId,referenceName:product?.productName,referenceCode:product?.productCode}})">查看关联图纸</el-button>
-      <el-button @click="router.back()">返回</el-button>
-      <el-button @click="router.push(toArchivedSkuRoute())">返回归档 SKU</el-button>
+      <el-button v-if="userStore.hasPermission('file:read')" @click="router.push({path:'/files',query:{referenceType:product?.productType === 'sku' ? 'sku' : 'product',referenceId:productId,referenceName:product?.productName,referenceCode:product?.productCode}})">{{ uiText("查看关联图纸") }}</el-button>
+      <el-button @click="router.back()">{{ uiText("返回") }}</el-button>
+      <el-button @click="router.push(toArchivedSkuRoute())">{{ uiText("返回归档 SKU") }}</el-button>
     </template>
 
     <section class="metric-grid" v-loading="loading">
       <div v-for="metric in topMetrics" :key="metric.label" class="metric-card">
-        <p class="metric-card__label">{{ metric.label }}</p>
+        <p class="metric-card__label">{{ uiText(String((metric.label) ?? '')) }}</p>
         <p class="metric-card__value metric-card__value--small">{{ metric.value }}</p>
         <span class="metric-card__trend">{{ metric.hint }}</span>
       </div>
@@ -296,12 +298,12 @@ onMounted(loadData)
       <section class="page-panel section-switch-panel">
         <div class="toolbar-row section-switch-panel__header">
           <div>
-            <h3 class="section-title">详情板块</h3>
-            <p class="page-panel-desc">产品详情按主任务拆成独立板块，先切到当前要处理的内容，再展开对应信息。</p>
+            <h3 class="section-title">{{ uiText("详情板块") }}</h3>
+            <p class="page-panel-desc">{{ uiText("产品详情按主任务拆成独立板块，先切到当前要处理的内容，再展开对应信息。") }}</p>
           </div>
           <div class="toolbar-actions">
             <StatusTag :status="product.status" object-type="product" />
-            <el-tag v-if="isSuperAdmin" type="danger" effect="light">管理员可强制推进</el-tag>
+            <el-tag v-if="isSuperAdmin" type="danger" effect="light">{{ uiText("管理员可强制推进") }}</el-tag>
           </div>
         </div>
 
@@ -311,8 +313,8 @@ onMounted(loadData)
       <section v-if="activeSection === 'basic'" class="page-panel detail-subpanel">
         <div class="toolbar-row">
           <div>
-            <h3 class="section-title">基础信息</h3>
-            <p class="page-panel-desc">先确认当前产品对象、版本状态、型号颜色和客户来源，避免在错误版本上继续推进。</p>
+            <h3 class="section-title">{{ uiText("基础信息") }}</h3>
+            <p class="page-panel-desc">{{ uiText("先确认当前产品对象、版本状态、型号颜色和客户来源，避免在错误版本上继续推进。") }}</p>
           </div>
         </div>
 
@@ -323,28 +325,28 @@ onMounted(loadData)
 
           <div class="detail-grid detail-hero__meta">
             <div class="info-card">
-              <span class="subtle-text">产品线</span>
+              <span class="subtle-text">{{ uiText("产品线") }}</span>
               <strong>{{ product.seriesName }}</strong>
             </div>
             <div class="info-card">
-              <span class="subtle-text">型号 + 颜色</span>
+              <span class="subtle-text">{{ uiText("型号 + 颜色") }}</span>
               <strong>{{ product.model }} / {{ product.color }}</strong>
             </div>
             <div class="info-card">
-              <span class="subtle-text">产品编码</span>
+              <span class="subtle-text">{{ uiText("产品编码") }}</span>
               <strong>{{ product.productCode }}</strong>
             </div>
             <div class="info-card">
-              <span class="subtle-text">客户来源</span>
+              <span class="subtle-text">{{ uiText("客户来源") }}</span>
               <strong>{{ product.customerName }}</strong>
             </div>
             <div class="info-card">
-              <span class="subtle-text">当前阶段</span>
+              <span class="subtle-text">{{ uiText("当前阶段") }}</span>
               <strong>{{ product.currentStage }}</strong>
             </div>
             <div class="info-card">
-              <span class="subtle-text">产品类型</span>
-              <strong>{{ product.productType === 'product_line' ? '新产品线' : '新型号线' }}</strong>
+              <span class="subtle-text">{{ uiText("产品类型") }}</span>
+              <strong>{{ product.productType === 'product_line' ? uiText('新产品线') : uiText('新型号线') }}</strong>
             </div>
           </div>
         </div>
@@ -353,8 +355,8 @@ onMounted(loadData)
       <section v-else-if="activeSection === 'timeline'" id="product-detail-timeline" class="page-panel detail-subpanel">
         <div class="toolbar-row">
           <div>
-            <h3 class="section-title">项目流程</h3>
-            <p class="page-panel-desc">查看每个环节的经历内容、接收人、推动人和推动时间，可在当前节点直接执行推进、驳回或强制推进。</p>
+            <h3 class="section-title">{{ uiText("项目流程") }}</h3>
+            <p class="page-panel-desc">{{ uiText("查看每个环节的经历内容、接收人、推动人和推动时间，可在当前节点直接执行推进、驳回或强制推进。") }}</p>
           </div>
         </div>
 
@@ -370,8 +372,8 @@ onMounted(loadData)
                 <div class="toolbar-row">
                   <strong>{{ node.nodeName }}</strong>
                   <div class="row-actions">
-                    <el-tag :type="getNodeStatusType(node.status)" effect="light">{{ getNodeStatusLabel(node.status) }}</el-tag>
-                    <el-tag v-if="node.gateLabel" type="danger" effect="light">{{ node.gateLabel }}</el-tag>
+                    <el-tag :type="getNodeStatusType(node.status)" effect="light">{{ uiText(String((getNodeStatusLabel(node.status)) ?? '')) }}</el-tag>
+                    <el-tag v-if="node.gateLabel" type="danger" effect="light">{{ uiText(String((node.gateLabel) ?? '')) }}</el-tag>
                   </div>
                 </div>
                 <div class="detail-row">
@@ -379,17 +381,15 @@ onMounted(loadData)
                   <span>{{ node.actualDate || node.plannedDate || '--' }}</span>
                 </div>
                 <div class="detail-row" v-if="node.receiverUserName || node.promoterUserName">
-                  <span v-if="node.receiverUserName">接收：{{ node.receiverUserName }}</span>
-                  <span v-if="node.promoterUserName">推动：{{ node.promoterUserName }}</span>
+                  <span v-if="node.receiverUserName">{{ uiText("接收：") }}{{ node.receiverUserName }}</span>
+                  <span v-if="node.promoterUserName">{{ uiText("推动：") }}{{ node.promoterUserName }}</span>
                 </div>
                 <p class="page-panel-desc">{{ node.summary }}</p>
               </button>
 
               <div class="timeline-card__actions">
-                <el-button size="small" @click="selectTimelineNode(node.nodeKey)">查看节点</el-button>
-                <el-button v-if="canRejectNode(node)" size="small" type="danger" plain @click="openActionDialog(node, 'reject')">
-                  驳回
-                </el-button>
+                <el-button size="small" @click="selectTimelineNode(node.nodeKey)">{{ uiText("查看节点") }}</el-button>
+                <el-button v-if="canRejectNode(node)" size="small" type="danger" plain @click="openActionDialog(node, 'reject')">{{ uiText(" 驳回 ") }}</el-button>
                 <el-button
                   v-if="node.status === 'current'"
                   size="small"
@@ -398,11 +398,9 @@ onMounted(loadData)
                   :title="getAdvanceDisabledReason(node)"
                   @click="openActionDialog(node, 'advance')"
                 >
-                  {{ node.canAdvance ? '确认推进' : '暂不可推进' }}
+                  {{ node.canAdvance ? uiText('确认推进') : uiText('暂不可推进') }}
                 </el-button>
-                <el-button v-if="canShowForceAdvance(node)" size="small" type="warning" plain @click="openActionDialog(node, 'force')">
-                  强制推进
-                </el-button>
+                <el-button v-if="canShowForceAdvance(node)" size="small" type="warning" plain @click="openActionDialog(node, 'force')">{{ uiText(" 强制推进 ") }}</el-button>
               </div>
             </section>
           </div>
@@ -414,59 +412,59 @@ onMounted(loadData)
                 <p class="page-panel-desc">{{ activeTimelineNode.summary }}</p>
               </div>
               <el-tag :type="getNodeStatusType(activeTimelineNode.status)" effect="light">
-                {{ getNodeStatusLabel(activeTimelineNode.status) }}
+                {{ uiText(String((getNodeStatusLabel(activeTimelineNode.status)) ?? '')) }}
               </el-tag>
             </div>
 
             <div class="page-stack">
               <div v-if="activeTimelineNode.experienceSummary" class="info-card">
-                <span class="subtle-text">经历内容</span>
+                <span class="subtle-text">{{ uiText("经历内容") }}</span>
                 <strong>{{ activeTimelineNode.experienceSummary }}</strong>
               </div>
               <div class="detail-grid-2col">
                 <div class="info-card">
-                  <span class="subtle-text">责任角色</span>
+                  <span class="subtle-text">{{ uiText("责任角色") }}</span>
                   <strong>{{ activeTimelineNode.ownerRole }}</strong>
                 </div>
                 <div v-if="activeTimelineNode.actualDate || activeTimelineNode.plannedDate" class="info-card">
-                  <span class="subtle-text">计划 / 实际时间</span>
+                  <span class="subtle-text">{{ uiText("计划 / 实际时间") }}</span>
                   <strong>{{ activeTimelineNode.actualDate || activeTimelineNode.plannedDate || '--' }}</strong>
                 </div>
               </div>
               <div class="detail-grid-2col">
                 <div class="info-card">
-                  <span class="subtle-text">接收人</span>
+                  <span class="subtle-text">{{ uiText("接收人") }}</span>
                   <strong>{{ activeTimelineNode.receiverUserName || activeTimelineNode.receiverRole || '--' }}</strong>
-                  <span class="subtle-text" v-if="activeTimelineNode.receivedAt">接收时间：{{ activeTimelineNode.receivedAt }}</span>
+                  <span class="subtle-text" v-if="activeTimelineNode.receivedAt">{{ uiText("接收时间：") }}{{ activeTimelineNode.receivedAt }}</span>
                 </div>
                 <div class="info-card">
-                  <span class="subtle-text">推动人</span>
+                  <span class="subtle-text">{{ uiText("推动人") }}</span>
                   <strong>{{ activeTimelineNode.promoterUserName || activeTimelineNode.promoterRole || activeTimelineNode.ownerRole }}</strong>
-                  <span class="subtle-text" v-if="activeTimelineNode.promotedAt">推动时间：{{ activeTimelineNode.promotedAt }}</span>
-                  <span class="subtle-text" v-else-if="activeTimelineNode.status === 'current'">当前节点推进中</span>
+                  <span class="subtle-text" v-if="activeTimelineNode.promotedAt">{{ uiText("推动时间：") }}{{ activeTimelineNode.promotedAt }}</span>
+                  <span class="subtle-text" v-else-if="activeTimelineNode.status === 'current'">{{ uiText("当前节点推进中") }}</span>
                 </div>
               </div>
               <div v-if="activeTimelineNode.nextAction" class="info-card">
-                <span class="subtle-text">下一步动作</span>
+                <span class="subtle-text">{{ uiText("下一步动作") }}</span>
                 <strong>{{ activeTimelineNode.nextAction }}</strong>
               </div>
               <div v-if="activeTimelineNode.nextReceiverRole" class="info-card">
-                <span class="subtle-text">下一接收人</span>
+                <span class="subtle-text">{{ uiText("下一接收人") }}</span>
                 <strong>{{ activeTimelineNode.nextReceiverUserName || activeTimelineNode.nextReceiverRole }}</strong>
               </div>
               <div v-if="activeTimelineNode.riskNote" class="info-card">
-                <span class="subtle-text">风险提示</span>
+                <span class="subtle-text">{{ uiText("风险提示") }}</span>
                 <strong>{{ activeTimelineNode.riskNote }}</strong>
               </div>
               <div v-if="activeTimelineNode.detailLines?.length" class="info-card">
-                <span class="subtle-text">节点检查项</span>
+                <span class="subtle-text">{{ uiText("节点检查项") }}</span>
                 <ul class="detail-list">
                   <li v-for="line in activeTimelineNode.detailLines" :key="line">{{ line }}</li>
                 </ul>
               </div>
               <div v-if="activeTimelineNode.documentCount != null" class="info-card">
-                <span class="subtle-text">关联资料</span>
-                <strong>{{ activeTimelineNode.documentCount }} 份</strong>
+                <span class="subtle-text">{{ uiText("关联资料") }}</span>
+                <strong>{{ activeTimelineNode.documentCount }}{{ uiText(" 份") }}</strong>
               </div>
             </div>
           </div>
@@ -476,8 +474,8 @@ onMounted(loadData)
       <section v-else-if="activeSection === 'materials'" class="page-panel detail-subpanel">
         <div class="toolbar-row materials-header">
           <div>
-            <h3 class="section-title">资料区</h3>
-            <p class="page-panel-desc">把 BOM、图纸文件、模具治具拆开查看，减少信息堆叠，让版本核对更直观。</p>
+            <h3 class="section-title">{{ uiText("资料区") }}</h3>
+            <p class="page-panel-desc">{{ uiText("把 BOM、图纸文件、模具治具拆开查看，减少信息堆叠，让版本核对更直观。") }}</p>
           </div>
           <el-segmented v-model="activeMaterialSection" :options="materialSectionOptions" class="materials-switcher" />
         </div>
@@ -489,8 +487,8 @@ onMounted(loadData)
         <section v-else-if="activeMaterialSection === 'files'" class="page-panel materials-section-panel">
           <div class="toolbar-row">
             <div>
-              <h3 class="section-title">图纸 / 文件</h3>
-              <p class="page-panel-desc">图纸、客户确认件和测试文件统一放在这里查看。</p>
+              <h3 class="section-title">{{ uiText("图纸 / 文件") }}</h3>
+              <p class="page-panel-desc">{{ uiText("图纸、客户确认件和测试文件统一放在这里查看。") }}</p>
             </div>
           </div>
 
@@ -504,12 +502,12 @@ onMounted(loadData)
                   </el-tag>
                 </div>
               </div>
-              <span class="subtle-text">{{ doc.category }} / 版本 {{ doc.versionNo }}</span>
-              <span class="subtle-text" v-if="doc.owner">负责人：{{ doc.owner }}</span>
-              <span class="subtle-text">更新：{{ formatDate(doc.updatedAt) }}</span>
+              <span class="subtle-text">{{ doc.category }}{{ uiText(" / 版本 ") }}{{ doc.versionNo }}</span>
+              <span class="subtle-text" v-if="doc.owner">{{ uiText("负责人：") }}{{ doc.owner }}</span>
+              <span class="subtle-text">{{ uiText("更新：") }}{{ formatDate(doc.updatedAt) }}</span>
               <div class="document-card__actions">
-                <el-button link type="primary" size="small" @click="openProductionDocPreview(doc)">预览</el-button>
-                <el-button link type="primary" size="small">下载</el-button>
+                <el-button link type="primary" size="small" @click="openProductionDocPreview(doc)">{{ uiText("预览") }}</el-button>
+                <el-button link type="primary" size="small">{{ uiText("下载") }}</el-button>
               </div>
             </div>
           </div>
@@ -518,22 +516,20 @@ onMounted(loadData)
         <section v-else class="page-panel materials-section-panel">
           <div class="toolbar-row">
             <div>
-              <h3 class="section-title">模具治具</h3>
-              <p class="page-panel-desc">把当前版本关联的模具治具单独展示，方便从资料区直接跳转查看。</p>
+              <h3 class="section-title">{{ uiText("模具治具") }}</h3>
+              <p class="page-panel-desc">{{ uiText("把当前版本关联的模具治具单独展示，方便从资料区直接跳转查看。") }}</p>
             </div>
-            <el-button type="primary" plain @click="router.push(presentation.toolingSummary.targetPath || '/inventories')">
-              查看模具治具
-            </el-button>
+            <el-button type="primary" plain @click="router.push(presentation.toolingSummary.targetPath || '/inventories')">{{ uiText(" 查看模具治具 ") }}</el-button>
           </div>
 
           <div class="tooling-summary tooling-summary--stacked">
             <div class="info-card tooling-summary__card">
-              <span class="subtle-text">总数</span>
-              <strong>{{ presentation.toolingSummary.totalCount }} 套</strong>
-              <span class="subtle-text">可用 {{ presentation.toolingSummary.availableCount }} / 试模中 {{ presentation.toolingSummary.trialCount }}</span>
+              <span class="subtle-text">{{ uiText("总数") }}</span>
+              <strong>{{ presentation.toolingSummary.totalCount }}{{ uiText(" 套") }}</strong>
+              <span class="subtle-text">{{ uiText("可用 ") }}{{ presentation.toolingSummary.availableCount }}{{ uiText(" / 试模中 ") }}{{ presentation.toolingSummary.trialCount }}</span>
             </div>
             <div class="info-card tooling-summary__card tooling-summary__names">
-              <span class="subtle-text">当前关联</span>
+              <span class="subtle-text">{{ uiText("当前关联") }}</span>
               <strong>{{ presentation.toolingSummary.toolingNames.join('') }}</strong>
             </div>
           </div>
@@ -543,8 +539,8 @@ onMounted(loadData)
       <section v-else-if="activeSection === 'business'" class="page-panel detail-subpanel">
         <div class="toolbar-row">
           <div>
-            <h3 class="section-title">商务区</h3>
-            <p class="page-panel-desc">成本和供应商信息单独查看，减少对项目主链路阅读的干扰。</p>
+            <h3 class="section-title">{{ uiText("商务区") }}</h3>
+            <p class="page-panel-desc">{{ uiText("成本和供应商信息单独查看，减少对项目主链路阅读的干扰。") }}</p>
           </div>
         </div>
 
@@ -557,12 +553,12 @@ onMounted(loadData)
             >
               <button class="cost-card__summary" type="button" @click="toggleCostPanel('estimated')">
                 <div>
-                  <strong>预计成本</strong>
-                  <p class="subtle-text">立项与前期评估口径</p>
+                  <strong>{{ uiText("预计成本") }}</strong>
+                  <p class="subtle-text">{{ uiText("立项与前期评估口径") }}</p>
                 </div>
                 <div class="cost-card__summary-right">
                   <strong>{{ formatAmount(presentation.costPanel.estimatedTotal || 0) }}</strong>
-                  <span class="subtle-text">{{ expandedCost === 'estimated' ? '收起' : '展开' }}</span>
+                  <span class="subtle-text">{{ expandedCost === 'estimated' ? uiText('收起') : uiText('展开') }}</span>
                 </div>
               </button>
               <div v-if="expandedCost === 'estimated'" class="cost-card__detail">
@@ -579,12 +575,12 @@ onMounted(loadData)
             <section class="cost-card" :class="{ 'is-expanded': expandedCost === 'actual' }">
               <button class="cost-card__summary" type="button" @click="toggleCostPanel('actual')">
                 <div>
-                  <strong>实际成本</strong>
-                  <p class="subtle-text">当前版本执行口径</p>
+                  <strong>{{ uiText("实际成本") }}</strong>
+                  <p class="subtle-text">{{ uiText("当前版本执行口径") }}</p>
                 </div>
                 <div class="cost-card__summary-right">
                   <strong>{{ formatAmount(presentation.costPanel.actualTotal) }}</strong>
-                  <span class="subtle-text">{{ expandedCost === 'actual' ? '收起' : '展开' }}</span>
+                  <span class="subtle-text">{{ expandedCost === 'actual' ? uiText('收起') : uiText('展开') }}</span>
                 </div>
               </button>
               <div v-if="expandedCost === 'actual'" class="cost-card__detail">
@@ -603,7 +599,7 @@ onMounted(loadData)
             <div v-for="supplier in presentation.suppliers" :key="supplier.supplierName" class="supplier-card">
               <div class="toolbar-row">
                 <strong>{{ supplier.supplierName }}</strong>
-                <el-tag effect="light">{{ supplier.statusLabel }}</el-tag>
+                <el-tag effect="light">{{ uiText(supplier.statusLabel) }}</el-tag>
               </div>
               <span class="subtle-text">{{ supplier.role }}</span>
               <span class="subtle-text">{{ supplier.note }}</span>
@@ -615,8 +611,8 @@ onMounted(loadData)
       <section v-else class="page-panel detail-subpanel">
         <div class="toolbar-row">
           <div>
-            <h3 class="section-title">质量区</h3>
-            <p class="page-panel-desc">测试记录、问题处理和验证结论保持独立沉淀，方便回溯每个节点是否满足推进条件。</p>
+            <h3 class="section-title">{{ uiText("质量区") }}</h3>
+            <p class="page-panel-desc">{{ uiText("测试记录、问题处理和验证结论保持独立沉淀，方便回溯每个节点是否满足推进条件。") }}</p>
           </div>
         </div>
 
@@ -625,11 +621,11 @@ onMounted(loadData)
             <div class="toolbar-row">
               <strong>{{ record.testItem }}</strong>
               <el-tag :type="record.resultLabel === '通过' ? 'success' : record.resultLabel === '不通过' ? 'danger' : 'warning'" effect="light">
-                {{ record.resultLabel }}
+                {{ uiText(String((record.resultLabel) ?? '')) }}
               </el-tag>
             </div>
-            <span class="subtle-text">责任人：{{ record.owner }}</span>
-            <span class="subtle-text">时间：{{ formatDate(record.testedAt) }}</span>
+            <span class="subtle-text">{{ uiText("责任人：") }}{{ record.owner }}</span>
+            <span class="subtle-text">{{ uiText("时间：") }}{{ formatDate(record.testedAt) }}</span>
             <span class="subtle-text">{{ record.note }}</span>
           </div>
         </div>
@@ -639,35 +635,35 @@ onMounted(loadData)
     <el-dialog v-model="dialogState.visible" :title="dialogTitle" width="560px">
       <div v-if="dialogNode" class="page-stack">
         <div class="info-card">
-          <span class="subtle-text">当前产品</span>
-          <strong>{{ presentation?.title }}</strong>
+          <span class="subtle-text">{{ uiText("当前产品") }}</span>
+          <strong>{{ uiText(String((presentation?.title) ?? '')) }}</strong>
         </div>
         <div class="info-card">
-          <span class="subtle-text">当前节点</span>
+          <span class="subtle-text">{{ uiText("当前节点") }}</span>
           <strong>{{ dialogNode.nodeName }}</strong>
         </div>
         <div class="info-card">
-          <span class="subtle-text">责任角色</span>
+          <span class="subtle-text">{{ uiText("责任角色") }}</span>
           <strong>{{ dialogNode.ownerRole }}</strong>
         </div>
         <div v-if="dialogNode.nextAction && dialogState.mode !== 'reject'" class="info-card">
-          <span class="subtle-text">下一步动作</span>
+          <span class="subtle-text">{{ uiText("下一步动作") }}</span>
           <strong>{{ dialogNode.nextAction }}</strong>
         </div>
         <div v-if="dialogNode.riskNote" class="info-card">
-          <span class="subtle-text">风险 / 阻塞</span>
+          <span class="subtle-text">{{ uiText("风险 / 阻塞") }}</span>
           <strong>{{ dialogNode.riskNote }}</strong>
         </div>
         <div v-if="dialogNode.detailLines?.length" class="info-card">
-          <span class="subtle-text">{{ dialogState.mode === 'force' ? '越权前须知' : dialogState.mode === 'reject' ? '驳回前检查项' : '推进前检查项' }}</span>
+          <span class="subtle-text">{{ dialogState.mode === 'force' ? uiText('越权前须知') : dialogState.mode === 'reject' ? uiText('驳回前检查项') : uiText('推进前检查项') }}</span>
           <ul class="detail-list">
             <li v-for="line in dialogNode.detailLines" :key="line">{{ line }}</li>
           </ul>
         </div>
 
         <div v-if="dialogState.mode === 'reject'" class="info-card">
-          <span class="subtle-text">驳回到节点</span>
-          <el-select v-model="dialogState.rejectTo" placeholder="请选择要驳回到的节点">
+          <span class="subtle-text">{{ uiText("驳回到节点") }}</span>
+          <el-select v-model="dialogState.rejectTo" :placeholder='uiText("请选择要驳回到的节点")'>
             <el-option v-for="item in timelineRejectOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </div>
@@ -678,29 +674,29 @@ onMounted(loadData)
           :rows="dialogState.mode === 'force' || dialogState.mode === 'reject' ? 4 : 3"
           :placeholder="
             dialogState.mode === 'force'
-              ? '请填写强制推进原因、风险说明和后续补救动作。' 
+              ? uiText('请填写强制推进原因、风险说明和后续补救动作。') 
               : dialogState.mode === 'reject'
-                ? '请填写驳回原因、需补充的资料和责任提醒。' 
-                : '可填写推进备注、交接说明或提醒事项。' 
+                ? uiText('请填写驳回原因、需补充的资料和责任提醒。') 
+                : uiText('可填写推进备注、交接说明或提醒事项。') 
           "
         />
 
         <el-checkbox v-model="dialogState.confirmed">
           {{
             dialogState.mode === 'force'
-              ? '我已确认本次为管理员强制推进，系统应保留完整审计痕迹。' 
+              ? uiText('我已确认本次为管理员强制推进，系统应保留完整审计痕迹。') 
               : dialogState.mode === 'reject'
-                ? '我已确认当前节点需要退回处理，并会通知相关责任人补齐资料。' 
-                : '我已确认当前节点的推进前检查项已经完成。' 
+                ? uiText('我已确认当前节点需要退回处理，并会通知相关责任人补齐资料。') 
+                : uiText('我已确认当前节点的推进前检查项已经完成。') 
           }}
         </el-checkbox>
       </div>
 
       <template #footer>
         <div class="drawer-actions">
-          <el-button @click="dialogState.visible = false">取消</el-button>
+          <el-button @click="dialogState.visible = false">{{ uiText("取消") }}</el-button>
           <el-button :type="dialogState.mode === 'reject' ? 'danger' : 'primary'" @click="submitAction">
-            {{ dialogState.mode === 'force' ? '确认强制推进' : dialogState.mode === 'reject' ? '确认驳回' : '确认推进' }}
+            {{ dialogState.mode === 'force' ? uiText('确认强制推进') : dialogState.mode === 'reject' ? uiText('确认驳回') : uiText('确认推进') }}
           </el-button>
         </div>
       </template>
@@ -710,19 +706,19 @@ onMounted(loadData)
       <div v-if="presentation" class="page-stack bom-detail-dialog">
         <div class="bom-detail-dialog__summary">
           <div class="info-card">
-            <span class="subtle-text">所属产品</span>
-            <strong>{{ presentation.title }}</strong>
+            <span class="subtle-text">{{ uiText("所属产品") }}</span>
+            <strong>{{ uiText(String((presentation.title) ?? '')) }}</strong>
           </div>
           <div class="info-card">
-            <span class="subtle-text">版本状态</span>
+            <span class="subtle-text">{{ uiText("版本状态") }}</span>
             <strong>{{ bomDetailRow?.statusLabel || '--' }}</strong>
           </div>
           <div class="info-card">
-            <span class="subtle-text">总成本</span>
+            <span class="subtle-text">{{ uiText("总成本") }}</span>
             <strong>{{ formatAmount(bomDetailRow?.totalCost || 0) }}</strong>
           </div>
           <div class="info-card">
-            <span class="subtle-text">成本变化</span>
+            <span class="subtle-text">{{ uiText("成本变化") }}</span>
             <strong :class="(bomDetailRow?.delta || 0) > 0 ? 'text-danger' : (bomDetailRow?.delta || 0) < 0 ? 'text-success' : ''">
               {{ (bomDetailRow?.delta || 0) > 0 ? '+' : '' }}{{ formatAmount(bomDetailRow?.delta || 0) }}
             </strong>
@@ -731,35 +727,35 @@ onMounted(loadData)
 
         <div class="bom-detail-dialog__cost">
           <div class="info-card">
-            <span class="subtle-text">材料成本</span>
+            <span class="subtle-text">{{ uiText("材料成本") }}</span>
             <strong>{{ formatAmount(bomDetailRow?.materialCost || 0) }}</strong>
           </div>
           <div class="info-card">
-            <span class="subtle-text">工艺成本</span>
+            <span class="subtle-text">{{ uiText("工艺成本") }}</span>
             <strong>{{ formatAmount(bomDetailRow?.processCost || 0) }}</strong>
           </div>
           <div class="info-card">
-            <span class="subtle-text">当前页面成本汇总</span>
+            <span class="subtle-text">{{ uiText("当前页面成本汇总") }}</span>
             <strong>{{ formatAmount(presentation.bomCostSummary?.totalCost || 0) }}</strong>
           </div>
         </div>
 
         <el-table :data="bomDetailItems" border stripe>
-          <el-table-column prop="inventoryCode" label="物料编码" min-width="150" />
-          <el-table-column prop="inventoryName" label="物料名称" min-width="180" />
-          <el-table-column prop="quantity" label="用量" width="90" />
-          <el-table-column prop="stockUom" label="单位" width="90" />
-          <el-table-column prop="supplierName" label="供应商" min-width="160" />
-          <el-table-column label="单价" width="120">
+          <el-table-column prop="inventoryCode" :label='uiText("物料编码")' min-width="150" />
+          <el-table-column prop="inventoryName" :label='uiText("物料名称")' min-width="180" />
+          <el-table-column prop="quantity" :label='uiText("用量")' width="90" />
+          <el-table-column prop="stockUom" :label='uiText("单位")' width="90" />
+          <el-table-column prop="supplierName" :label='uiText("供应商")' min-width="160" />
+          <el-table-column :label='uiText("单价")' width="120">
             <template #default="{ row }">{{ formatAmount(row.unitCost) }}</template>
           </el-table-column>
-          <el-table-column label="差异标识" width="110">
+          <el-table-column :label='uiText("差异标识")' width="110">
             <template #default="{ row }">
               <el-tag
                 :type="row.changeType === 'new' ? 'success' : row.changeType === 'replace' ? 'warning' : row.changeType === 'remove' ? 'danger' : 'info'"
                 effect="light"
               >
-                {{ row.changeType === 'new' ? '新增' : row.changeType === 'replace' ? '替换' : row.changeType === 'remove' ? '删除' : '沿用' }}
+                {{ row.changeType === 'new' ? uiText('新增') : row.changeType === 'replace' ? uiText('替换') : row.changeType === 'remove' ? uiText('删除') : uiText('沿用') }}
               </el-tag>
             </template>
           </el-table-column>

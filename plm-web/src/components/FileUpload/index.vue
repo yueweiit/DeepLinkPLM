@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
@@ -23,7 +25,7 @@ const uploading = ref(false)
 
 async function beforeUpload(file: File) {
   if (!props.projectId || !props.nodeKey) {
-    ElMessage.error('请先选择项目和时间轴节点')
+    ElMessage.error(uiText("请先选择项目和时间轴节点"))
     return false
   }
 
@@ -39,7 +41,7 @@ async function beforeUpload(file: File) {
       attachmentId: result.attachmentId,
       fileName: result.originalFileName || result.fileName
     })
-    ElMessage.success(`已上传 ${file.name}`)
+    ElMessage.success(uiText("已上传 {value0}",{value0:(file.name)}))
   } finally {
     uploading.value = false
   }
@@ -51,8 +53,8 @@ async function beforeUpload(file: File) {
   <el-upload drag :show-file-list="false" :before-upload="beforeUpload">
     <div class="upload-box">
       <el-icon class="upload-box__icon"><UploadFilled /></el-icon>
-      <div class="upload-box__title">{{ uploading ? '上传中...' : '拖拽文件到此处，或点击上传' }}</div>
-      <div class="upload-box__tip">文件会挂到当前项目的时间轴节点。</div>
+      <div class="upload-box__title">{{ uploading ? uiText("上传中...") : uiText("拖拽文件到此处，或点击上传") }}</div>
+      <div class="upload-box__tip">{{ uiText("文件会挂到当前项目的时间轴节点。") }}</div>
     </div>
   </el-upload>
 </template>

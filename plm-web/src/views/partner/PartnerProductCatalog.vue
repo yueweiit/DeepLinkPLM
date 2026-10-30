@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { Box } from '@element-plus/icons-vue'
 import PartnerPhoto from './PartnerPhoto.vue'
 import type { PartnerRow } from '@/types/partner'
@@ -21,9 +23,9 @@ const listingNames: Record<string, string> = { listed: '已上架', unlisted: '�
 </script>
 
 <template>
-  <div class="product-catalog" aria-label="合作产品目录">
+  <div class="product-catalog" :aria-label='uiText("合作产品目录")'>
     <div class="product-head" aria-hidden="true">
-      <span>产品 / 编号</span><span>规格</span><span>供货来源</span><span>业务状态</span><span>操作</span>
+      <span>{{ uiText("产品 / 编号") }}</span><span>{{ uiText("规格") }}</span><span>{{ uiText("供货来源") }}</span><span>{{ uiText("业务状态") }}</span><span>{{ uiText("操作") }}</span>
     </div>
     <article v-for="row in rows" :key="row.id" class="product-row" :data-product-id="row.id">
       <div class="product-identity">
@@ -31,19 +33,19 @@ const listingNames: Record<string, string> = { listed: '已上架', unlisted: '�
         <span v-else class="product-placeholder" aria-hidden="true"><el-icon><Box /></el-icon></span>
         <div>
           <el-button link type="primary" class="product-name" @click="emit('open', row)">{{ row.name }}</el-button>
-          <p class="secondary">{{ row.code }}<template v-if="row.version"> · 资料 V{{ row.version }}</template></p>
+          <p class="secondary">{{ row.code }}<template v-if="row.version">{{ uiText(" · 资料 V") }}{{ row.version }}</template></p>
         </div>
       </div>
       <div class="product-spec-count">
-        <span class="cell-label">规格</span>
-        <el-button link type="primary" @click="emit('open', row)"><strong>{{ row.specs?.length || 0 }}</strong> 个规格</el-button>
+        <span class="cell-label">{{ uiText("规格") }}</span>
+        <el-button link type="primary" @click="emit('open', row)"><strong>{{ row.specs?.length || 0 }}</strong>{{ uiText(" 个规格") }}</el-button>
       </div>
-      <div class="product-suppliers"><span class="cell-label">供货来源</span>{{ suppliers(row) }}</div>
+      <div class="product-suppliers"><span class="cell-label">{{ uiText("供货来源") }}</span>{{ suppliers(row) }}</div>
       <div class="product-status">
-        <div><span class="status-label">选品</span><el-tag size="small" :type="row.status === 'adopted' ? 'success' : 'info'">{{ label(row.status) }}</el-tag></div>
-        <div><span class="status-label">网站</span><span :class="{ 'is-listed': row.listing === 'listed' }">{{ listingNames[String(row.listing)] || '未记录' }}</span></div>
+        <div><span class="status-label">{{ uiText("选品") }}</span><el-tag size="small" :type="row.status === 'adopted' ? 'success' : 'info'">{{ uiText(label(row.status)) }}</el-tag></div>
+        <div><span class="status-label">{{ uiText("网站") }}</span><span :class="{ 'is-listed': row.listing === 'listed' }">{{ listingNames[String(row.listing)] || uiText('未记录') }}</span></div>
       </div>
-      <div class="product-actions"><el-button link type="primary" @click="emit('open', row)">查看详情</el-button><el-button v-if="canWrite" link type="danger" :disabled="Boolean(deleting)" @click="emit('delete', row)">删除产品</el-button></div>
+      <div class="product-actions"><el-button link type="primary" @click="emit('open', row)">{{ uiText("查看详情") }}</el-button><el-button v-if="canWrite" link type="danger" :disabled="Boolean(deleting)" @click="emit('delete', row)">{{ uiText("删除产品") }}</el-button></div>
     </article>
   </div>
 </template>

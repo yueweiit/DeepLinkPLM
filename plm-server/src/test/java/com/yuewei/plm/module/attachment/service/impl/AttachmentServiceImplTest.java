@@ -28,6 +28,8 @@ import com.yuewei.plm.repository.entity.Product;
 import java.nio.file.Files;
 import java.time.LocalDateTime;
 import java.util.List;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
@@ -38,6 +40,29 @@ class AttachmentServiceImplTest {
 
     @TempDir
     java.nio.file.Path tempDir;
+
+    @ParameterizedTest @ValueSource(strings={"png","jpg","jpeg","webp","pdf"})
+    void explicit3dRenderUploadsThroughTheOriginalMetadataStorageAndAuditPath(String ext)throws Exception {
+        AppProperties properties=new AppProperties();properties.getStorage().setLocalRoot(tempDir.toString());
+        ProductRepository products=mock(ProductRepository.class);AttachmentRepository files=mock(AttachmentRepository.class);
+        when(products.selectById(10L)).thenReturn(product(10L,1));when(files.insert(any(Attachment.class))).thenAnswer(call->{call.<Attachment>getArgument(0).setAttachmentId(310L);return 1;});
+        var file=new MockMultipartFile("file","工程师指定效果图."+ext,"application/octet-stream","original-render-content".getBytes());
+        var result=service(properties,products,files).uploadProjectAttachment(10L,file,"render_3d","D1","工程师指定本版为产品3D效果图",null);
+        assertThat(result.getFileCategory()).isEqualTo("render_3d");assertThat(result.getVersionNo()).isEqualTo("D1");assertThat(result.getOriginalFileName()).isEqualTo("工程师指定效果图."+ext);
+        assertThat(Files.readAllBytes(tempDir.resolve(result.getStorageKey()))).isEqualTo(file.getBytes());
+        assertThat(result.getPreviewType()).isEqualTo("pdf".equals(ext)?"pdf":"image");assertThat(result.getPreviewable()).isTrue();
+        ArgumentCaptor<Attachment> saved=ArgumentCaptor.forClass(Attachment.class);verify(files).insert(saved.capture());
+        assertThat(saved.getValue().getOwnerObjectId()).isEqualTo(10L);assertThat(saved.getValue().getFileCategory()).isEqualTo("render_3d");assertThat(saved.getValue().getRemark()).contains("工程师指定");
+    }
+
+    @ParameterizedTest @ValueSource(strings={"step","zip","txt"})
+    void renderPurposeRejectsNonImageNonPdfBeforeWritingAnyFileOrMetadata(String ext)throws Exception {
+        AppProperties properties=new AppProperties();properties.getStorage().setLocalRoot(tempDir.toString());
+        ProductRepository products=mock(ProductRepository.class);AttachmentRepository files=mock(AttachmentRepository.class);when(products.selectById(10L)).thenReturn(product(10L,1));
+        var file=new MockMultipartFile("file","不能标记为效果图."+ext,"application/octet-stream","source".getBytes());
+        assertThatThrownBy(()->service(properties,products,files).uploadProjectAttachment(10L,file,"render_3d","V1",null,null)).hasMessageContaining("3D效果图仅支持");
+        verify(files,Mockito.never()).insert(any(Attachment.class));try(var stored=Files.list(tempDir)){assertThat(stored).isEmpty();}
+    }
 
     @Test
     void uploadTimelineAttachmentWritesMetadataAndLocalFile() {

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { ArrowLeft, ArrowRight, Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
@@ -164,7 +166,7 @@ async function saveOperationMaster() {
   await confirmProcessOperationMaster(created.processId)
   operationMasterDialogVisible.value = false
   await loadOperationMasterRows()
-  ElMessage.success('工序已加入工序库')
+  ElMessage.success(uiText('工序已加入工序库'))
 }
 
 const rows = computed(() => (snapshot.value?.routes || []).filter((item) => isWithinTimeRange(item.updatedAt, timeRange.value)))
@@ -373,7 +375,7 @@ async function openRouteRelation(row: ProcessRouteListItem) {
     activeRelation.value = await getProcessRouteRelations(row.processId || row.routeId)
   } catch (error) {
     relationDrawerVisible.value = false
-    ElMessage.error(error instanceof Error ? error.message : '工艺路线详情加载失败')
+    ElMessage.error(error instanceof Error ? error.message : uiText('工艺路线详情加载失败'))
   } finally {
     relationLoading.value = false
   }
@@ -429,26 +431,26 @@ function getOperationCode(operation: ProcessOperationRecord) {
 
 function previewAttachment(row: ProcessAttachmentSummary) {
   if (!row.previewPath) {
-    ElMessage.info('当前工序暂无可预览资料')
+    ElMessage.info(uiText('当前工序暂无可预览资料'))
     return
   }
-  ElMessage.info(`预览 ${row.operationName} 的资料`)
+  ElMessage.info(uiText('预览 {value0} 的资料',{value0:(row.operationName)}))
 }
 
 function addAttachment(row: ProcessAttachmentSummary) {
   if (row.canAdd === false) {
-    ElMessage.info('当前状态暂不能添加资料')
+    ElMessage.info(uiText('当前状态暂不能添加资料'))
     return
   }
-  ElMessage.info(`为 ${row.operationName} 添加资料`)
+  ElMessage.info(uiText('为 {value0} 添加资料',{value0:(row.operationName)}))
 }
 
 function applyChange() {
-  ElMessage.info('变更申请入口已预留')
+  ElMessage.info(uiText('变更申请入口已预留'))
 }
 
 function finalizeChange() {
-  ElMessage.info('敲定入口已预留')
+  ElMessage.info(uiText('敲定入口已预留'))
 }
 
 watch(
@@ -466,12 +468,12 @@ onMounted(async () => {
 
 <template>
   <PageContainer
-    title="工艺管理"
-    description="集中维护工序库、标准工艺路线，并查看项目工艺路线、工序结构、资料挂接和版本追溯。"
+    :title='uiText("工艺管理")'
+    :description='uiText("集中维护工序库、标准工艺路线，并查看项目工艺路线、工序结构、资料挂接和版本追溯。")'
   >
     <CurrentProcessList v-if="masterDataStatus?.ready&&!legacy&&!route.query.routeId" @history="legacy=true"/>
     <template v-else>
-    <el-button v-if="masterDataStatus?.ready" size="small" @click="legacy=false">返回本期 MES 工艺</el-button>
+    <el-button v-if="masterDataStatus?.ready" size="small" @click="legacy=false">{{ uiText("返回本期 MES 工艺") }}</el-button>
     <section class="process-management-tabs">
       <el-segmented v-model="activeManagementTab" :options="processTabOptions" />
     </section>
@@ -479,33 +481,33 @@ onMounted(async () => {
     <section v-if="activeManagementTab === 'operation-master'" class="page-panel route-table-panel" v-loading="operationMasterLoading">
       <div class="toolbar-row route-table-panel__header">
         <div>
-          <h3 class="section-title">工序库</h3>
-          <p class="page-panel-desc">工序名称由基础资料维护，工作台和项目中心只能选择这里已确认的工序。</p>
+          <h3 class="section-title">{{ uiText("工序库") }}</h3>
+          <p class="page-panel-desc">{{ uiText("工序名称由基础资料维护，工作台和项目中心只能选择这里已确认的工序。") }}</p>
         </div>
         <div class="header-actions">
-          <el-button :icon="Refresh" circle title="刷新工序库" @click="loadOperationMasterRows" />
-          <el-button type="primary" :icon="Plus" @click="openOperationMasterCreate">新增工序</el-button>
+          <el-button :icon="Refresh" circle :title='uiText("刷新工序库")' @click="loadOperationMasterRows" />
+          <el-button type="primary" :icon="Plus" @click="openOperationMasterCreate">{{ uiText("新增工序") }}</el-button>
         </div>
       </div>
 
       <FixedTableViewport v-slot="{ tableHeight }" :refresh-key="operationMasterRows">
       <el-table :data="operationMasterRows" :height="tableHeight" border stripe>
-        <el-table-column prop="processCode" label="工序编码" min-width="150" />
-        <el-table-column prop="processName" label="工序名称" min-width="150" />
-        <el-table-column prop="processCategory" label="工序分类" min-width="120" />
-        <el-table-column prop="operationType" label="工序类型" min-width="120" />
-        <el-table-column prop="operationCraftCode" label="工艺编码" width="100">
+        <el-table-column prop="processCode" :label='uiText("工序编码")' min-width="150" />
+        <el-table-column prop="processName" :label='uiText("工序名称")' min-width="150" />
+        <el-table-column prop="processCategory" :label='uiText("工序分类")' min-width="120" />
+        <el-table-column prop="operationType" :label='uiText("工序类型")' min-width="120" />
+        <el-table-column prop="operationCraftCode" :label='uiText("工艺编码")' width="100">
           <template #default="{ row }">{{ row.operationCraftCode || '--' }}</template>
         </el-table-column>
-        <el-table-column prop="defaultStandardTimeMins" label="默认工时" width="110" />
-        <el-table-column prop="defaultQualityRequirement" label="默认质量要求" min-width="220" show-overflow-tooltip />
-        <el-table-column label="需要工位" width="100">
-          <template #default="{ row }">{{ row.needWorkstation ? '是' : '否' }}</template>
+        <el-table-column prop="defaultStandardTimeMins" :label='uiText("默认工时")' width="110" />
+        <el-table-column prop="defaultQualityRequirement" :label='uiText("默认质量要求")' min-width="220" show-overflow-tooltip />
+        <el-table-column :label='uiText("需要工位")' width="100">
+          <template #default="{ row }">{{ row.needWorkstation ? uiText('是') : uiText('否') }}</template>
         </el-table-column>
-        <el-table-column prop="workstationType" label="工位类型" min-width="120">
+        <el-table-column prop="workstationType" :label='uiText("工位类型")' min-width="120">
           <template #default="{ row }">{{ row.workstationType || '--' }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="110">
+        <el-table-column :label='uiText("状态")' width="110">
           <template #default="{ row }">
             <StatusTag :status="row.status" object-type="process" />
           </template>
@@ -517,32 +519,32 @@ onMounted(async () => {
     <section v-else-if="activeManagementTab === 'route-template'" class="page-panel route-table-panel" v-loading="routeTemplateLoading">
       <div class="toolbar-row route-table-panel__header">
         <div>
-          <h3 class="section-title">标准工艺路线</h3>
-          <p class="page-panel-desc">标准路线由工序库组合而成，工作台编写项目路线时可按模板复制。</p>
+          <h3 class="section-title">{{ uiText("标准工艺路线") }}</h3>
+          <p class="page-panel-desc">{{ uiText("标准路线由工序库组合而成，工作台编写项目路线时可按模板复制。") }}</p>
         </div>
-        <el-button :icon="Refresh" circle title="刷新标准工艺路线" @click="loadRouteTemplateRows" />
+        <el-button :icon="Refresh" circle :title='uiText("刷新标准工艺路线")' @click="loadRouteTemplateRows" />
       </div>
 
       <FixedTableViewport v-slot="{ tableHeight }" :refresh-key="routeTemplateRows">
       <el-table :data="routeTemplateRows" :height="tableHeight" border stripe>
-        <el-table-column prop="routeTemplateCode" label="路线编码" min-width="170" />
-        <el-table-column prop="routeTemplateName" label="路线名称" min-width="180" />
-        <el-table-column prop="versionNo" label="版本" width="90" />
-        <el-table-column prop="productCode" label="适用产品" min-width="130">
-          <template #default="{ row }">{{ row.productCode || '通用' }}</template>
+        <el-table-column prop="routeTemplateCode" :label='uiText("路线编码")' min-width="170" />
+        <el-table-column prop="routeTemplateName" :label='uiText("路线名称")' min-width="180" />
+        <el-table-column prop="versionNo" :label='uiText("版本")' width="90" />
+        <el-table-column prop="productCode" :label='uiText("适用产品")' min-width="130">
+          <template #default="{ row }">{{ row.productCode || uiText('通用') }}</template>
         </el-table-column>
-        <el-table-column label="默认" width="90">
-          <template #default="{ row }"><el-tag v-if="row.defaultTemplate" type="success" effect="light">默认</el-tag><span v-else>--</span></template>
+        <el-table-column :label='uiText("默认")' width="90">
+          <template #default="{ row }"><el-tag v-if="row.defaultTemplate" type="success" effect="light">{{ uiText("默认") }}</el-tag><span v-else>--</span></template>
         </el-table-column>
-        <el-table-column label="工序数" width="100">
+        <el-table-column :label='uiText("工序数")' width="100">
           <template #default="{ row }">{{ row.operations?.length || 0 }}</template>
         </el-table-column>
-        <el-table-column label="工序组合" min-width="320" show-overflow-tooltip>
+        <el-table-column :label='uiText("工序组合")' min-width="320" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.operations?.map((item: ProcessRouteTemplateOperationVO) => item.processName).join(' / ') || '--' }}
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="110">
+        <el-table-column :label='uiText("状态")' width="110">
           <template #default="{ row }">
             <StatusTag :status="row.status || 'confirmed'" object-type="process" />
           </template>
@@ -566,41 +568,41 @@ onMounted(async () => {
     <section v-if="activeManagementTab === 'project-route' && !isDetailMode" class="page-panel route-table-panel" v-loading="loading">
       <div class="toolbar-row route-table-panel__header">
         <div>
-          <h3 class="section-title">项目工艺路线</h3>
-          <p class="page-panel-desc">先找到项目工艺路线，再在右侧抽屉查看适用颜色、关联 SKU 和工序明细。</p>
+          <h3 class="section-title">{{ uiText("项目工艺路线") }}</h3>
+          <p class="page-panel-desc">{{ uiText("先找到项目工艺路线，再在右侧抽屉查看适用颜色、关联 SKU 和工序明细。") }}</p>
         </div>
-        <el-tag effect="light">共 {{ table.filteredRows.value.length }} 条</el-tag>
+        <el-tag effect="light">{{ uiText("共 ") }}{{ table.filteredRows.value.length }}{{ uiText(" 条") }}</el-tag>
       </div>
 
       <FixedTableViewport v-slot="{ tableHeight }" :refresh-key="table.filteredRows.value">
       <el-table :data="table.filteredRows.value" :height="tableHeight" border stripe class="route-table">
-        <el-table-column prop="routeCode" label="路线编号" min-width="170" />
-        <el-table-column label="所属项目" min-width="230"><template #default="{ row }"><strong>{{ row.productName }}</strong></template></el-table-column>
-        <el-table-column prop="routeName" label="工序名称" min-width="230" />
-        <el-table-column label="适用颜色" min-width="180">
+        <el-table-column prop="routeCode" :label='uiText("路线编号")' min-width="170" />
+        <el-table-column :label='uiText("所属项目")' min-width="230"><template #default="{ row }"><strong>{{ row.productName }}</strong></template></el-table-column>
+        <el-table-column prop="routeName" :label='uiText("工序名称")' min-width="230" />
+        <el-table-column :label='uiText("适用颜色")' min-width="180">
           <template #default="{ row }">
             <div v-if="row.colors?.length" class="tag-wrap">
               <el-tag v-for="color in row.colors.slice(0, 3)" :key="`${row.routeId}-${color.colorCode || color.colorName}`" size="small" effect="light">{{ color.colorName }}</el-tag>
               <el-tag v-if="row.colors.length > 3" size="small" effect="plain">+{{ row.colors.length - 3 }}</el-tag>
             </div>
-            <span v-else class="subtle-text">尚未关联颜色</span>
+            <span v-else class="subtle-text">{{ uiText("尚未关联颜色") }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="关联 SKU" width="120">
+        <el-table-column :label='uiText("关联 SKU")' width="120">
           <template #default="{ row }">
-            <el-button data-test="process-route-skus" link type="primary" @click="openRouteSkus(row)">{{ row.skuCount || 0 }} 个 SKU</el-button>
+            <el-button data-test="process-route-skus" link type="primary" @click="openRouteSkus(row)">{{ row.skuCount || 0 }}{{ uiText(" 个 SKU") }}</el-button>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="120">
+        <el-table-column :label='uiText("状态")' width="120">
           <template #default="{ row }">
             <StatusTag :status="row.status" object-type="process" />
           </template>
         </el-table-column>
-        <el-table-column prop="currentGate" label="进程" min-width="170" />
-        <el-table-column prop="versionNo" label="版本" width="90" />
-        <el-table-column label="操作" width="110" fixed="right">
+        <el-table-column prop="currentGate" :label='uiText("进程")' min-width="170" />
+        <el-table-column prop="versionNo" :label='uiText("版本")' width="90" />
+        <el-table-column :label='uiText("操作")' width="110" fixed="right">
           <template #default="{ row }">
-            <el-button data-test="process-route-detail" link type="primary" @click="openRouteRelation(row)">详情</el-button>
+            <el-button data-test="process-route-detail" link type="primary" @click="openRouteRelation(row)">{{ uiText("详情") }}</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -609,22 +611,22 @@ onMounted(async () => {
 
     <article v-else-if="activeManagementTab === 'project-route' && activeDetail" class="page-panel detail-panel">
       <div class="detail-topline">
-        <el-button link type="primary" :icon="ArrowLeft" @click="backToList">返回列表</el-button>
+        <el-button link type="primary" :icon="ArrowLeft" @click="backToList">{{ uiText("返回列表") }}</el-button>
       </div>
 
       <div class="toolbar-row detail-header">
         <div>
           <h3 class="section-title">{{ activeDetail.routeName }}</h3>
           <div class="detail-breadcrumb">
-            <span>工艺管理</span>
+            <span>{{ uiText("工艺管理") }}</span>
             <span>{{ activeDetail.productName }}</span>
             <span>{{ activeDetail.routeCode }}</span>
-            <span>版本 {{ activeDetail.versionNo }}</span>
+            <span>{{ uiText("版本 ") }}{{ activeDetail.versionNo }}</span>
           </div>
         </div>
         <div class="header-actions">
           <StatusTag :status="activeDetail.status" object-type="process" />
-          <el-button link type="primary" @click="openTarget(`/products/${activeDetail.productId}`)">产品详情</el-button>
+          <el-button link type="primary" @click="openTarget(`/products/${activeDetail.productId}`)">{{ uiText("产品详情") }}</el-button>
         </div>
       </div>
 
@@ -636,30 +638,30 @@ onMounted(async () => {
         <section class="split-grid overview-detail-grid">
           <article class="page-panel inner-panel">
             <div class="toolbar-row">
-              <h3 class="section-title">工序视图</h3>
+              <h3 class="section-title">{{ uiText("工序视图") }}</h3>
             </div>
-            <p class="page-panel-desc">概览区收纳原有数据板信息，具体工序在“工序明细”里查看和搜索。</p>
+            <p class="page-panel-desc">{{ uiText("概览区收纳原有数据板信息，具体工序在“工序明细”里查看和搜索。") }}</p>
           </article>
 
           <article class="page-panel inner-panel">
-            <h3 class="section-title">当前对象</h3>
+            <h3 class="section-title">{{ uiText("当前对象") }}</h3>
             <div class="object-lines">
               <span>{{ activeDetail.productCode }}</span>
               <strong>{{ activeDetail.productName }}</strong>
-              <span>{{ activeRouteRow ? routeTypeLabel(activeRouteRow.routeType) : routeTypeLabel(activeDetail.routeType) }}</span>
+              <span>{{ uiText(String((activeRouteRow ? routeTypeLabel(activeRouteRow.routeType) : routeTypeLabel(activeDetail.routeType)) ?? '')) }}</span>
             </div>
           </article>
         </section>
 
         <section class="overview-panel">
           <div class="summary-box summary-box--note">
-            <span class="subtle-text">概览</span>
+            <span class="subtle-text">{{ uiText("概览") }}</span>
             <strong>{{ activeDetail.overviewNote }}</strong>
           </div>
 
           <div class="overview-grid">
             <div v-for="item in overviewItems" :key="item.label" class="overview-item">
-              <span class="subtle-text">{{ item.label }}</span>
+              <span class="subtle-text">{{ uiText(String((item.label) ?? '')) }}</span>
               <strong :class="{ 'is-emphasis': item.emphasis }">{{ item.value }}</strong>
             </div>
           </div>
@@ -669,8 +671,8 @@ onMounted(async () => {
       <section v-else-if="activeSection === 'operations'" class="page-stack detail-section">
         <div class="toolbar-row">
           <div>
-            <h3 class="section-title">工序明细</h3>
-            <p class="page-panel-desc">按工序查看参数、质量要求、责任确认人和关键标记。</p>
+            <h3 class="section-title">{{ uiText("工序明细") }}</h3>
+            <p class="page-panel-desc">{{ uiText("按工序查看参数、质量要求、责任确认人和关键标记。") }}</p>
           </div>
           <div class="operation-toolbar">
             <el-segmented
@@ -682,47 +684,47 @@ onMounted(async () => {
               ]"
               @change="(value: string | number) => syncViewMode(value as ProcessCenterViewMode)"
             />
-            <el-input v-model="operationKeyword" clearable placeholder="搜索工序 / 位置 / 供应商" class="operation-search" />
+            <el-input v-model="operationKeyword" clearable :placeholder='uiText("搜索工序 / 位置 / 供应商")' class="operation-search" />
           </div>
         </div>
 
         <el-table :data="filteredOperationRows" border stripe>
-          <el-table-column prop="sequenceNo" label="顺序" width="80" />
-          <el-table-column label="工序编码" min-width="150">
+          <el-table-column prop="sequenceNo" :label='uiText("顺序")' width="80" />
+          <el-table-column :label='uiText("工序编码")' min-width="150">
             <template #default="{ row }">
               {{ getOperationCode(row) }}
             </template>
           </el-table-column>
-          <el-table-column prop="operationName" label="工序名称" min-width="150" />
-          <el-table-column label="工序类型" min-width="120">
+          <el-table-column prop="operationName" :label='uiText("工序名称")' min-width="150" />
+          <el-table-column :label='uiText("工序类型")' min-width="120">
             <template #default="{ row }">
-              {{ getOperationTypeLabel(row.operationType) }}
+              {{ uiText(String((getOperationTypeLabel(row.operationType)) ?? '')) }}
             </template>
           </el-table-column>
-          <el-table-column prop="workstationName" label="执行位置" min-width="170" />
-          <el-table-column prop="supplierName" label="供应商" min-width="140">
+          <el-table-column prop="workstationName" :label='uiText("执行位置")' min-width="170" />
+          <el-table-column prop="supplierName" :label='uiText("供应商")' min-width="140">
             <template #default="{ row }">{{ row.supplierName || '--' }}</template>
           </el-table-column>
-          <el-table-column label="确认人" min-width="140">
+          <el-table-column :label='uiText("确认人")' min-width="140">
             <template #default="{ row }">
               <div class="cell-stack">
                 <strong>{{ row.confirmerName || '--' }}</strong>
-                <span class="subtle-text">{{ row.confirmerRole || '未指定' }}</span>
+                <span class="subtle-text">{{ row.confirmerRole || uiText('未指定') }}</span>
               </div>
             </template>
           </el-table-column>
-          <el-table-column prop="parameterSummary" label="核心参数摘要" min-width="220" />
-          <el-table-column prop="qualityRequirement" label="质量要求" min-width="180" />
-          <el-table-column label="单工序成本" width="130">
+          <el-table-column prop="parameterSummary" :label='uiText("核心参数摘要")' min-width="220" />
+          <el-table-column prop="qualityRequirement" :label='uiText("质量要求")' min-width="180" />
+          <el-table-column :label='uiText("单工序成本")' width="130">
             <template #default="{ row }">{{ formatAmount(row.unitCost) }}</template>
           </el-table-column>
-          <el-table-column label="标记" min-width="170">
+          <el-table-column :label='uiText("标记")' min-width="170">
             <template #default="{ row }">
               <div class="tag-wrap">
-                <el-tag v-if="row.isKeyProcess" type="warning" effect="light">关键工序</el-tag>
-                <el-tag v-if="row.isExternalOperation" type="success" effect="light">外协</el-tag>
-                <el-tag v-if="row.isDifferenceOperation" type="info" effect="light">差异</el-tag>
-                <el-tag v-if="row.changedInCurrentVersion" type="danger" effect="light">本版变更</el-tag>
+                <el-tag v-if="row.isKeyProcess" type="warning" effect="light">{{ uiText("关键工序") }}</el-tag>
+                <el-tag v-if="row.isExternalOperation" type="success" effect="light">{{ uiText("外协") }}</el-tag>
+                <el-tag v-if="row.isDifferenceOperation" type="info" effect="light">{{ uiText("差异") }}</el-tag>
+                <el-tag v-if="row.changedInCurrentVersion" type="danger" effect="light">{{ uiText("本版变更") }}</el-tag>
               </div>
             </template>
           </el-table-column>
@@ -732,30 +734,30 @@ onMounted(async () => {
       <section v-else-if="activeSection === 'attachments'" class="page-stack detail-section">
         <div class="toolbar-row">
           <div>
-            <h3 class="section-title">资料挂接</h3>
-            <p class="page-panel-desc">按工序查看 SOP、SIP、参数表和检验标准是否齐套。</p>
+            <h3 class="section-title">{{ uiText("资料挂接") }}</h3>
+            <p class="page-panel-desc">{{ uiText("按工序查看 SOP、SIP、参数表和检验标准是否齐套。") }}</p>
           </div>
         </div>
 
         <el-table :data="activeDetail.attachments" border stripe>
-          <el-table-column prop="operationName" label="工序" min-width="150" />
+          <el-table-column prop="operationName" :label='uiText("工序")' min-width="150" />
           <el-table-column prop="sopCount" label="SOP" width="70" />
           <el-table-column prop="sipCount" label="SIP" width="70" />
-          <el-table-column prop="parameterSheetCount" label="参数表" width="90" />
-          <el-table-column prop="qualitySpecCount" label="检验标准" width="90" />
-          <el-table-column label="状态" width="100">
+          <el-table-column prop="parameterSheetCount" :label='uiText("参数表")' width="90" />
+          <el-table-column prop="qualitySpecCount" :label='uiText("检验标准")' width="90" />
+          <el-table-column :label='uiText("状态")' width="100">
             <template #default="{ row }">
               <el-tag :type="row.status === 'complete' ? 'success' : row.status === 'partial' ? 'warning' : 'danger'" effect="light">
-                {{ attachmentStatusLabel(row.status) }}
+                {{ uiText(String((attachmentStatusLabel(row.status)) ?? '')) }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="updatedAt" label="最近更新" width="140" />
-          <el-table-column label="操作" width="150" fixed="right">
+          <el-table-column prop="updatedAt" :label='uiText("最近更新")' width="140" />
+          <el-table-column :label='uiText("操作")' width="150" fixed="right">
             <template #default="{ row }">
               <div class="table-actions">
-                <el-button link type="primary" @click="previewAttachment(row)">预览</el-button>
-                <el-button link type="success" :disabled="row.canAdd === false" @click="addAttachment(row)">添加</el-button>
+                <el-button link type="primary" @click="previewAttachment(row)">{{ uiText("预览") }}</el-button>
+                <el-button link type="success" :disabled="row.canAdd === false" @click="addAttachment(row)">{{ uiText("添加") }}</el-button>
               </div>
             </template>
           </el-table-column>
@@ -765,27 +767,27 @@ onMounted(async () => {
       <section v-else-if="activeSection === 'changes'" class="page-stack detail-section">
         <div class="toolbar-row">
           <div>
-            <h3 class="section-title">版本变更</h3>
-            <p class="page-panel-desc">聚焦这条路线的版本变化、原因和影响。</p>
+            <h3 class="section-title">{{ uiText("版本变更") }}</h3>
+            <p class="page-panel-desc">{{ uiText("聚焦这条路线的版本变化、原因和影响。") }}</p>
           </div>
           <div class="header-actions">
-            <el-button plain :disabled="activeDetail.canApplyChange === false" @click="applyChange">变更申请</el-button>
-            <el-button type="primary" :disabled="activeDetail.canFinalize === false" @click="finalizeChange">敲定</el-button>
+            <el-button plain :disabled="activeDetail.canApplyChange === false" @click="applyChange">{{ uiText("变更申请") }}</el-button>
+            <el-button type="primary" :disabled="activeDetail.canFinalize === false" @click="finalizeChange">{{ uiText("敲定") }}</el-button>
           </div>
         </div>
 
         <div class="page-stack">
           <div v-for="item in activeDetail.changes" :key="`${item.versionNo}-${item.changedAt}`" class="change-card">
             <div class="toolbar-row">
-              <strong>版本 {{ item.versionNo }} / {{ item.changeType }}</strong>
+              <strong>{{ uiText("版本 ") }}{{ item.versionNo }} / {{ item.changeType }}</strong>
               <span>{{ item.changedAt }}</span>
             </div>
             <p class="page-panel-desc">{{ item.changeReason }}</p>
-            <p class="subtle-text">涉及工序：{{ item.affectedOperations.join('、') }}</p>
+            <p class="subtle-text">{{ uiText("涉及工序：") }}{{ item.affectedOperations.join('、') }}</p>
             <div class="route-meta route-meta--compact">
-              <span>成本变化 {{ formatAmount(item.costDelta) }}</span>
-              <span>交期变化 {{ item.leadDayDelta }} 天</span>
-              <span>责任人 {{ item.ownerName }}</span>
+              <span>{{ uiText("成本变化 ") }}{{ formatAmount(item.costDelta) }}</span>
+              <span>{{ uiText("交期变化 ") }}{{ item.leadDayDelta }}{{ uiText(" 天") }}</span>
+              <span>{{ uiText("责任人 ") }}{{ item.ownerName }}</span>
             </div>
           </div>
         </div>
@@ -794,8 +796,8 @@ onMounted(async () => {
       <section v-else class="page-stack detail-section">
         <div class="toolbar-row">
           <div>
-            <h3 class="section-title">联动影响</h3>
-            <p class="page-panel-desc">点击左侧联动项，在右侧查看当前路线相关摘要。</p>
+            <h3 class="section-title">{{ uiText("联动影响") }}</h3>
+            <p class="page-panel-desc">{{ uiText("点击左侧联动项，在右侧查看当前路线相关摘要。") }}</p>
           </div>
         </div>
 
@@ -810,7 +812,7 @@ onMounted(async () => {
               @click="activeImpactLabel = item.label"
             >
               <div class="toolbar-row">
-                <strong>{{ item.label }}</strong>
+                <strong>{{ uiText(String((item.label) ?? '')) }}</strong>
                 <el-icon><ArrowRight /></el-icon>
               </div>
               <p class="page-panel-desc">{{ item.summary }}</p>
@@ -820,15 +822,15 @@ onMounted(async () => {
           <article v-if="activeImpact" class="impact-preview-panel">
             <div class="toolbar-row">
               <div>
-                <h3 class="section-title">{{ activeImpact.label }}</h3>
+                <h3 class="section-title">{{ uiText(String((activeImpact.label) ?? '')) }}</h3>
                 <p class="page-panel-desc">{{ activeImpact.summary }}</p>
               </div>
-              <el-button link type="primary" @click="openTarget(activeImpact.targetPath)">查看完整页面</el-button>
+              <el-button link type="primary" @click="openTarget(activeImpact.targetPath)">{{ uiText("查看完整页面") }}</el-button>
             </div>
 
             <div class="impact-summary-grid">
               <div v-for="item in activeImpactSummaryItems" :key="item.label" class="overview-item">
-                <span class="subtle-text">{{ item.label }}</span>
+                <span class="subtle-text">{{ uiText(String((item.label) ?? '')) }}</span>
                 <strong>{{ item.value }}</strong>
               </div>
             </div>
@@ -837,109 +839,109 @@ onMounted(async () => {
       </section>
     </article>
 
-    <el-dialog v-model="operationMasterDialogVisible" title="新增工序" width="min(720px, 94vw)" append-to-body>
+    <el-dialog v-model="operationMasterDialogVisible" :title='uiText("新增工序")' width="min(720px, 94vw)" append-to-body>
       <el-form label-width="112px" class="operation-master-form">
-        <el-form-item label="工序编码" required>
-          <el-input v-model="operationMasterForm.processCode" maxlength="80" placeholder="例如 PROC_LAMINATION" />
+        <el-form-item :label='uiText("工序编码")' required>
+          <el-input v-model="operationMasterForm.processCode" maxlength="80" :placeholder='uiText("例如 PROC_LAMINATION")' />
         </el-form-item>
-        <el-form-item label="工序名称" required>
-          <el-input v-model="operationMasterForm.processName" maxlength="100" placeholder="例如 压合" />
+        <el-form-item :label='uiText("工序名称")' required>
+          <el-input v-model="operationMasterForm.processName" maxlength="100" :placeholder='uiText("例如 压合")' />
         </el-form-item>
-        <el-form-item label="工序分类" required>
-          <el-select v-model="operationMasterForm.processCategory" filterable allow-create default-first-option placeholder="选择或输入分类">
-            <el-option label="成型" value="成型" />
-            <el-option label="后处理" value="后处理" />
-            <el-option label="表面处理" value="表面处理" />
-            <el-option label="组装" value="组装" />
-            <el-option label="包装" value="包装" />
-            <el-option label="质检" value="质检" />
+        <el-form-item :label='uiText("工序分类")' required>
+          <el-select v-model="operationMasterForm.processCategory" filterable allow-create default-first-option :placeholder='uiText("选择或输入分类")'>
+            <el-option :label='uiText("成型")' value="成型" />
+            <el-option :label='uiText("后处理")' value="后处理" />
+            <el-option :label='uiText("表面处理")' value="表面处理" />
+            <el-option :label='uiText("组装")' value="组装" />
+            <el-option :label='uiText("包装")' value="包装" />
+            <el-option :label='uiText("质检")' value="质检" />
           </el-select>
         </el-form-item>
-        <el-form-item label="工序类型" required>
+        <el-form-item :label='uiText("工序类型")' required>
           <el-select v-model="operationMasterForm.operationType">
-            <el-option label="加工" value="加工" />
-            <el-option label="检验" value="检验" />
-            <el-option label="包装" value="包装" />
-            <el-option label="外协" value="外协" />
+            <el-option :label='uiText("加工")' value="加工" />
+            <el-option :label='uiText("检验")' value="检验" />
+            <el-option :label='uiText("包装")' value="包装" />
+            <el-option :label='uiText("外协")' value="外协" />
           </el-select>
         </el-form-item>
-        <el-form-item label="工艺编码">
-          <el-input v-model="operationMasterForm.operationCraftCode" maxlength="20" placeholder="如 10 / 20 / 30" />
+        <el-form-item :label='uiText("工艺编码")'>
+          <el-input v-model="operationMasterForm.operationCraftCode" maxlength="20" :placeholder='uiText("如 10 / 20 / 30")' />
         </el-form-item>
-        <el-form-item label="默认工时">
+        <el-form-item :label='uiText("默认工时")'>
           <el-input-number v-model="operationMasterForm.defaultStandardTimeMins" :min="0" :precision="2" controls-position="right" />
         </el-form-item>
-        <el-form-item label="需要工位">
+        <el-form-item :label='uiText("需要工位")'>
           <el-switch v-model="operationMasterForm.needWorkstation" />
         </el-form-item>
-        <el-form-item label="工位类型">
-          <el-input v-model="operationMasterForm.workstationType" maxlength="80" placeholder="例如 注塑机 / 组装工位" />
+        <el-form-item :label='uiText("工位类型")'>
+          <el-input v-model="operationMasterForm.workstationType" maxlength="80" :placeholder='uiText("例如 注塑机 / 组装工位")' />
         </el-form-item>
-        <el-form-item label="质量要求" class="operation-master-form__wide">
+        <el-form-item :label='uiText("质量要求")' class="operation-master-form__wide">
           <el-input v-model="operationMasterForm.defaultQualityRequirement" maxlength="500" type="textarea" :rows="2" />
         </el-form-item>
-        <el-form-item label="默认参数" class="operation-master-form__wide">
-          <el-input v-model="operationMasterForm.defaultProcessParamJson" type="textarea" :rows="3" placeholder='例如 {"temperature":"按工艺卡"}' />
+        <el-form-item :label='uiText("默认参数")' class="operation-master-form__wide">
+          <el-input v-model="operationMasterForm.defaultProcessParamJson" type="textarea" :rows="3" :placeholder='uiText("例如 {\"temperature\":\"按工艺卡\"}")' />
         </el-form-item>
-        <el-form-item label="备注" class="operation-master-form__wide">
+        <el-form-item :label='uiText("备注")' class="operation-master-form__wide">
           <el-input v-model="operationMasterForm.remark" maxlength="500" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="operationMasterDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="saveOperationMaster">保存并确认</el-button>
+        <el-button @click="operationMasterDialogVisible = false">{{ uiText("取消") }}</el-button>
+        <el-button type="primary" @click="saveOperationMaster">{{ uiText("保存并确认") }}</el-button>
       </template>
     </el-dialog>
 
     <el-drawer
       v-model="relationDrawerVisible"
-      :title="`工艺路线详情：${activeRelation?.processName || ''}`"
+      :title="uiText('工艺路线详情：{value0}',{value0:(activeRelation?.processName || '')})"
       size="min(920px, 96vw)"
       append-to-body
     >
       <div v-loading="relationLoading" class="relation-drawer">
         <template v-if="activeRelation">
           <section class="relation-section">
-            <h3 class="section-title">路线信息</h3>
+            <h3 class="section-title">{{ uiText("路线信息") }}</h3>
             <dl class="relation-facts">
-              <div><dt>路线编号</dt><dd>{{ activeRelation.processCode }}</dd></div>
-              <div><dt>工序名称</dt><dd>{{ activeRelation.processName }}</dd></div>
-              <div><dt>所属产品</dt><dd>{{ activeRelation.productName }}</dd></div>
-              <div><dt>版本</dt><dd>{{ activeRelation.versionNo }}</dd></div>
-              <div><dt>状态</dt><dd><StatusTag :status="activeRelation.status" object-type="process" /></dd></div>
+              <div><dt>{{ uiText("路线编号") }}</dt><dd>{{ activeRelation.processCode }}</dd></div>
+              <div><dt>{{ uiText("工序名称") }}</dt><dd>{{ activeRelation.processName }}</dd></div>
+              <div><dt>{{ uiText("所属产品") }}</dt><dd>{{ activeRelation.productName }}</dd></div>
+              <div><dt>{{ uiText("版本") }}</dt><dd>{{ activeRelation.versionNo }}</dd></div>
+              <div><dt>{{ uiText("状态") }}</dt><dd><StatusTag :status="activeRelation.status" object-type="process" /></dd></div>
             </dl>
           </section>
 
           <section class="relation-section">
-            <h3 class="section-title">适用颜色</h3>
+            <h3 class="section-title">{{ uiText("适用颜色") }}</h3>
             <div v-if="activeRelation.colors.length" class="tag-wrap">
               <el-tag v-for="color in activeRelation.colors" :key="color.colorCode || color.colorName" effect="light">{{ color.colorName }}</el-tag>
             </div>
-            <el-empty v-else description="尚未关联适用颜色" />
+            <el-empty v-else :description='uiText("尚未关联适用颜色")' />
           </section>
 
           <section class="relation-section">
-            <h3 class="section-title">关联 SKU</h3>
-            <el-table :data="activeRelation.skus" border stripe empty-text="暂无关联 SKU">
-              <el-table-column prop="skuCode" label="SKU 编码" min-width="160" />
-              <el-table-column prop="productName" label="产品" min-width="150" />
-              <el-table-column prop="phoneModel" label="手机型号" min-width="150" />
-              <el-table-column prop="color" label="颜色" width="110" />
-              <el-table-column label="状态" width="110">
+            <h3 class="section-title">{{ uiText("关联 SKU") }}</h3>
+            <el-table :data="activeRelation.skus" border stripe :empty-text='uiText("暂无关联 SKU")'>
+              <el-table-column prop="skuCode" :label='uiText("SKU 编码")' min-width="160" />
+              <el-table-column prop="productName" :label='uiText("产品")' min-width="150" />
+              <el-table-column prop="phoneModel" :label='uiText("手机型号")' min-width="150" />
+              <el-table-column prop="color" :label='uiText("颜色")' width="110" />
+              <el-table-column :label='uiText("状态")' width="110">
                 <template #default="{ row }"><StatusTag :status="row.status" object-type="product" /></template>
               </el-table-column>
             </el-table>
           </section>
 
           <section class="relation-section">
-            <h3 class="section-title">工序明细</h3>
-            <el-table :data="activeRelation.operations" border stripe empty-text="暂无工序明细">
-              <el-table-column prop="sequenceNo" label="顺序" width="80" />
-              <el-table-column prop="processName" label="工序名称" min-width="150" />
-              <el-table-column label="工艺编码" min-width="130">
+            <h3 class="section-title">{{ uiText("工序明细") }}</h3>
+            <el-table :data="activeRelation.operations" border stripe :empty-text='uiText("暂无工序明细")'>
+              <el-table-column prop="sequenceNo" :label='uiText("顺序")' width="80" />
+              <el-table-column prop="processName" :label='uiText("工序名称")' min-width="150" />
+              <el-table-column :label='uiText("工艺编码")' min-width="130">
                 <template #default="{ row }">{{ row.operationCraftCode || row.operationCode || row.processCode || '--' }}</template>
               </el-table-column>
-              <el-table-column prop="qualityRequirement" label="质量要求" min-width="220" />
+              <el-table-column prop="qualityRequirement" :label='uiText("质量要求")' min-width="220" />
             </el-table>
           </section>
         </template>

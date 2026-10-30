@@ -1,0 +1,20 @@
+<script setup lang="ts">
+import { t as uiText } from '@/locales'
+
+import {computed,ref,watch} from 'vue'
+import type {SelectionRow} from '@/types/partnerSelections'
+import {supplierColors,type SupplierColor} from '@/api/modules/supplierRanges'
+import {partnerError} from '@/utils/partnerError'
+const props=defineProps<{row:SelectionRow;disabled?:boolean}>()
+const options=ref<SupplierColor[]>([]),retained=ref(new Map<number,SupplierColor>()),common=ref<string[]>([]),keyword=ref(''),loading=ref(false),error=ref('')
+let sequence=0
+const known=computed(()=>new Map<number,Partial<SupplierColor>&{id:number;name:string}>([...(props.row.supplierColors||[]).filter(color=>props.row.supplierColorIds?.includes(color.id)),...retained.value.values()].map(color=>[color.id,color])))
+const matchingRaw=computed(()=>options.value.filter(color=>color.name===props.row.color&&color.status==='active'))
+const value=computed<(number|string)[]>({get(){if(props.row.supplierColorIds?.length||props.row.newSupplierColors?.length)return [...(props.row.supplierColorIds||[]),...(props.row.newSupplierColors||[])];return matchingRaw.value.length===1?[matchingRaw.value[0].id]:[]},set(values){props.row.supplierColorIds=values.filter((value):value is number=>typeof value==='number');props.row.newSupplierColors=values.filter((value):value is string=>typeof value==='string').map(value=>value.trim()).filter(Boolean);props.row.color=values.map(value=>typeof value==='number'?known.value.get(value)?.name||'':value.trim()).filter(Boolean).join('、')}})
+const candidates=computed(()=>common.value.filter(name=>name.includes(keyword.value)&&![...known.value.values()].some(color=>color.name===name)))
+async function load(word=''){keyword.value=word;const current=++sequence;if(!props.row.supplierCode){options.value=[];common.value=[];return}loading.value=true;error.value='';try{const data=await supplierColors(props.row.supplierCode,{page:1,size:100,keyword:word,scope:'general'});if(current===sequence){options.value=data.content;retained.value=new Map([...retained.value,...data.content.map(color=>[color.id,color] as const)]);common.value=data.commonColors||[]}}catch(e){if(current===sequence)error.value=partnerError(e)}finally{if(current===sequence)loading.value=false}}
+watch(()=>props.row.supplierCode,()=>{options.value=[];retained.value=new Map();common.value=[];void load()},{immediate:true})
+function opened(open:boolean){if(open)void load()}
+</script>
+<template><div class="supplier-color-select"><el-select v-model="value" multiple filterable remote allow-create clearable reserve-keyword :remote-method="load" :disabled="disabled||!row.supplierCode" :loading="loading" :placeholder='uiText("选择或输入颜色，可多选")' :aria-label='uiText("供应商颜色")' @visible-change="opened"><el-option v-for="color in [...known.values()].filter(color=>value.includes(color.id)||options.some(option=>option.id===color.id))" :key="color.id" :value="color.id" :disabled="color.status==='inactive'&&!value.includes(color.id)" :label="color.name+(color.status==='inactive'?uiText('（已停用）'):'')+(color.supplierColorCode?' · '+color.supplierColorCode:'')"/><el-option v-for="name in candidates" :key="name" :value="name" :label="name"/></el-select><small v-if="row.color&&!value.length">{{ uiText("原记录：") }}{{row.color}}{{ uiText("（选择颜色后替换，未选择则保留）") }}</small><small v-if="row.newSupplierColors?.length">{{ uiText("新颜色将在保存产品资料时建档；取消不会创建。") }}</small><p v-if="error" role="alert">{{error}}<el-button link @click="load()">{{ uiText("重试") }}</el-button></p></div></template>
+<style scoped>.supplier-color-select{width:100%;min-width:0}.supplier-color-select small{display:block;color:var(--el-text-color-secondary);font-size:12px;line-height:1.6}.supplier-color-select p{font-size:12px;margin:4px 0;color:var(--el-color-danger)}.supplier-color-select :deep(.el-select){width:100%}.supplier-color-select :deep(.el-tag){max-width:100%;height:auto;min-height:22px}.supplier-color-select :deep(.el-tag__content){white-space:normal;overflow-wrap:anywhere}</style>

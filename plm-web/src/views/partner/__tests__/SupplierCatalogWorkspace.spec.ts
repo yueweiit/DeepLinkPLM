@@ -1,14 +1,17 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import ElementPlus, { ElCheckbox, ElInputNumber, ElPagination, ElMessageBox } from 'element-plus'
+import ElementPlus, { ElCheckbox, ElInputNumber, ElPagination, ElMessageBox,ElSelect } from 'element-plus'
+import SupplierColorSelect from '@/views/supplier/SupplierColorSelect.vue'
+import PartnerPhoto from '../PartnerPhoto.vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CatalogStyle } from '@/types/partnerCatalog'
 
-const api = vi.hoisted(() => ({ catalogSuppliers: vi.fn(), catalogStyles: vi.fn(), catalogStyle: vi.fn(),renameCatalogStyle:vi.fn(),addCatalogSelection: vi.fn(), previewCatalogSelection:vi.fn(), selectionPage: vi.fn() }))
+const api = vi.hoisted(() => ({ catalogSuppliers: vi.fn(), catalogStyles: vi.fn(), catalogStyle: vi.fn(),updateCatalogStyle:vi.fn(),addCatalogSelection: vi.fn(), previewCatalogSelection:vi.fn(), selectionPage: vi.fn() }))
 vi.mock('@/api/modules/partnerCatalog', () => api)
 vi.mock('@/api/modules/partnerSelections', () => ({ selectionPage: api.selectionPage }))
 vi.mock('@/api/modules/partner', () => ({ newRequestId: () => crypto.randomUUID() }))
-vi.mock('../PartnerPhoto.vue', () => ({ default: { props: ['id'], template: '<span class="test-photo" :data-photo="id">图片</span>' } }))
+vi.mock('@/api/modules/supplierRanges',()=>({supplierRanges:vi.fn(async()=>({content:[]})),supplierColors:vi.fn(async()=>({content:[]}))}))
+vi.mock('../PartnerPhoto.vue', () => ({ default: { props: {id:Number,previewable:Boolean,previewFiles:Array}, template: '<span class="test-photo" :data-photo="id">图片</span>' } }))
 vi.mock('../PartnerFiles.vue', () => ({ default: { props: ['files'], template: '<section class="test-files"><span v-for="file in files" :key="file.id">{{file.name}}</span></section>' } }))
 vi.mock('../PartnerWorkspace.vue', () => ({ default: { template: '<div class="existing-workspace">现有产品办理</div>' } }))
 vi.mock('../catalog/CatalogModelSheetDialog.vue',()=>({default:{name:'CatalogModelSheetDialog',props:['row'],emits:['saved','close'],template:'<section class="model-sheet-owner">单款型号表核对：{{row.name}}</section>'}}))
@@ -50,14 +53,22 @@ async function chooseFirstRowModel(index = 0) {
 }
 
 describe('supplier-first product catalog', () => {
-  it('renames a legacy imported style directly from the list, submits only the name and current versions, and refreshes without moving the page',async()=>{
+  it('edits current catalog fields through the shared real editor, submits only changes and current versions, and retains the page',async()=>{
     const original=row({name:'凡影大孔手机壳'}),current={...original,rowVersion:5,recordVersion:6},corrected={...original,name:'凡影精孔手机壳'}
-    api.catalogStyles.mockResolvedValueOnce(page([original],{supplier})).mockResolvedValueOnce(page([corrected],{supplier}));api.catalogStyle.mockResolvedValue(current);api.renameCatalogStyle.mockResolvedValue({name:corrected.name,changed:true});vi.spyOn(ElMessageBox,'prompt').mockImplementation(()=>Promise.resolve({value:corrected.name,action:'confirm'}) as ReturnType<typeof ElMessageBox.prompt>)
-    const router=await start('/partner-products?supplierCode=TEST-SUP&catalogPage=2');await wrapper.get('[aria-label="修改凡影大孔手机壳名称"]').trigger('click');await flushPromises()
-    expect(api.renameCatalogStyle).toHaveBeenCalledWith('TEST-SUP',current,{name:'凡影精孔手机壳',rowVersion:5,recordVersion:6,requestId:expect.any(String)});expect(wrapper.get('.catalog-style-name').text()).toContain('凡影精孔手机壳');expect(router.currentRoute.value.query.catalogPage).toBe('2');expect(api.addCatalogSelection).not.toHaveBeenCalled();expect(api.catalogStyles).toHaveBeenCalledTimes(2)
-    await wrapper.get('.catalog-style-name button').trigger('click');await flushPromises();expect(wrapper.findAll('button').some(button=>button.text()==='修改名称')).toBe(true)
+    api.catalogStyles.mockResolvedValueOnce(page([original],{supplier})).mockResolvedValueOnce(page([corrected],{supplier}));api.catalogStyle.mockResolvedValue(current);api.updateCatalogStyle.mockResolvedValue({name:corrected.name,changed:true})
+    const router=await start('/partner-products?supplierCode=TEST-SUP&catalogPage=2');await wrapper.get('[aria-label="编辑产品 凡影大孔手机壳"]').trigger('click');await flushPromises()
+    const field=(label:string)=>wrapper.findAll('.el-form-item').find(item=>item.find('.el-form-item__label').text()===label)!.get('input,textarea')
+    await field('款式名称 *').setValue(corrected.name);wrapper.getComponent(SupplierColorSelect).getComponent(ElSelect).vm.$emit('update:modelValue',['红色']);await flushPromises();await field('数值单价').setValue('0');await field('材质／配置').setValue('PC');await click('保存产品资料')
+    expect(api.updateCatalogStyle).toHaveBeenCalledWith('TEST-SUP',current,{changes:{name:'凡影精孔手机壳',color:'红色',supplierColorIds:[],newSupplierColors:['红色'],material:'PC',unitPrice:'0'},rowVersion:5,recordVersion:6,requestId:expect.any(String)});expect(wrapper.get('.catalog-style-name').text()).toContain('凡影精孔手机壳');expect(router.currentRoute.value.query.catalogPage).toBe('2');expect(api.addCatalogSelection).not.toHaveBeenCalled();expect(api.catalogStyles).toHaveBeenCalledTimes(2)
+    await wrapper.get('.catalog-style-name button').trigger('click');await flushPromises();expect(wrapper.findAll('button').some(button=>button.text()==='编辑产品资料')).toBe(true)
   })
-  it('keeps the current detail and does not write or refresh when the rename is cancelled',async()=>{vi.spyOn(ElMessageBox,'prompt').mockRejectedValue('cancel');await start('/partner-products?supplierCode=TEST-SUP&sourceKind=selection&recordId=17&rowId=stable-row');await click('修改名称');expect(api.renameCatalogStyle).not.toHaveBeenCalled();expect(wrapper.get('.detail-heading h2').text()).toBe('磁吸支架款');expect(api.catalogStyles).not.toHaveBeenCalled()})
+  it('closes an unchanged editor without writing or refreshing the original detail',async()=>{await start('/partner-products?supplierCode=TEST-SUP&sourceKind=selection&recordId=17&rowId=stable-row');await click('编辑产品资料');await click('取消');expect(api.updateCatalogStyle).not.toHaveBeenCalled();expect(wrapper.get('.detail-heading h2').text()).toBe('磁吸支架款');expect(api.catalogStyles).not.toHaveBeenCalled()})
+  it('retains edits on cancel, navigation and page reload until explicitly discarded or saved',async()=>{vi.spyOn(ElMessageBox,'confirm').mockRejectedValue('cancel');const router=await start('/partner-products?supplierCode=TEST-SUP');await click('编辑');await wrapper.get('.selection-row-editor textarea').setValue('待保存名称');const leaving=new Event('beforeunload',{cancelable:true});window.dispatchEvent(leaving);expect(leaving.defaultPrevented).toBe(true);await router.push('/partner-selections');expect(router.currentRoute.value.path).toBe('/partner-products');await click('取消');expect(wrapper.find('.selection-row-editor').exists()).toBe(true);expect(api.updateCatalogStyle).not.toHaveBeenCalled()})
+  it('removes and restores the same identity with explicit deleted queries and fresh versions, without cancelling selections',async()=>{
+    vi.spyOn(ElMessageBox,'confirm').mockResolvedValue('confirm' as never);api.updateCatalogStyle.mockResolvedValue({changed:true})
+    const router=await start('/partner-products?supplierCode=TEST-SUP');await click('删除');expect(api.updateCatalogStyle).toHaveBeenLastCalledWith('TEST-SUP',row(),{changes:{discarded:true},rowVersion:3,recordVersion:4,requestId:expect.any(String)})
+    api.catalogStyles.mockResolvedValue(page([row({discarded:true,rowVersion:4,recordVersion:5})],{supplier}));api.catalogStyle.mockResolvedValue(row({discarded:true,rowVersion:4,recordVersion:5}));await click('已删除产品');expect(router.currentRoute.value.query.deleted).toBe('true');expect(api.catalogStyles).toHaveBeenLastCalledWith(expect.objectContaining({supplierCode:'TEST-SUP',deleted:'true'}));await click('恢复');expect(api.updateCatalogStyle).toHaveBeenLastCalledWith('TEST-SUP',row({discarded:true,rowVersion:4,recordVersion:5}),{changes:{discarded:false},rowVersion:4,recordVersion:5,requestId:expect.any(String)});expect(api.addCatalogSelection).not.toHaveBeenCalled()
+  })
   it('loads the selected source detail before choosing models and exposes optional recorded colours even without cost permission',async()=>{api.catalogStyles.mockResolvedValue(page([row({pairings:undefined})],{supplier,canReadCost:false}));api.catalogStyle.mockResolvedValue(row({rowVersion:5,recordVersion:6,canReadCost:false,pairings:[{phoneModelId:201,colorId:8,state:'available',colorSnapshot:{id:8,name:'原报价黑'}}]}));await start('/partner-products?supplierCode=TEST-SUP');expect(api.catalogStyle).not.toHaveBeenCalled();await chooseCatalogStyle();expect(api.catalogStyle).toHaveBeenCalledWith('TEST-SUP',{sourceKind:'selection',recordId:17,rowId:'stable-row'});expect(wrapper.text()).toContain('收到实物再登记收样');await chooseFirstRowModel();await flushPromises();expect(wrapper.get('.selection-pairs').text()).toContain('iPhone 11 · 原报价黑');await wrapper.get('.selection-pairs input[type="checkbox"]').setValue(true);wrapper.get('.selection-row-quantity').getComponent(ElInputNumber).vm.$emit('update:modelValue',2);await flushPromises();await click('保存选样');expect(api.previewCatalogSelection).toHaveBeenCalledWith(expect.objectContaining({items:[expect.objectContaining({rowVersion:5,recordVersion:6,phoneModelIds:[201],sampleQty:2,selectedPairs:[{phoneModelId:201,colorId:8}]})]}));expect(api.addCatalogSelection).toHaveBeenCalledWith(expect.objectContaining({previewToken:'signed-real-pairs',items:[expect.objectContaining({sampleQty:2,phoneModelIds:[201]})]}));expect(api.previewCatalogSelection.mock.invocationCallOrder[0]).toBeLessThan(api.addCatalogSelection.mock.invocationCallOrder[0]);expect(wrapper.find('.catalog-style-row .selection-pairs').exists()).toBe(false)})
   it.each(['list','detail'])('uses the checked toolbar selection without a style-code or reason gate after viewing the %s',async view=>{
     api.catalogStyles.mockResolvedValue(page([row({catalogStyleId:undefined,catalogStyleCode:undefined,catalogStyleLabel:undefined})],{supplier}));api.catalogStyle.mockResolvedValue(row({catalogStyleId:undefined,catalogStyleCode:undefined,catalogStyleLabel:undefined,modelText:'iPhone 11系列',rowVersion:5,recordVersion:6}))
@@ -147,21 +158,21 @@ describe('supplier-first product catalog', () => {
     expect(wrapper.text()).toContain('iPhone 11')
   })
 
-  it('uses an accessible image-count badge without an extra line of image text', async () => {
+  it('passes this style image list to direct preview instead of opening the detail through its count badge', async () => {
     api.catalogStyles.mockResolvedValue(page([row({ fileDetails: [501,502,503].map(id=>({id,name:`本款${id}.png`,version:'V1',type:'image/png',size:20})) })], { supplier }))
     await start('/partner-products?supplierCode=TEST-SUP')
     expect(wrapper.get('.catalog-photo-open').text()).toBe('3图')
-    expect(wrapper.get('.catalog-photo-open').attributes('aria-label')).toBe('查看磁吸支架款的3张图片')
+    expect(wrapper.get('.catalog-photo-open').attributes('aria-hidden')).toBe('true')
+    const photo=wrapper.getComponent(PartnerPhoto);expect(photo.props('previewable')).toBe(true);expect(photo.props('previewFiles')!.map((file:{id:number})=>file.id)).toEqual([501,502,503])
     expect(wrapper.get('.catalog-check-title').text()).toBe('勾选')
-    expect(wrapper.get('.catalog-style-actions').findAll('button').map(button=>button.text())).toEqual(['详情', '改名'])
-    await wrapper.get('.catalog-photo-open').trigger('click'); await flushPromises()
-    expect(api.catalogStyle).toHaveBeenCalledWith('TEST-SUP', expect.objectContaining({rowId:'stable-row'}))
+    expect(wrapper.get('.catalog-style-actions').findAll('button').map(button=>button.text())).toEqual(['详情', '编辑', '删除'])
+    await wrapper.get('.catalog-photo-open').trigger('click'); await flushPromises();expect(api.catalogStyle).not.toHaveBeenCalled()
   })
 
   it('preserves supplier, search and pagination across detail and return, without loading other suppliers', async () => {
     const router = await start('/partner-products?supplierCode=TEST-SUP&keyword=支架&catalogPage=3&catalogSize=20&supplierQ=测试&supplierPage=2')
     await click('详情')
-    expect(api.catalogStyle).toHaveBeenCalledWith('TEST-SUP', { sourceKind: 'selection', recordId: 17, rowId: 'stable-row' })
+    expect(api.catalogStyle).toHaveBeenCalledWith('TEST-SUP', { sourceKind: 'selection', recordId: 17, rowId: 'stable-row' },false)
     expect(router.currentRoute.value.query).toMatchObject({ keyword: '支架', catalogPage: '3', supplierPage: '2' })
     await click('返回款式列表')
     expect(api.catalogStyles).toHaveBeenLastCalledWith({ supplierCode: 'TEST-SUP', keyword: '支架', page: 3, size: 20 })
@@ -383,6 +394,6 @@ describe('catalog compact responsive layout contract',()=>{
 
   it('can keep selecting into the same exact workbench directory after a successful save without carrying a stale client target version',async()=>{api.previewCatalogSelection.mockResolvedValueOnce({canAdd:true,previewToken:'first',targetSelectionId:77,targetVersion:8,items:[],messages:[]}).mockResolvedValue({canAdd:true,previewToken:'second',targetSelectionId:77,targetVersion:9,items:[],messages:[]});const router=await start('/partner-products?supplierCode=TEST-SUP&selectionId=77');await chooseCatalogStyle();await chooseFirstRowModel();await click('保存选样');await chooseCatalogStyle();await chooseFirstRowModel();await click('保存选样');expect(api.previewCatalogSelection).toHaveBeenCalledTimes(2);expect(api.addCatalogSelection).toHaveBeenCalledTimes(2);for(const call of api.addCatalogSelection.mock.calls){expect(call[0]).toMatchObject({targetSelectionId:77,targetMode:'supplier_directory'});expect(call[0]).not.toHaveProperty('targetVersion')}expect(api.addCatalogSelection.mock.calls.map(call=>call[0].previewToken)).toEqual(['first','second']);expect(router.currentRoute.value.query.selectionId).toBe('77');expect(api.selectionPage).not.toHaveBeenCalled()})
 
-  it('offers one checked-style selection entry above the list and keeps row and detail views free of duplicate add actions',async()=>{const router=await start('/partner-products?supplierCode=TEST-SUP');expect(wrapper.findAll('button').filter(button=>button.text()==='选择样品')).toHaveLength(1);expect(wrapper.text()).not.toContain('加入选品');expect(wrapper.get('.catalog-style-actions').findAll('button').map(button=>button.text())).toEqual(['详情','改名']);expect(wrapper.findAll('button').find(button=>button.text()==='选择样品')!.attributes('disabled')).toBeDefined();await click('详情');expect(wrapper.find('.detail-scroll').exists()).toBe(true);expect(wrapper.text()).not.toContain('加入选品');expect(wrapper.findAll('button').filter(button=>button.text()==='选择样品')).toHaveLength(0);expect(wrapper.get('.test-files').text()).toContain('本款原图.png');expect(wrapper.get('.supplier-style-detail').text()).toContain('iPhone 11');await click('返回款式列表');expect(router.currentRoute.value.query.supplierCode).toBe('TEST-SUP');await chooseCatalogStyle();expect(wrapper.findAll('.selection-model-row')).toHaveLength(1);expect(api.addCatalogSelection).not.toHaveBeenCalled();expect(api.previewCatalogSelection).not.toHaveBeenCalled()})
+  it('offers one checked-style selection entry above the list and keeps row and detail views free of duplicate add actions',async()=>{const router=await start('/partner-products?supplierCode=TEST-SUP');expect(wrapper.findAll('button').filter(button=>button.text()==='选择样品')).toHaveLength(1);expect(wrapper.text()).not.toContain('加入选品');expect(wrapper.get('.catalog-style-actions').findAll('button').map(button=>button.text())).toEqual(['详情','编辑','删除']);expect(wrapper.findAll('button').find(button=>button.text()==='选择样品')!.attributes('disabled')).toBeDefined();await click('详情');expect(wrapper.find('.detail-scroll').exists()).toBe(true);expect(wrapper.text()).not.toContain('加入选品');expect(wrapper.findAll('button').filter(button=>button.text()==='选择样品')).toHaveLength(0);expect(wrapper.get('.test-files').text()).toContain('本款原图.png');expect(wrapper.get('.supplier-style-detail').text()).toContain('iPhone 11');await click('返回款式列表');expect(router.currentRoute.value.query.supplierCode).toBe('TEST-SUP');await chooseCatalogStyle();expect(wrapper.findAll('.selection-model-row')).toHaveLength(1);expect(api.addCatalogSelection).not.toHaveBeenCalled();expect(api.previewCatalogSelection).not.toHaveBeenCalled()})
 
 })

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -75,10 +77,10 @@ onMounted(loadData)
 </script>
 
 <template>
-  <PageContainer title="测试管理" description="页面只保留两块：测试种类和测试记录。先知道测什么，再知道谁测过、结果如何。">
+  <PageContainer :title='uiText("测试管理")' :description='uiText("页面只保留两块：测试种类和测试记录。先知道测什么，再知道谁测过、结果如何。")'>
     <section class="metric-grid">
       <div v-for="metric in metrics" :key="metric.label" class="metric-card">
-        <p class="metric-card__label">{{ metric.label }}</p>
+        <p class="metric-card__label">{{ uiText(String((metric.label) ?? '')) }}</p>
         <p class="metric-card__value">{{ metric.value }}</p>
         <span class="metric-card__trend">{{ metric.hint }}</span>
       </div>
@@ -105,10 +107,10 @@ onMounted(loadData)
       <article class="page-panel">
         <div class="toolbar-row">
           <div>
-            <h3 class="section-title">测试种类</h3>
-            <p class="page-panel-desc">按常用测试种类维护，不堆 KPI，也不做趋势图。</p>
+            <h3 class="section-title">{{ uiText("测试种类") }}</h3>
+            <p class="page-panel-desc">{{ uiText("按常用测试种类维护，不堆 KPI，也不做趋势图。") }}</p>
           </div>
-          <el-button type="primary" plain>新增测试种类</el-button>
+          <el-button type="primary" plain>{{ uiText("新增测试种类") }}</el-button>
         </div>
 
         <div class="category-grid">
@@ -116,7 +118,7 @@ onMounted(loadData)
             <strong>{{ item.categoryName }}</strong>
             <p class="page-panel-desc">{{ item.method }}</p>
             <div class="toolbar-row">
-              <span class="subtle-text">默认阶段：{{ item.defaultFrequency }}</span>
+              <span class="subtle-text">{{ uiText("默认阶段：") }}{{ item.defaultFrequency }}</span>
               <span class="subtle-text">{{ item.owner }}</span>
             </div>
           </section>
@@ -126,31 +128,31 @@ onMounted(loadData)
       <article class="page-panel">
         <div class="toolbar-row">
           <div>
-            <h3 class="section-title">测试记录</h3>
-            <p class="page-panel-desc">记录只关心产品、测试项、结果、执行人和备注。</p>
+            <h3 class="section-title">{{ uiText("测试记录") }}</h3>
+            <p class="page-panel-desc">{{ uiText("记录只关心产品、测试项、结果、执行人和备注。") }}</p>
           </div>
-          <el-button type="primary">新增测试记录</el-button>
+          <el-button type="primary">{{ uiText("新增测试记录") }}</el-button>
         </div>
 
         <FixedTableViewport v-slot="{ tableHeight }" :refresh-key="filteredRecords">
         <el-table :data="filteredRecords" :height="tableHeight" border stripe>
-          <el-table-column prop="productName" label="关联产品" min-width="220" />
-          <el-table-column prop="testCategory" label="测试项" min-width="140" />
-          <el-table-column label="结果" width="120">
+          <el-table-column prop="productName" :label='uiText("关联产品")' min-width="220" />
+          <el-table-column prop="testCategory" :label='uiText("测试项")' min-width="140" />
+          <el-table-column :label='uiText("结果")' width="120">
             <template #default="{ row }">
               <el-tag :type="row.result === '通过' ? 'success' : row.result === '不通过' ? 'danger' : 'warning'" effect="light">
                 {{ row.result }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="owner" label="测试人" width="120" />
-          <el-table-column label="日期" width="120">
+          <el-table-column prop="owner" :label='uiText("测试人")' width="120" />
+          <el-table-column :label='uiText("日期")' width="120">
             <template #default="{ row }">{{ formatDate(row.testedAt) }}</template>
           </el-table-column>
-          <el-table-column prop="note" label="备注" min-width="260" />
-          <el-table-column label="操作" width="120">
+          <el-table-column prop="note" :label='uiText("备注")' min-width="260" />
+          <el-table-column :label='uiText("操作")' width="120">
             <template #default="{ row }">
-              <el-button link type="primary" @click="openProduct(row.productId)">查看节点</el-button>
+              <el-button link type="primary" @click="openProduct(row.productId)">{{ uiText("查看节点") }}</el-button>
             </template>
           </el-table-column>
         </el-table>

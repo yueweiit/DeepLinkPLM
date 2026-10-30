@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import {computed,onBeforeUnmount,onMounted,ref} from 'vue'
 import type {MoldSalesMatrixCell,MoldSalesMatrixPage,MoldSalesMatrixRow,SalesProductOption} from '@/api/modules/moldSales'
 const props=defineProps<{data?:MoldSalesMatrixPage;products:SalesProductOption[]}>()
@@ -17,22 +19,22 @@ const visibleState=(value:MoldSalesMatrixCell|undefined)=>!!value?.stateLabel&&v
 function open(value:MoldSalesMatrixCell|undefined,row:MoldSalesMatrixRow){if(value&&clickable(value))emit('open',value,row)}
 </script>
 <template>
- <div ref="root" class="sales-matrix" :class="{'is-stacked':stacked}" :style="{'--matrix-columns':columns}" role="table" aria-label="手机型号产品销量总览">
-  <div class="matrix-row matrix-head" role="row"><span role="columnheader">品牌</span><span role="columnheader">手机型号 / 编码</span><span v-for="p in products" :key="p.productLineId" role="columnheader">{{p.productName}}</span><span role="columnheader">已选产品合计</span></div>
+ <div ref="root" class="sales-matrix" :class="{'is-stacked':stacked}" :style="{'--matrix-columns':columns}" role="table" :aria-label='uiText("手机型号产品销量总览")'>
+  <div class="matrix-row matrix-head" role="row"><span role="columnheader">{{ uiText("品牌") }}</span><span role="columnheader">{{ uiText("手机型号 / 编码") }}</span><span v-for="p in products" :key="p.productLineId" role="columnheader">{{p.productName}}</span><span role="columnheader">{{ uiText("已选产品合计") }}</span></div>
   <div class="matrix-body">
    <article v-for="row in data?.content" :key="row.rowKey" class="matrix-row matrix-record" role="row">
-    <div class="brand-cell" role="cell"><small class="record-label">品牌</small><strong>{{row.brandNames.join(' / ')||'未登记品牌'}}</strong></div>
-    <div class="model-cell" role="cell"><small class="record-label">手机型号</small><strong>{{row.modelNames.join(' / ')||'未登记型号'}}</strong><div class="model-meta"><small v-if="row.phoneCodes.length">编码 {{row.phoneCodes.join(' / ')}}</small><span v-if="row.modelKind==='shared'" class="model-badge">通用组合 · 合计一次</span></div></div>
+    <div class="brand-cell" role="cell"><small class="record-label">{{ uiText("品牌") }}</small><strong>{{row.brandNames.join(' / ')||uiText('未登记品牌')}}</strong></div>
+    <div class="model-cell" role="cell"><small class="record-label">{{ uiText("手机型号") }}</small><strong>{{row.modelNames.join(' / ')||uiText('未登记型号')}}</strong><div class="model-meta"><small v-if="row.phoneCodes.length">{{ uiText("编码 ") }}{{row.phoneCodes.join(' / ')}}</small><span v-if="row.modelKind==='shared'" class="model-badge">{{ uiText("通用组合 · 合计一次") }}</span></div></div>
     <div v-for="p in products" :key="p.productLineId" class="product-cell" role="cell" :data-product-id="p.productLineId">
      <small class="record-label">{{p.productName}}</small>
-     <button v-if="clickable(cell(row,p.productLineId))" class="matrix-cell-button" :aria-label="`${p.productName} · ${row.modelNames.join(' / ')} · ${cell(row,p.productLineId)?.stateLabel||'查看依据'}`" @click="open(cell(row,p.productLineId),row)"><strong>{{qty(cell(row,p.productLineId)?.salesQuantity)}}<small v-if="cell(row,p.productLineId)?.salesQuantity!=null">件</small></strong><span v-if="visibleState(cell(row,p.productLineId))" class="state-label" :class="tone(cell(row,p.productLineId)?.state)">{{cell(row,p.productLineId)?.stateLabel}}</span></button>
-     <template v-else><strong class="plain-quantity">{{qty(cell(row,p.productLineId)?.salesQuantity)}}</strong><span v-if="visibleState(cell(row,p.productLineId))" class="state-label" :class="tone(cell(row,p.productLineId)?.state)">{{cell(row,p.productLineId)?.stateLabel}}</span></template>
+     <button v-if="clickable(cell(row,p.productLineId))" class="matrix-cell-button" :aria-label="uiText('{value0} · {value1} · {value2}',{value0:(p.productName),value1:(row.modelNames.join(' / ')),value2:(cell(row,p.productLineId)?.stateLabel||'查看依据')})" @click="open(cell(row,p.productLineId),row)"><strong>{{qty(cell(row,p.productLineId)?.salesQuantity)}}<small v-if="cell(row,p.productLineId)?.salesQuantity!=null">{{ uiText("件") }}</small></strong><span v-if="visibleState(cell(row,p.productLineId))" class="state-label" :class="tone(cell(row,p.productLineId)?.state)">{{uiText(String((cell(row,p.productLineId)?.stateLabel) ?? ''))}}</span></button>
+     <template v-else><strong class="plain-quantity">{{qty(cell(row,p.productLineId)?.salesQuantity)}}</strong><span v-if="visibleState(cell(row,p.productLineId))" class="state-label" :class="tone(cell(row,p.productLineId)?.state)">{{uiText(String((cell(row,p.productLineId)?.stateLabel) ?? ''))}}</span></template>
     </div>
-    <div class="matrix-total" role="cell"><small class="record-label">已选产品合计</small><button v-if="row.cells.some(c=>c.groupIds.length)" @click="emit('total',row)">{{qty(row.totalSalesQuantity)}}<small>件</small></button><strong v-else>{{qty(row.totalSalesQuantity)}}</strong></div>
+    <div class="matrix-total" role="cell"><small class="record-label">{{ uiText("已选产品合计") }}</small><button v-if="row.cells.some(c=>c.groupIds.length)" @click="emit('total',row)">{{qty(row.totalSalesQuantity)}}<small>{{ uiText("件") }}</small></button><strong v-else>{{qty(row.totalSalesQuantity)}}</strong></div>
    </article>
-   <el-empty v-if="data&&!data.content.length" :description="products.length?'当前筛选范围暂无型号记录':'请先选择要查看的产品列'"/>
+   <el-empty v-if="data&&!data.content.length" :description="products.length?uiText('当前筛选范围暂无型号记录'):uiText('请先选择要查看的产品列')"/>
   </div>
-  <div v-if="data&&products.length" class="matrix-row matrix-foot" role="row"><strong class="summary-label">当前筛选合计</strong><div v-for="p in products" :key="p.productLineId" role="cell"><small class="record-label">{{p.productName}}</small><strong>{{qty(data.productTotals.find(t=>t.productLineId===p.productLineId)?.salesQuantity)}}</strong></div><div class="matrix-total" role="cell"><small class="record-label">已选产品合计</small><strong>{{qty(data.totalSalesQuantity)}}</strong></div></div>
+  <div v-if="data&&products.length" class="matrix-row matrix-foot" role="row"><strong class="summary-label">{{ uiText("当前筛选合计") }}</strong><div v-for="p in products" :key="p.productLineId" role="cell"><small class="record-label">{{p.productName}}</small><strong>{{qty(data.productTotals.find(t=>t.productLineId===p.productLineId)?.salesQuantity)}}</strong></div><div class="matrix-total" role="cell"><small class="record-label">{{ uiText("已选产品合计") }}</small><strong>{{qty(data.totalSalesQuantity)}}</strong></div></div>
  </div>
 </template>
 <style scoped>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import type { UnwrapNestedRefs } from 'vue'
 import type { CollaborationRow } from '@/types/collaboration'
 import type { useArchiveLedger } from '../composables/useArchiveLedger'
@@ -9,18 +11,18 @@ defineProps<{ledger:UnwrapNestedRefs<ReturnType<typeof useArchiveLedger>>;height
 const emit=defineEmits<{action:[command:string,row:CollaborationRow]}>()
 </script>
 <template>
-  <div class="archive-records" role="list" aria-label="协作档案" :style="{height:`${height}px`}">
+  <div class="archive-records" role="list" :aria-label='uiText("协作档案")' :style="{height:`${height}px`}">
     <article v-for="row in ledger.rows" :key="row.itemId" class="archive-record" role="listitem">
       <header>
         <button class="record-identity" @click="emit('action',archiveLinked(row)?'phone':'associate',row)"><strong>{{archivePlatformName(row)}}</strong> · {{archiveModelName(row)}}</button>
         <ArchiveRowMenu :row="row" :dirty="ledger.drafts.rows.has(`item:${row.itemId}`)" @action="emit('action',$event,row)"><slot name="row-actions" :row="row" :ledger="ledger" /></ArchiveRowMenu>
       </header>
-      <div class="record-meta"><span>原型号编码 {{row.linkedPhoneModelCode || row.phoneModelCode || '—'}}</span><button @click="emit('action','associate',row)">{{archiveLinked(row)?'已关联':'待关联'}}</button><span>{{statusNames[row.status]}}</span><button @click="emit('action','references',row)">项目 {{row.projectCount}}</button></div>
+      <div class="record-meta"><span>{{ uiText("原型号编码 ") }}{{row.linkedPhoneModelCode || row.phoneModelCode || '—'}}</span><button @click="emit('action','associate',row)">{{archiveLinked(row)?uiText('已关联'):uiText('待关联')}}</button><span>{{statusNames[row.status]}}</span><button @click="emit('action','references',row)">{{ uiText("项目 ") }}{{row.projectCount}}</button></div>
       <div class="record-fields">
-        <label v-for="f in ledger.fields" :key="f.key"><span>{{f.key==='brandId'?'手机品牌':f.label}}</span><div class="ledger-cell"><CollaborationCell :field="f" :value="ledger.value(row,f.key)" :editable="ledger.editable(f)" :dirty="ledger.dirty(row,f.key)" :brands="ledger.brands" :brand-name="row.brandName || row.brand" :brand-source="row.brandSource" compact expandable @preview="ledger.preview(row,f,$event)" @edit="ledger.edit(row,f,$event)" @paste="ledger.paste(row,f,$event)" @expand="ledger.openEditor(row,f)" /></div></label>
+        <label v-for="f in ledger.fields" :key="f.key"><span>{{f.key==='brandId'?uiText('手机品牌'):f.label}}</span><div class="ledger-cell"><CollaborationCell :field="f" :value="ledger.value(row,f.key)" :editable="ledger.editable(f)" :dirty="ledger.dirty(row,f.key)" :brands="ledger.brands" :brand-name="row.brandName || row.brand" :brand-source="row.brandSource" compact expandable @preview="ledger.preview(row,f,$event)" @edit="ledger.edit(row,f,$event)" @paste="ledger.paste(row,f,$event)" @expand="ledger.openEditor(row,f)" /></div></label>
       </div>
     </article>
-    <el-empty v-if="!ledger.rows.length" description="暂无档案" />
+    <el-empty v-if="!ledger.rows.length" :description='uiText("暂无档案")' />
   </div>
 </template>
 <style scoped>

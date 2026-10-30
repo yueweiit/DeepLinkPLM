@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, nextTick, onMounted, reactive, ref, toRaw, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance } from 'element-plus'
@@ -39,11 +41,11 @@ async function loadCompatibleMolds() {
   const epoch=++compatibleRequest,token=user.token
   compatibleMolds.value=[];selectedMoldSetId.value=null
   if(isEdit.value||!isModelVariant.value||!form.parentProductId||!selectedPhone.value)return
-  try {const next=await getPhoneCompatibleMolds(selectedPhone.value.phoneModelId,form.parentProductId);if(epoch===compatibleRequest&&token===user.token)compatibleMolds.value=next}catch {if(epoch===compatibleRequest&&token===user.token)ElMessage.warning('已确认共模资料读取失败，请重试核对')}
+  try {const next=await getPhoneCompatibleMolds(selectedPhone.value.phoneModelId,form.parentProductId);if(epoch===compatibleRequest&&token===user.token)compatibleMolds.value=next}catch {if(epoch===compatibleRequest&&token===user.token)ElMessage.warning(uiText('已确认共模资料读取失败，请重试核对'))}
 }
 function selectStandardPhone(rows:CompatiblePhone[]) {
   if(isEdit.value)return
-  if(rows.length>1){selectedPhoneIds.value=selectedPhone.value?[selectedPhone.value.phoneModelId]:[];ElMessage.warning('一个型号项目请选择一款标准手机；共模组在模具详情维护');return}
+  if(rows.length>1){selectedPhoneIds.value=selectedPhone.value?[selectedPhone.value.phoneModelId]:[];ElMessage.warning(uiText('一个型号项目请选择一款标准手机；共模组在模具详情维护'));return}
   selectedPhone.value=rows[0]
   form.phoneModelId=rows[0]?.phoneModelId??null
   if(rows[0]){form.model=phoneMemberName(rows[0]);form.phoneModelCode=rows[0].phoneModelCode}
@@ -379,7 +381,7 @@ async function loadDetail() {
     syncStageStep()
     syncCostBreakdown()
   } catch (error) {
-    ElMessage.info(error instanceof Error ? error.message : '产品详情接口未接入')
+    ElMessage.info(error instanceof Error ? error.message : uiText('产品详情接口未接入'))
     router.replace('/products')
   } finally {
     loading.value = false
@@ -409,11 +411,11 @@ async function handleSubmit() {
   if (!valid) return
 
   if (isModelVariant.value && !form.parentProductId) {
-    ElMessage.warning('新型号线必须先选择父产品线。')
+    ElMessage.warning(uiText('新型号线必须先选择父产品线。'))
     return
   }
-  if(!isEdit.value&&!createdCollaborationProjectId.value&&isModelVariant.value&&!onSaleProductIds.value.has(form.parentProductId!)){ElMessage.warning('所选产品已停售或在售状态待确认，请改选在售产品；填写内容已保留');return}
-  if(!isEdit.value&&selectedPhone.value&&!selectedPhone.value.phoneModelCode){ElMessage.warning('所选手机编码尚待分配，不能猜码立项；请先核对原编码');return}
+  if(!isEdit.value&&!createdCollaborationProjectId.value&&isModelVariant.value&&!onSaleProductIds.value.has(form.parentProductId!)){ElMessage.warning(uiText('所选产品已停售或在售状态待确认，请改选在售产品；填写内容已保留'));return}
+  if(!isEdit.value&&selectedPhone.value&&!selectedPhone.value.phoneModelCode){ElMessage.warning(uiText('所选手机编码尚待分配，不能猜码立项；请先核对原编码'));return}
   if(!isEdit.value&&selectedMold.value)form.moldAction='none'
 
   form.coreProcess = isProductLine.value
@@ -432,10 +434,10 @@ async function handleSubmit() {
     if (isEdit.value) {
       if (isReleasedBasicInfoEdit.value) {
         await updateProductBasicInfo(productId.value, structuredClone(toRaw(form)))
-        ElMessage.success('项目基础信息已更新')
+        ElMessage.success(uiText('项目基础信息已更新'))
       } else {
         await updateProduct(productId.value, structuredClone(toRaw(form)))
-        ElMessage.success('产品已更新')
+        ElMessage.success(uiText('产品已更新'))
       }
       workspace.changed()
       router.push(toArchivedProductRoute(productId.value))
@@ -451,14 +453,14 @@ async function handleSubmit() {
         const item = await getCollaborationItem(effectiveItemId.value)
         await linkCollaborationProjects(item.itemId, [created.productId], true, undefined, true)
         workspace.changed()
-        ElMessage.success('项目已按原有校验创建，并关联协作档案')
+        ElMessage.success(uiText('项目已按原有校验创建，并关联协作档案'))
         router.replace({path:'/market-watch',query:{itemId:effectiveItemId.value,panel:'market-data'}})
       } catch {
-        ElMessage.warning('项目已创建，关联尚未完成。再次提交只重试关联，不会重复创建项目。')
+        ElMessage.warning(uiText('项目已创建，关联尚未完成。再次提交只重试关联，不会重复创建项目。'))
       }
       return
     }
-    ElMessage.success('产品已创建')
+    ElMessage.success(uiText('产品已创建'))
     router.replace(toArchivedProductRoute(created.productId))
   } finally {
     submitting.value = false
@@ -468,20 +470,20 @@ async function handleSubmit() {
 async function saveProductIdentity() {
   if (!isEdit.value || !isProductLine.value || originalProductSpecificCode.value || identitySaving.value) return
   const code = form.productSpecificCode?.trim() || ''
-  if (!/^[A-Z]{2}$/.test(code)) { ElMessage.warning('请填写两位大写英文字母的产品特定编码'); return }
+  if (!/^[A-Z]{2}$/.test(code)) { ElMessage.warning(uiText('请填写两位大写英文字母的产品特定编码')); return }
   identitySaving.value = true
   try {
     // Reuse the product writer without applying legacy stage/cost defaults to a research project.
     await updateProduct(productId.value, { productSpecificCode: code })
     originalProductSpecificCode.value = code
     workspace.changed()
-    ElMessage.success('产品特定编码已保存，研发及开模申请同步使用')
+    ElMessage.success(uiText('产品特定编码已保存，研发及开模申请同步使用'))
     if (route.query.source === 'research') {
       const step = launchStage(route.query.step ?? legacyResearchStep(route.query.stage))
       await router.push({ path: '/product-research', query: { productId: String(productId.value), step: step.key } })
     }
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '保存产品特定编码失败')
+    ElMessage.error(error instanceof Error ? error.message : uiText('保存产品特定编码失败'))
   } finally { identitySaving.value = false }
 }
 
@@ -501,15 +503,15 @@ onMounted(async () => {
       form.ownerUserName = useUserStore().profile?.userName || ''
       form.moldAction = 'new'
       form.referenceUrl = item.referenceUrl
-    } catch { ElMessage.error('协作档案读取失败，请返回协作计划核对') }
+    } catch { ElMessage.error(uiText('协作档案读取失败，请返回协作计划核对')) }
   }
 })
 </script>
 
 <template>
   <PageContainer
-    :title="identityOnly?'维护产品编码':isEdit ? '编辑产品' : '新建产品'"
-    :description="identityOnly?'补齐当前研发产品的正式编码；其余研发资料保留在原办理页，不重复维护。':isReleasedBasicInfoEdit ? '已发布 / 已归档项目仅开放基础信息维护，版本成果物请走变更流程。' : '把新产品线和新型号线分开建档，并把工艺配置改成模板继承与差异配置的业务入口。'"
+    :title="identityOnly?uiText('维护产品编码'):isEdit ? uiText('编辑产品') : uiText('新建产品')"
+    :description="identityOnly?uiText('补齐当前研发产品的正式编码；其余研发资料保留在原办理页，不重复维护。'):isReleasedBasicInfoEdit ? uiText('已发布 / 已归档项目仅开放基础信息维护，版本成果物请走变更流程。') : uiText('把新产品线和新型号线分开建档，并把工艺配置改成模板继承与差异配置的业务入口。')"
   >
     <section class="page-panel" v-loading="loading">
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="120px">
@@ -517,15 +519,15 @@ onMounted(async () => {
         <section v-if="!identityOnly" class="mode-panel">
           <div class="toolbar-row">
             <div>
-              <h3 class="section-title">流程模式</h3>
+              <h3 class="section-title">{{ uiText("流程模式") }}</h3>
               <p class="page-panel-desc">
-                {{ isProductLine ? '新产品线走完整研发流程。' : '新型号线继承父产品资产，只管理差异工序和差异测试。' }}
+                {{ isProductLine ? uiText('新产品线走完整研发流程。') : uiText('新型号线继承父产品资产，只管理差异工序和差异测试。') }}
               </p>
             </div>
-            <el-tag effect="light">{{ isProductLine ? '新产品线' : '新型号线' }}</el-tag>
+            <el-tag effect="light">{{ isProductLine ? uiText('新产品线') : uiText('新型号线') }}</el-tag>
           </div>
 
-          <el-form-item label="产品类型" prop="productType">
+          <el-form-item :label='uiText("产品类型")' prop="productType">
             <el-segmented
               v-model="form.productType"
               :disabled="isReleasedBasicInfoEdit"
@@ -538,28 +540,28 @@ onMounted(async () => {
 
           <div class="mode-grid">
             <div class="guide-card">
-              <strong>新产品线录入重点</strong>
+              <strong>{{ uiText("新产品线录入重点") }}</strong>
               <ul>
-                <li>立项说明、目标机型、预期工艺和成本边界</li>
-                <li>完整 22 步开发流程与关键门禁</li>
-                <li>工艺模板、完整测试套件和生产资料准备</li>
+                <li>{{ uiText("立项说明、目标机型、预期工艺和成本边界") }}</li>
+                <li>{{ uiText("完整 22 步开发流程与关键门禁") }}</li>
+                <li>{{ uiText("工艺模板、完整测试套件和生产资料准备") }}</li>
               </ul>
             </div>
             <div class="guide-card">
-              <strong>新型号线录入重点</strong>
+              <strong>{{ uiText("新型号线录入重点") }}</strong>
               <ul>
-                <li>父产品继承边界、机型与颜色差异</li>
-                <li>改模 / 新开模 / 无需模具变更三分支</li>
-                <li>差异工艺、差异 BOM、差异测试与版本冻结</li>
+                <li>{{ uiText("父产品继承边界、机型与颜色差异") }}</li>
+                <li>{{ uiText("改模 / 新开模 / 无需模具变更三分支") }}</li>
+                <li>{{ uiText("差异工艺、差异 BOM、差异测试与版本冻结") }}</li>
               </ul>
             </div>
           </div>
 
-          <el-form-item v-if="isModelVariant" label="父产品线" required>
+          <el-form-item v-if="isModelVariant" :label='uiText("父产品线")' required>
             <el-select
               v-model="form.parentProductId"
               filterable
-              placeholder="先选择父产品线"
+              :placeholder='uiText("先选择父产品线")'
               popper-class="product-line-select-popper"
               style="width: 100%"
             >
@@ -579,86 +581,84 @@ onMounted(async () => {
             </el-select>
           </el-form-item>
 
-          <el-form-item v-if="isModelVariant" label="模具策略">
+          <el-form-item v-if="isModelVariant" :label='uiText("模具策略")'>
             <el-radio-group v-model="form.moldAction">
               <el-radio-button v-for="item in moldActionOptions" :key="item.value" :value="item.value">
-                {{ item.label }}
+                {{ uiText(String((item.label) ?? '')) }}
               </el-radio-button>
             </el-radio-group>
           </el-form-item>
 
           <div v-if="isModelVariant && parentProduct" class="inherit-card">
-            <strong>继承基线</strong>
-            <p class="page-panel-desc">
-              父产品：{{ parentProduct.productName }} / {{ parentProduct.productCode }}。默认沿用父产品的基础工艺、BOM 结构、测试框架与文件模板，仅记录差异部分。
-            </p>
+            <strong>{{ uiText("继承基线") }}</strong>
+            <p class="page-panel-desc">{{ uiText(" 父产品：") }}{{ parentProduct.productName }} / {{ parentProduct.productCode }}{{ uiText("。默认沿用父产品的基础工艺、BOM 结构、测试框架与文件模板，仅记录差异部分。 ") }}</p>
           </div>
         </section>
 
         <div class="detail-grid">
           <div>
-            <el-form-item label="产品编码" prop="productCode">
-              <el-input v-model="form.productCode" :disabled="isEdit" placeholder="例如 PRD-SC30-0001" />
+            <el-form-item :label='uiText("产品编码")' prop="productCode">
+              <el-input v-model="form.productCode" :disabled="isEdit" :placeholder='uiText("例如 PRD-SC30-0001")' />
             </el-form-item>
-            <el-form-item v-if="isEdit&&isProductLine" label="两位产品特定编码">
-              <el-input v-model="form.productSpecificCode" aria-label="两位产品特定编码" :readonly="!!originalProductSpecificCode" :disabled="identitySaving" maxlength="2" placeholder="例如 BA，请按已确认编码填写"/>
-              <p class="page-panel-desc">{{originalProductSpecificCode?'已有编码只读；引用它的产品、BOM、工艺及开模资料共用同一身份。':'仅补填原来缺失的编码，不生成 SKU 或改动研发阶段；系统不猜码。'}}</p>
-              <el-button v-if="!originalProductSpecificCode" type="primary" :loading="identitySaving" :disabled="submitting" @click="saveProductIdentity">保存产品特定编码</el-button>
+            <el-form-item v-if="isEdit&&isProductLine" :label='uiText("两位产品特定编码")'>
+              <el-input v-model="form.productSpecificCode" :aria-label='uiText("两位产品特定编码")' :readonly="!!originalProductSpecificCode" :disabled="identitySaving" maxlength="2" :placeholder='uiText("例如 BA，请按已确认编码填写")'/>
+              <p class="page-panel-desc">{{originalProductSpecificCode?uiText('已有编码只读；引用它的产品、BOM、工艺及开模资料共用同一身份。'):uiText('仅补填原来缺失的编码，不生成 SKU 或改动研发阶段；系统不猜码。')}}</p>
+              <el-button v-if="!originalProductSpecificCode" type="primary" :loading="identitySaving" :disabled="submitting" @click="saveProductIdentity">{{ uiText("保存产品特定编码") }}</el-button>
             </el-form-item>
-            <template v-if="!identityOnly"><el-form-item label="产品名称" prop="productName">
+            <template v-if="!identityOnly"><el-form-item :label='uiText("产品名称")' prop="productName">
               <el-input v-model="form.productName" />
             </el-form-item>
-            <el-form-item label="系列名称" prop="seriesName">
+            <el-form-item :label='uiText("系列名称")' prop="seriesName">
               <el-input v-model="form.seriesName" :disabled="isModelVariant && !!parentProduct" />
             </el-form-item>
-            <el-form-item label="负责人" prop="ownerUserName">
-              <el-input v-model="form.ownerUserName" placeholder="填写项目负责人" />
+            <el-form-item :label='uiText("负责人")' prop="ownerUserName">
+              <el-input v-model="form.ownerUserName" :placeholder='uiText("填写项目负责人")' />
             </el-form-item>
-            <el-form-item label="版本号" prop="versionNo">
+            <el-form-item :label='uiText("版本号")' prop="versionNo">
               <el-input v-model="form.versionNo" :disabled="isReleasedBasicInfoEdit" />
             </el-form-item>
-            <el-form-item label="客户来源">
+            <el-form-item :label='uiText("客户来源")'>
               <el-input v-model="form.customerName" />
             </el-form-item></template>
           </div>
 
           <div v-if="!identityOnly">
-            <el-form-item label="当前阶段" prop="currentStage">
+            <el-form-item :label='uiText("当前阶段")' prop="currentStage">
               <el-select v-model="form.currentStage" :disabled="isReleasedBasicInfoEdit" style="width: 100%">
                 <el-option v-for="item in currentStageOptions" :key="item" :label="item" :value="item" />
               </el-select>
             </el-form-item>
-            <el-form-item label="当前步序">
+            <el-form-item :label='uiText("当前步序")'>
               <el-input :model-value="String(form.currentStepNo || 1)" disabled />
             </el-form-item>
-            <el-form-item :label="isModelVariant ? '适配机型' : '目标机型'">
+            <el-form-item :label="isModelVariant ? uiText('适配机型') : uiText('目标机型')">
               <SharedCompatiblePhoneSelector v-if="isModelVariant && !isEdit" v-model="selectedPhoneIds" :multiple="false" :disabled="!!createdCollaborationProjectId" :allow-manage="user.hasPermission('*')" @selected="selectStandardPhone" />
-              <el-input v-model="form.model" :readonly="isEdit && !!form.phoneModelId" :disabled="!isModelVariant || (!isEdit && !!selectedPhone)" placeholder="旧资料原名称保留；新型号优先选择标准成员" />
-              <small v-if="isEdit && form.phoneModelId">已关联标准手机，保留项目原型号快照；不能在基础编辑中换手机。</small>
-              <small v-if="selectedPhone">手机原编码 {{ selectedPhone.phoneModelCode || '待分配' }}，不会替换模具刻码。</small>
+              <el-input v-model="form.model" :readonly="isEdit && !!form.phoneModelId" :disabled="!isModelVariant || (!isEdit && !!selectedPhone)" :placeholder='uiText("旧资料原名称保留；新型号优先选择标准成员")' />
+              <small v-if="isEdit && form.phoneModelId">{{ uiText("已关联标准手机，保留项目原型号快照；不能在基础编辑中换手机。") }}</small>
+              <small v-if="selectedPhone">{{ uiText("手机原编码 ") }}{{ selectedPhone.phoneModelCode || uiText('待分配') }}{{ uiText("，不会替换模具刻码。") }}</small>
             </el-form-item>
-            <el-form-item v-if="isModelVariant && !isEdit && compatibleMolds.length" label="已确认共模套">
-              <el-select v-model="selectedMoldSetId" clearable :disabled="!!createdCollaborationProjectId" placeholder="明确选择后关联原档案，不新增实物套" style="width:100%">
-                <el-option v-for="mold in compatibleMolds" :key="mold.moldSetId" :value="mold.moldSetId" :label="`${mold.moldName || mold.styleName} · 原刻码 ${mold.engravedCode || '待核对'} · ${mold.physicalCode}`" />
+            <el-form-item v-if="isModelVariant && !isEdit && compatibleMolds.length" :label='uiText("已确认共模套")'>
+              <el-select v-model="selectedMoldSetId" clearable :disabled="!!createdCollaborationProjectId" :placeholder='uiText("明确选择后关联原档案，不新增实物套")' style="width:100%">
+                <el-option v-for="mold in compatibleMolds" :key="mold.moldSetId" :value="mold.moldSetId" :label="uiText('{value0} · 原刻码 {value1} · {value2}',{value0:(mold.moldName || mold.styleName),value1:(mold.engravedCode || '待核对'),value2:(mold.physicalCode)})" />
               </el-select>
-              <small v-if="selectedMold">复用 {{ selectedMold.parts.map(part => part.code).join(' / ') }}，保留原套与费用。</small>
+              <small v-if="selectedMold">{{ uiText("复用 ") }}{{ selectedMold.parts.map(part => part.code).join(' / ') }}{{ uiText("，保留原套与费用。") }}</small>
             </el-form-item>
-            <el-form-item :label="isModelVariant ? '适配颜色' : '主颜色'">
-              <el-input v-model="form.color" :disabled="!isModelVariant" placeholder="例如 黑色" />
+            <el-form-item :label="isModelVariant ? uiText('适配颜色') : uiText('主颜色')">
+              <el-input v-model="form.color" :disabled="!isModelVariant" :placeholder='uiText("例如 黑色")' />
             </el-form-item>
-            <el-form-item label="材料">
+            <el-form-item :label='uiText("材料")'>
               <el-input v-model="form.material" />
             </el-form-item>
-            <el-form-item label="包装方式">
+            <el-form-item :label='uiText("包装方式")'>
               <el-input v-model="form.packageType" />
             </el-form-item>
-            <el-form-item label="预计发布时间">
+            <el-form-item :label='uiText("预计发布时间")'>
               <el-date-picker v-model="form.expectedReleaseDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
             </el-form-item>
-            <el-form-item label="预计到达时间">
+            <el-form-item :label='uiText("预计到达时间")'>
               <el-date-picker v-model="form.expectedArrivalAt" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" style="width: 100%" />
             </el-form-item>
-            <el-form-item label="实际到达时间">
+            <el-form-item :label='uiText("实际到达时间")'>
               <el-date-picker v-model="form.actualArrivalAt" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" style="width: 100%" />
             </el-form-item>
           </div>
@@ -667,7 +667,7 @@ onMounted(async () => {
         <section v-if="isModelVariant&&!identityOnly" class="form-block">
           <div class="toolbar-row">
             <div>
-              <h3 class="section-title">新型号需求信息</h3>
+              <h3 class="section-title">{{ uiText("新型号需求信息") }}</h3>
             </div>
           </div>
           <div class="detail-grid">
@@ -675,36 +675,36 @@ onMounted(async () => {
               <el-form-item label="4G/5G">
                 <el-input v-model="form.networkType" />
               </el-form-item>
-              <el-form-item label="大孔或精孔">
+              <el-form-item :label='uiText("大孔或精孔")'>
                 <el-input v-model="form.holeType" />
               </el-form-item>
-              <el-form-item label="Tipo 类型">
+              <el-form-item :label='uiText("Tipo 类型")'>
                 <el-input v-model="form.tipo" />
               </el-form-item>
-              <el-form-item label="紧急度">
+              <el-form-item :label='uiText("紧急度")'>
                 <el-input v-model="form.priority" />
               </el-form-item>
-              <el-form-item label="制造地">
+              <el-form-item :label='uiText("制造地")'>
                 <el-input v-model="form.manufacturingLocation" />
               </el-form-item>
             </div>
             <div>
-              <el-form-item label="模具印字">
+              <el-form-item :label='uiText("模具印字")'>
                 <el-input v-model="form.moldMarking" />
               </el-form-item>
-              <el-form-item label="订单类型">
+              <el-form-item :label='uiText("订单类型")'>
                 <el-select v-model="form.requirementType" clearable style="width: 100%">
-                  <el-option label="客户订单" value="customer_requirement" />
-                  <el-option label="市场需求" value="market_requirement" />
+                  <el-option :label='uiText("客户订单")' value="customer_requirement" />
+                  <el-option :label='uiText("市场需求")' value="market_requirement" />
                 </el-select>
               </el-form-item>
-              <el-form-item label="钉钉链接">
+              <el-form-item :label='uiText("钉钉链接")'>
                 <el-input v-model="form.referenceUrl" />
               </el-form-item>
-              <el-form-item label="手机功能">
+              <el-form-item :label='uiText("手机功能")'>
                 <el-input v-model="form.mobileFunction" type="textarea" :rows="3" />
               </el-form-item>
-              <el-form-item label="客户要求">
+              <el-form-item :label='uiText("客户要求")'>
                 <el-input v-model="form.customerRequirement" type="textarea" :rows="3" />
               </el-form-item>
             </div>
@@ -714,16 +714,16 @@ onMounted(async () => {
         <section v-if="!identityOnly" class="form-block">
           <div class="toolbar-row">
             <div>
-              <h3 class="section-title">工艺配置</h3>
+              <h3 class="section-title">{{ uiText("工艺配置") }}</h3>
               <p class="page-panel-desc">
-                {{ isProductLine ? '新产品线先选标准模板，再补充工艺说明。' : '新型号线显示父工艺继承摘要，并只录入差异工艺说明。' }}
+                {{ isProductLine ? uiText('新产品线先选标准模板，再补充工艺说明。') : uiText('新型号线显示父工艺继承摘要，并只录入差异工艺说明。') }}
               </p>
             </div>
-            <el-button type="primary" plain @click="router.push('/processes')">查看工艺路线中心</el-button>
+            <el-button type="primary" plain @click="router.push('/processes')">{{ uiText("查看工艺路线中心") }}</el-button>
           </div>
 
           <div v-if="isProductLine" class="page-stack">
-            <el-form-item label="工艺模板">
+            <el-form-item :label='uiText("工艺模板")'>
               <el-select v-model="processTemplateKey" style="width: 100%">
                 <el-option
                   v-for="item in processTemplates"
@@ -737,7 +737,7 @@ onMounted(async () => {
             <div class="template-card" v-if="selectedTemplate">
               <div class="toolbar-row">
                 <strong>{{ selectedTemplate.templateName }}</strong>
-                <el-tag effect="light">{{ selectedTemplate.operationCount }} 道工序</el-tag>
+                <el-tag effect="light">{{ selectedTemplate.operationCount }}{{ uiText(" 道工序") }}</el-tag>
               </div>
               <p class="page-panel-desc">{{ selectedTemplate.summary }}</p>
               <div class="tag-wrap">
@@ -745,43 +745,43 @@ onMounted(async () => {
               </div>
             </div>
 
-            <el-form-item label="工艺补充说明">
-              <el-input v-model="processNotes" type="textarea" :rows="4" placeholder="补充模板之外的工艺约束、风险点和关键参数说明" />
+            <el-form-item :label='uiText("工艺补充说明")'>
+              <el-input v-model="processNotes" type="textarea" :rows="4" :placeholder='uiText("补充模板之外的工艺约束、风险点和关键参数说明")' />
             </el-form-item>
           </div>
 
           <div v-else class="page-stack">
             <div class="template-card">
               <div class="toolbar-row">
-                <strong>{{ parentProduct ? `${parentProduct.productName} 工艺基线` : '待选择父产品线' }}</strong>
-                <el-tag effect="light">{{ form.moldAction === 'modify' ? '改模分支' : form.moldAction === 'new' ? '新开模分支' : '无需模具变更' }}</el-tag>
+                <strong>{{ parentProduct ? uiText('{value0} 工艺基线',{value0:(parentProduct.productName)}) : uiText('待选择父产品线') }}</strong>
+                <el-tag effect="light">{{ form.moldAction === 'modify' ? uiText('改模分支') : form.moldAction === 'new' ? uiText('新开模分支') : uiText('无需模具变更') }}</el-tag>
               </div>
               <p class="page-panel-desc">
-                {{ parentProduct ? '默认继承父产品标准工艺、SOP/SIP 和测试框架，只在当前子版本补录差异工序。' : '先选择父产品线后，再录入差异工艺说明。' }}
+                {{ parentProduct ? uiText('默认继承父产品标准工艺、SOP/SIP 和测试框架，只在当前子版本补录差异工序。') : uiText('先选择父产品线后，再录入差异工艺说明。') }}
               </p>
             </div>
 
-            <el-form-item label="差异工艺说明">
+            <el-form-item :label='uiText("差异工艺说明")'>
               <el-input
                 v-model="differenceProcessNotes"
                 type="textarea"
                 :rows="5"
-                placeholder="例如：iPhone18 孔位调整、黑色色母差异、改模判断、只需执行的差异测试等"
+                :placeholder='uiText("例如：iPhone18 孔位调整、黑色色母差异、改模判断、只需执行的差异测试等")'
               />
             </el-form-item>
           </div>
 
           <div class="detail-grid">
             <div>
-              <el-form-item label="表面工艺">
+              <el-form-item :label='uiText("表面工艺")'>
                 <el-input v-model="form.surfaceProcess" />
               </el-form-item>
-              <el-form-item label="核心工艺摘要">
+              <el-form-item :label='uiText("核心工艺摘要")'>
                 <el-input v-model="form.coreProcess" type="textarea" :rows="4" />
               </el-form-item>
             </div>
             <div>
-              <el-form-item label="组成说明">
+              <el-form-item :label='uiText("组成说明")'>
                 <el-input v-model="form.composition" type="textarea" :rows="6" />
               </el-form-item>
             </div>
@@ -791,9 +791,9 @@ onMounted(async () => {
         <section v-if="!identityOnly" class="form-block">
           <div class="toolbar-row">
             <div>
-              <h3 class="section-title">成本结构</h3>
+              <h3 class="section-title">{{ uiText("成本结构") }}</h3>
               <p class="page-panel-desc">
-                {{ isModelVariant ? '新型号线只强调差异成本和增量投入。' : '新产品线记录完整研发成本和成品成本基线。' }}
+                {{ isModelVariant ? uiText('新型号线只强调差异成本和增量投入。') : uiText('新产品线记录完整研发成本和成品成本基线。') }}
               </p>
             </div>
             <el-tag effect="light">{{ form.estimatedCostCurrency }}</el-tag>
@@ -810,22 +810,22 @@ onMounted(async () => {
                 style="width: 100%"
                 @change="syncCostBreakdown"
               />
-              <el-input v-model="item.note" placeholder="补充说明" />
-              <div class="subtle-text">占比 {{ Math.round(item.ratio * 100) }}%</div>
+              <el-input v-model="item.note" :placeholder='uiText("补充说明")' />
+              <div class="subtle-text">{{ uiText("占比 ") }}{{ Math.round(item.ratio * 100) }}%</div>
             </div>
           </div>
 
           <div class="cost-summary-grid">
             <div class="summary-pill">
-              <span class="subtle-text">预计成本</span>
+              <span class="subtle-text">{{ uiText("预计成本") }}</span>
               <strong>{{ totalCost.toFixed(2) }} {{ form.estimatedCostCurrency }}</strong>
             </div>
             <div class="summary-pill">
-              <span class="subtle-text">研发成本</span>
+              <span class="subtle-text">{{ uiText("研发成本") }}</span>
               <strong>{{ form.rdCost?.toFixed(2) || '0.00' }} {{ form.estimatedCostCurrency }}</strong>
             </div>
             <div class="summary-pill">
-              <span class="subtle-text">成品成本</span>
+              <span class="subtle-text">{{ uiText("成品成本") }}</span>
               <strong>{{ form.productCost?.toFixed(2) || '0.00' }} {{ form.estimatedCostCurrency }}</strong>
             </div>
           </div>
@@ -834,34 +834,34 @@ onMounted(async () => {
         <section v-if="!identityOnly" class="form-block">
           <div class="toolbar-row">
             <div>
-              <h3 class="section-title">{{ isModelVariant ? '差异测试配置' : '完整测试配置' }}</h3>
+              <h3 class="section-title">{{ isModelVariant ? uiText('差异测试配置') : uiText('完整测试配置') }}</h3>
               <p class="page-panel-desc">
-                {{ isModelVariant ? '新型号线只保留变化部分的测试计划。' : '新产品线保留完整测试套件和量产前验证计划。' }}
+                {{ isModelVariant ? uiText('新型号线只保留变化部分的测试计划。') : uiText('新产品线保留完整测试套件和量产前验证计划。') }}
               </p>
             </div>
-            <el-button type="primary" plain @click="addTestItem">新增测试项</el-button>
+            <el-button type="primary" plain @click="addTestItem">{{ uiText("新增测试项") }}</el-button>
           </div>
 
           <div class="page-stack">
             <div v-for="(item, index) in form.testItems" :key="`${item.name}-${index}`" class="test-card">
               <div class="test-card__grid">
-                <el-input v-model="item.name" placeholder="测试项名称" />
-                <el-input v-model="item.method" placeholder="测试方法" />
-                <el-input v-model="item.owner" placeholder="负责人" />
-                <el-input v-model="item.frequency" placeholder="阶段" />
-                <el-input v-model="item.result" placeholder="结果状态" />
-                <el-date-picker v-model="item.dueDate" type="date" value-format="YYYY-MM-DD" placeholder="计划完成日" />
+                <el-input v-model="item.name" :placeholder='uiText("测试项名称")' />
+                <el-input v-model="item.method" :placeholder='uiText("测试方法")' />
+                <el-input v-model="item.owner" :placeholder='uiText("负责人")' />
+                <el-input v-model="item.frequency" :placeholder='uiText("阶段")' />
+                <el-input v-model="item.result" :placeholder='uiText("结果状态")' />
+                <el-date-picker v-model="item.dueDate" type="date" value-format="YYYY-MM-DD" :placeholder='uiText("计划完成日")' />
               </div>
               <div class="test-card__actions">
-                <el-button text type="danger" @click="removeTestItem(index)">删除</el-button>
+                <el-button text type="danger" @click="removeTestItem(index)">{{ uiText("删除") }}</el-button>
               </div>
             </div>
           </div>
         </section>
 
         <div class="toolbar-actions">
-          <el-button @click="router.back()">取消</el-button>
-          <el-button v-if="!identityOnly" type="primary" :loading="submitting" @click="handleSubmit">保存</el-button>
+          <el-button @click="router.back()">{{ uiText("取消") }}</el-button>
+          <el-button v-if="!identityOnly" type="primary" :loading="submitting" @click="handleSubmit">{{ uiText("保存") }}</el-button>
         </div>
       </el-form>
     </section>

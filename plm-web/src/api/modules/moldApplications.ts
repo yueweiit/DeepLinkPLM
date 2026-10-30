@@ -1,7 +1,7 @@
 import request, { unwrapResponse, type PageResponse } from '@/api/request'
 import type { PhoneCompatibleMold } from './phoneReference'
 
-export interface MoldFile { attachmentId:number; category:string; fileName:string; fileSize:number; contentType:string; sha256:string; downloadStatus:string; selectionId?:string|null }
+export interface MoldFile { attachmentId:number; category:string; fileName:string; fileSize:number; contentType:string; sha256:string; downloadStatus:string; selectionId?:string|null; archiveError?:string|null }
 export interface MoldActivity { activityId:number; type:string; occurredAt:string|null; actorId:string|null; actorName:string|null; taskId:string|null; payload:Record<string,string> }
 export type MoldBusinessStatus = 'draft'|'submitting'|'submission_unknown'|'awaiting_approval'|'approved'|'rejected'|'withdrawn'|'terminated'|'approval_unknown'
 export const moldBusinessStatusNames:Record<MoldBusinessStatus,string>={draft:'草稿',submitting:'提交中',submission_unknown:'提交待核对',awaiting_approval:'待 Tiffany 审核',approved:'Tiffany 已同意',rejected:'已拒绝',withdrawn:'已撤回',terminated:'已终止',approval_unknown:'审批待核对'}
@@ -19,8 +19,17 @@ export interface MoldResearchSource {
   suppliers:{role:string;mode:string;supplierId?:number;supplierCode?:string;supplierName?:string;internalName?:string;scope?:string;basis?:string;reason?:string}[]
   references:{type:string;id:number;name:string;versionNo?:string;checksum?:string}[]
 }
+export interface ResearchCodingInput { materialCodes?:string[]; operationCode?:string }
+export interface ResearchCoding {
+  status:'awaiting_approval'|'pending'|'ready';missingFields:string[];missingMessages?:string[]
+  materialCodes?:string[];operationCode?:string;operationOptions?:{code:string;name:string}[]
+  productSpecificCode?:string;productCodePrefix?:string
+  generatedMoldCodes?:string[];generatedProductCodes?:string[]
+  products?:{productId:number;code?:string;finishedProductCode?:string;productCode?:string;modelName?:string;colorName?:string;phoneModelId?:number;phoneModelCode?:string;colorCode?:string;operationCode?:string}[]
+}
 export interface MoldApplication {
-  applicationId:number; version:number; canEditDraft?:boolean; canDeleteDraft?:boolean; sourceSystem:string; instanceId:string|null; approvalNo:string|null; title:string|null
+  terminal?:boolean;isOwnDraft?:boolean;refusal?:{reason:string|null;actorId:string|null;actorName:string|null;occurredAt:string|null}|null
+  applicationId:number; version:number; canEditDraft?:boolean; canDeleteDraft?:boolean; canArchiveFiles?:boolean; sourceSystem:string; instanceId:string|null; approvalNo:string|null; title:string|null
   model:string|null; tipo:string|null; generatedCodes:string|null; form:Record<string,string|null>; status:string; remoteStatus:string|null
   businessStatus?:MoldBusinessStatus; remoteResult?:string|null
   scheduleStatus?:string|null;assetNumber?:string|null
@@ -36,8 +45,11 @@ export interface MoldApplication {
   productLineId:number|null; phoneCodeItemId:number|null; projectId:number|null; itemId:number|null; moldSetId:number|null
   lastError:string|null; createdAt:string; activities?:MoldActivity[]; files?:MoldFile[]; previousApplicationId?:number|null
   submissionPolicy?:MoldSubmissionPolicy;reservedCompatibility?:PhoneCompatibleMold|null
+  researchCoding?:ResearchCoding|null;canMaintainResearchCoding?:boolean
 }
-export type MoldResearchContext=Partial<Omit<MoldApplication,'applicationId'|'productLineId'|'form'|'status'|'sourceSnapshot'>> & {applicationId:null;productLineId:number;form:Record<string,string|null>;status:'draft';sourceSnapshot:Record<string,unknown>&{research:MoldResearchSource};existingApplication?:MoldApplication;existingApplications?:MoldApplication[];existingApplicationNotice?:string}
+export type SafeResearchApplication=Partial<MoldApplication>&Pick<MoldApplication,'applicationId'|'status'|'version'>
+export interface ResearchApplicationSummary {applications:SafeResearchApplication[];activeApplications:SafeResearchApplication[];historyApplications:SafeResearchApplication[];activeCount:number;historyCount:number;totalCount:number;canCreate:boolean}
+export type MoldResearchContext=Partial<Omit<MoldApplication,'applicationId'|'productLineId'|'form'|'status'|'sourceSnapshot'>> & {applicationId:null;productLineId:number;form:Record<string,string|null>;status:'draft';sourceSnapshot:Record<string,unknown>&{research:MoldResearchSource};existingApplication?:MoldApplication;existingApplications?:MoldApplication[];activeApplications?:MoldApplication[];historyApplications?:MoldApplication[];existingApplicationNotice?:string}
 export interface MoldControl { key:string; id:string; label:string; type:string; required:boolean; options:string[] }
 export interface MoldConfig { tipo:string; productLineId:number; productSpecificCode:string; materials:{code:string;partType:string}[]; version:number }
 /** Filling eligibility; server submission policy separately governs research approval and model coding. */
@@ -72,6 +84,7 @@ export async function uploadMoldFile(id:number,category:string,file:File,selecti
 export async function selectMoldFiles(id:number,selections:{selectionId:string;category:string;fileName:string;fileSize:number;contentType:string}[]):Promise<MoldApplication>{return unwrapResponse(await request.post(`${root}/${id}/file-selections`,selections))}
 export async function discardMoldSelection(id:number,file:number):Promise<MoldApplication>{return unwrapResponse(await request.post(`${root}/${id}/files/${file}/discard-selection`))}
 export async function downloadMoldFile(id:number,file:number,signal?:AbortSignal):Promise<Blob> {return (await request.get(`${root}/${id}/files/${file}`,{responseType:'blob',...(signal?{signal}:{})})).data}
+export async function archiveMoldFiles(id:number):Promise<MoldApplication> {return unwrapResponse(await request.post(`${root}/${id}/files/archive`))}
 export async function submitMoldApplication(id:number,version:number,departmentId?:number):Promise<MoldApplication> {return unwrapResponse(await request.post(`${root}/${id}/submit`,{version,departmentId,confirmFormal:true},{timeout:180000}))}
 export async function withdrawMoldApplication(id:number,version:number):Promise<MoldApplication> {return unwrapResponse(await request.post(`${root}/${id}/withdraw`,{version},{timeout:60000}))}
 export async function syncMoldApplication(id:number):Promise<MoldApplication> {return unwrapResponse(await request.post(`${root}/${id}/sync`,{}, {timeout:90000}))}
@@ -84,6 +97,7 @@ export async function startResearchMoldApplication(data:{projectId:number;phoneM
 export async function startMoldApplication(data:StartMoldApplication):Promise<MoldStartResult>{return unwrapResponse(await request.post(`${root}/from-phone`,data))}
 export async function getMoldTargetOptions(phoneModelId:number,productLineId:number):Promise<MoldTargetOptions>{return unwrapResponse(await request.get(`${root}/target-options`,{params:{phoneModelId,productLineId}}))}
 export async function retryMoldProvision(id:number,version:number):Promise<MoldApplication>{return unwrapResponse(await request.post(`${root}/${id}/provision-retry`,{version}))}
+export async function saveResearchMoldCoding(id:number,data:ResearchCodingInput&{version:number}):Promise<MoldApplication>{return unwrapResponse(await request.post(`${root}/${id}/research-coding`,data))}
 export async function resolveMoldExecution(id:number,data:{version:number;action:'resume'|'terminate';reason:string}):Promise<MoldApplication>{return unwrapResponse(await request.post(`${root}/${id}/execution-resolution`,data))}
 
 export async function correctMoldTargets(id:number,data:{version:number;executionIntent:'new'|'new_set';targetItemId:number|null;targetProjectId:number|null;reason:string}):Promise<MoldApplication>{return unwrapResponse(await request.post(`${root}/${id}/provision-targets`,data))}

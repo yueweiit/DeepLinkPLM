@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { ArrowDown, ArrowUp, Delete, DocumentCopy, Edit, Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, reactive, ref, watch } from 'vue'
@@ -522,7 +524,7 @@ function addOperationRow() {
 
 function removeOperationRow(index: number) {
   if (routeForm.operations.length === 1) {
-    ElMessage.warning('工艺路线至少保留一道工序')
+    ElMessage.warning(uiText('工艺路线至少保留一道工序'))
     return
   }
   routeForm.operations.splice(index, 1)
@@ -649,7 +651,7 @@ async function saveRoute() {
     dialogVisible.value = false
     await loadRoutes(result.processId)
     emit('changed')
-    ElMessage.success(editing.value ? '工艺路线已更新' : creatingVersion.value ? '工艺路线新版本已创建' : '工艺路线已创建')
+    ElMessage.success(editing.value ? uiText('工艺路线已更新') : creatingVersion.value ? uiText('工艺路线新版本已创建') : uiText('工艺路线已创建'))
   } finally {
     actionLoading.value = false
   }
@@ -658,11 +660,11 @@ async function saveRoute() {
 async function deleteRoute() {
   if (!selectedRoute.value || !canDeleteSelectedRoute.value) return
   await ElMessageBox.confirm(
-    `确认删除工艺路线 ${selectedRoute.value.processCode}（${selectedRoute.value.versionNo}）吗？删除后仅做软删除，不再出现在当前路线列表中。`,
-    '删除工艺路线版本',
+    uiText('确认删除工艺路线 {value0}（{value1}）吗？删除后仅做软删除，不再出现在当前路线列表中。',{value0:(selectedRoute.value.processCode),value1:(selectedRoute.value.versionNo)}),
+    uiText('删除工艺路线版本'),
     {
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
+      confirmButtonText: uiText('删除'),
+      cancelButtonText: uiText('取消'),
       type: 'warning'
     }
   )
@@ -671,7 +673,7 @@ async function deleteRoute() {
     await deleteProcessRoute(selectedRoute.value.processId)
     await loadRoutes()
     emit('changed')
-    ElMessage.success('工艺路线版本已删除')
+    ElMessage.success(uiText('工艺路线版本已删除'))
   } finally {
     actionLoading.value = false
   }
@@ -691,12 +693,12 @@ watch(
   <div class="m4-panel" v-loading="loading">
     <div class="m4-panel__toolbar">
       <div>
-        <h4 class="section-title">工艺路线</h4>
-        <p class="page-panel-desc">从标准路线模板新建结构化 Process，保存后以节点核对表确认真实后端工序关系。</p>
+        <h4 class="section-title">{{ uiText("工艺路线") }}</h4>
+        <p class="page-panel-desc">{{ uiText("从标准路线模板新建结构化 Process，保存后以节点核对表确认真实后端工序关系。") }}</p>
       </div>
       <div class="m4-panel__actions">
-        <el-button :icon="Refresh" circle title="刷新工艺路线" @click="loadRoutes()" />
-        <el-button data-test="process-create" type="primary" :icon="Plus" @click="openCreate">新建工艺路线</el-button>
+        <el-button :icon="Refresh" circle :title='uiText("刷新工艺路线")' @click="loadRoutes()" />
+        <el-button data-test="process-create" type="primary" :icon="Plus" @click="openCreate">{{ uiText("新建工艺路线") }}</el-button>
       </div>
     </div>
 
@@ -704,7 +706,7 @@ watch(
 
     <template v-else-if="selectedRoute">
       <div class="m4-panel__selector">
-        <el-select v-model="selectedProcessId" class="m4-panel__select" aria-label="选择工艺路线">
+        <el-select v-model="selectedProcessId" class="m4-panel__select" :aria-label='uiText("选择工艺路线")'>
           <el-option
             v-for="route in routes"
             :key="route.processId"
@@ -712,12 +714,12 @@ watch(
             :value="route.processId"
           />
         </el-select>
-        <el-tag :type="routeStatusTagType" effect="light">{{ routeStatusLabel }}</el-tag>
-        <el-tag v-if="selectedRoute.finalSelected" type="success" effect="light">最终确认</el-tag>
+        <el-tag :type="routeStatusTagType" effect="light">{{ uiText(String((routeStatusLabel) ?? '')) }}</el-tag>
+        <el-tag v-if="selectedRoute.finalSelected" type="success" effect="light">{{ uiText("最终确认") }}</el-tag>
         <span class="m4-panel__code">{{ selectedRoute.processCode }}</span>
         <div class="m4-panel__actions m4-panel__actions--right">
-          <el-button v-if="!isReadonlyRoute" data-test="process-edit" :icon="Edit" @click="openEdit">编辑路线</el-button>
-          <el-button v-else data-test="process-edit" :icon="Edit" disabled>当前状态只读</el-button>
+          <el-button v-if="!isReadonlyRoute" data-test="process-edit" :icon="Edit" @click="openEdit">{{ uiText("编辑路线") }}</el-button>
+          <el-button v-else data-test="process-edit" :icon="Edit" disabled>{{ uiText("当前状态只读") }}</el-button>
           <el-button
             v-if="isReadonlyRoute"
             data-test="process-create-version"
@@ -725,58 +727,58 @@ watch(
             plain
             :icon="DocumentCopy"
             @click="openCreateVersion"
-          >创建新版本</el-button>
-          <el-button data-test="process-delete" type="danger" plain :icon="Delete" :disabled="!canDeleteSelectedRoute" @click="deleteRoute">删除版本</el-button>
+          >{{ uiText("创建新版本") }}</el-button>
+          <el-button data-test="process-delete" type="danger" plain :icon="Delete" :disabled="!canDeleteSelectedRoute" @click="deleteRoute">{{ uiText("删除版本") }}</el-button>
         </div>
       </div>
 
       <p class="selected-route-identity"><strong>{{selectedRoute.processName}}</strong><span>{{selectedRoute.sourceRouteCode||selectedRoute.processCode}} · {{selectedRoute.versionNo}}</span></p>
       <div class="route-meta-strip">
-        <span>模板：{{ selectedRoute.routeTemplateCode || '手工路线' }}</span>
+        <span>{{ uiText("模板：") }}{{ selectedRoute.routeTemplateCode || uiText('手工路线') }}</span>
         <span>BOM：{{ selectedRoute.linkedBomVersionNo || '--' }}</span>
-        <span v-if="selectedRoute.finalSelected">最终确认路线</span>
+        <span v-if="selectedRoute.finalSelected">{{ uiText("最终确认路线") }}</span>
       </div>
 
-      <h5 class="route-check-title">节点配置核对表</h5>
+      <h5 class="route-check-title">{{ uiText("节点配置核对表") }}</h5>
       <ProcessGraphView v-if="selectedRoute.graph" :graph="selectedRoute.graph"/>
       <el-table v-else :data="selectedRouteNodeCheckRows" border stripe size="small" class="m4-panel__table">
-        <el-table-column prop="displayOrder" label="顺序" width="72" />
-        <el-table-column prop="businessOperationCode" label="产品工序编码" min-width="180" />
-        <el-table-column prop="operationCraftCode" label="基础工序编码" min-width="150" />
-        <el-table-column prop="operationName" label="工序名称" min-width="150" />
-        <el-table-column label="前置节点" min-width="180">
+        <el-table-column prop="displayOrder" :label='uiText("顺序")' width="72" />
+        <el-table-column prop="businessOperationCode" :label='uiText("产品工序编码")' min-width="180" />
+        <el-table-column prop="operationCraftCode" :label='uiText("基础工序编码")' min-width="150" />
+        <el-table-column prop="operationName" :label='uiText("工序名称")' min-width="150" />
+        <el-table-column :label='uiText("前置节点")' min-width="180">
           <template #default="{ row }">
             <span data-test="node-check-predecessor">{{ row.predecessorNodeNames.join('、') || '--' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="后置节点" min-width="180">
+        <el-table-column :label='uiText("后置节点")' min-width="180">
           <template #default="{ row }">
             <span data-test="node-check-successor">{{ row.successorNodeNames.join('、') || '--' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="保存状态" width="100"><template #default="{ row }"><el-tag size="small" :type="row.backendPersisted ? 'success' : 'info'">{{ row.backendPersisted ? '已落库' : '草稿' }}</el-tag></template></el-table-column>
+        <el-table-column :label='uiText("保存状态")' width="100"><template #default="{ row }"><el-tag size="small" :type="row.backendPersisted ? 'success' : 'info'">{{ row.backendPersisted ? uiText('已落库') : uiText('草稿') }}</el-tag></template></el-table-column>
       </el-table>
     </template>
 
-    <el-empty v-else description="当前项目还没有工艺路线">
-      <el-button data-test="process-create-empty" type="primary" :icon="Plus" @click="openCreate">新建工艺路线</el-button>
+    <el-empty v-else :description='uiText("当前项目还没有工艺路线")'>
+      <el-button data-test="process-create-empty" type="primary" :icon="Plus" @click="openCreate">{{ uiText("新建工艺路线") }}</el-button>
     </el-empty>
 
     <el-dialog v-model="dialogVisible" width="min(1080px, 94vw)" append-to-body>
       <template #header>
         <div class="process-dialog-title">
-          <span>{{ editing ? '编辑工艺路线' : creatingVersion ? '创建工艺路线新版本' : '新建工艺路线' }}</span>
+          <span>{{ editing ? uiText('编辑工艺路线') : creatingVersion ? uiText('创建工艺路线新版本') : uiText('新建工艺路线') }}</span>
           <el-tag v-if="productName || productCode" effect="plain">{{ productName || productCode }}</el-tag>
         </div>
       </template>
       <el-form label-width="108px" class="route-form-head">
-        <el-form-item label="路线模板">
+        <el-form-item :label='uiText("路线模板")'>
           <el-select
             v-model="selectedTemplateCode"
             data-test="process-template-select"
             :loading="templateLoading"
             filterable
-            placeholder="选择标准工艺路线"
+            :placeholder='uiText("选择标准工艺路线")'
             @change="handleTemplateChange"
           >
             <el-option v-for="source in sourceRouteTemplates" :key="source.objectId" :value="`MES:${source.objectId}`" :label="`MES · ${source.source.route_name} · ${source.source.product_code}`"/>
@@ -788,63 +790,63 @@ watch(
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="路线名称" required>
+        <el-form-item :label='uiText("路线名称")' required>
           <div data-test="process-route-name-input">
             <el-input v-model="routeForm.processName" maxlength="100" />
           </div>
         </el-form-item>
-        <el-form-item label="版本号" required>
+        <el-form-item :label='uiText("版本号")' required>
           <div data-test="process-route-version-input">
             <el-input v-model="routeForm.versionNo" maxlength="50" />
           </div>
         </el-form-item>
-        <el-form-item v-if="routeForm.edges===undefined" label="编码预览"><el-input :model-value="generatedCodePreview" disabled /></el-form-item>
-        <el-form-item label="BOM 版本"><el-input v-model="routeForm.linkedBomVersionNo" maxlength="50" placeholder="后续最终确认时补齐" /></el-form-item>
-        <el-form-item label="最终确认"><el-switch v-model="routeForm.finalSelected" /></el-form-item>
-        <el-form-item label="备注" class="route-form-head__wide"><el-input v-model="routeForm.remark" maxlength="500" /></el-form-item>
+        <el-form-item v-if="routeForm.edges===undefined" :label='uiText("编码预览")'><el-input :model-value="generatedCodePreview" disabled /></el-form-item>
+        <el-form-item :label='uiText("BOM 版本")'><el-input v-model="routeForm.linkedBomVersionNo" maxlength="50" :placeholder='uiText("后续最终确认时补齐")' /></el-form-item>
+        <el-form-item :label='uiText("最终确认")'><el-switch v-model="routeForm.finalSelected" /></el-form-item>
+        <el-form-item :label='uiText("备注")' class="route-form-head__wide"><el-input v-model="routeForm.remark" maxlength="500" /></el-form-item>
       </el-form>
 
       <div class="operation-editor__head">
-        <strong>工序明细</strong>
-        <el-button type="primary" plain :icon="Plus" @click="addOperationRow">添加工序</el-button>
+        <strong>{{ uiText("工序明细") }}</strong>
+        <el-button type="primary" plain :icon="Plus" @click="addOperationRow">{{ uiText("添加工序") }}</el-button>
       </div>
       <section v-if="routeForm.edges!==undefined" class="graph-form">
-        <p>节点、工序和连接沿用 MES 语义；不生成旧式工序编码，执行配置保留原值只读。</p>
-        <article v-for="(operation,index) in routeForm.operations" :key="operation.nodeCode" class="graph-node-form"><label>显示顺序<el-input-number v-model="operation.sequenceNo" :min="1"/></label><label>节点标识<el-input :model-value="operation.nodeCode" readonly/></label><label>工序编码<el-input v-model="operation.operationCode"/></label><label>工序名称<el-input v-model="operation.processName"/><small>{{operation.processName}}</small></label><label>本地节点<el-input v-model="operation.localNodeCode"/></label><label>质量要求（未知留空）<el-input v-model="operation.qualityRequirement"/></label><label>工序定义<el-select v-model="operation.operationMasterProcessId" filterable @visible-change="$event&&loadOperationMasters()" @change="applyOperationMaster(operation,$event)"><el-option v-for="master in operationMasterOptions" :key="master.processId" :value="master.processId" :label="`${master.processCode} · ${master.processName}`"/></el-select></label><el-button size="small" @click="removeOperationRow(index)">移除节点</el-button><details><summary>原 MES 节点配置（只读）</summary><pre>{{operation.processParamJson}}</pre></details></article>
-        <h4>明确连接关系</h4><div v-for="(edge,index) in routeForm.edges" :key="index" class="graph-edge-form"><el-select v-model="edge.fromNodeCode" placeholder="起始节点"><el-option v-for="node in routeForm.operations" :key="node.nodeCode" :value="node.nodeCode||''" :label="node.processName||node.nodeCode||'待填名称'"/></el-select><b>→</b><el-select v-model="edge.toNodeCode" placeholder="目标节点"><el-option v-for="node in routeForm.operations" :key="node.nodeCode" :value="node.nodeCode||''" :label="node.processName||node.nodeCode||'待填名称'"/></el-select><span>{{edge.relationType}}</span><el-button size="small" @click="routeForm.edges.splice(index,1)">移除连接</el-button></div><el-button size="small" @click="routeForm.edges.push({fromNodeCode:'',toNodeCode:'',relationType:'finish_to_start',edgeNo:(routeForm.edges.length+1)*10})">添加明确连接</el-button>
+        <p>{{ uiText("节点、工序和连接沿用 MES 语义；不生成旧式工序编码，执行配置保留原值只读。") }}</p>
+        <article v-for="(operation,index) in routeForm.operations" :key="operation.nodeCode" class="graph-node-form"><label>{{ uiText("显示顺序") }}<el-input-number v-model="operation.sequenceNo" :min="1"/></label><label>{{ uiText("节点标识") }}<el-input :model-value="operation.nodeCode" readonly/></label><label>{{ uiText("工序编码") }}<el-input v-model="operation.operationCode"/></label><label>{{ uiText("工序名称") }}<el-input v-model="operation.processName"/><small>{{operation.processName}}</small></label><label>{{ uiText("本地节点") }}<el-input v-model="operation.localNodeCode"/></label><label>{{ uiText("质量要求（未知留空）") }}<el-input v-model="operation.qualityRequirement"/></label><label>{{ uiText("工序定义") }}<el-select v-model="operation.operationMasterProcessId" filterable @visible-change="$event&&loadOperationMasters()" @change="applyOperationMaster(operation,$event)"><el-option v-for="master in operationMasterOptions" :key="master.processId" :value="master.processId" :label="`${master.processCode} · ${master.processName}`"/></el-select></label><el-button size="small" @click="removeOperationRow(index)">{{ uiText("移除节点") }}</el-button><details><summary>{{ uiText("原 MES 节点配置（只读）") }}</summary><pre>{{operation.processParamJson}}</pre></details></article>
+        <h4>{{ uiText("明确连接关系") }}</h4><div v-for="(edge,index) in routeForm.edges" :key="index" class="graph-edge-form"><el-select v-model="edge.fromNodeCode" :placeholder='uiText("起始节点")'><el-option v-for="node in routeForm.operations" :key="node.nodeCode" :value="node.nodeCode||''" :label="node.processName||node.nodeCode||uiText('待填名称')"/></el-select><b>→</b><el-select v-model="edge.toNodeCode" :placeholder='uiText("目标节点")'><el-option v-for="node in routeForm.operations" :key="node.nodeCode" :value="node.nodeCode||''" :label="node.processName||node.nodeCode||uiText('待填名称')"/></el-select><span>{{edge.relationType}}</span><el-button size="small" @click="routeForm.edges.splice(index,1)">{{ uiText("移除连接") }}</el-button></div><el-button size="small" @click="routeForm.edges.push({fromNodeCode:'',toNodeCode:'',relationType:'finish_to_start',edgeNo:(routeForm.edges.length+1)*10})">{{ uiText("添加明确连接") }}</el-button>
       </section>
       <div v-else class="operation-editor" data-test="operation-editor">
         <div class="operation-editor__columns" data-test="operation-editor-columns" aria-hidden="true">
-          <span>顺序</span>
-          <span>产品工序编码</span>
-          <span>工序名称</span>
-          <span>基础工序编码</span>
-          <span>工序库</span>
-          <span>材料/状态</span>
-          <span>成品</span>
-          <span>标准工时</span>
-          <span>工艺参数</span>
-          <span>质量要求</span>
-          <span>操作</span>
+          <span>{{ uiText("顺序") }}</span>
+          <span>{{ uiText("产品工序编码") }}</span>
+          <span>{{ uiText("工序名称") }}</span>
+          <span>{{ uiText("基础工序编码") }}</span>
+          <span>{{ uiText("工序库") }}</span>
+          <span>{{ uiText("材料/状态") }}</span>
+          <span>{{ uiText("成品") }}</span>
+          <span>{{ uiText("标准工时") }}</span>
+          <span>{{ uiText("工艺参数") }}</span>
+          <span>{{ uiText("质量要求") }}</span>
+          <span>{{ uiText("操作") }}</span>
         </div>
         <div v-for="(operation, index) in routeForm.operations" :key="index" class="operation-row">
-          <el-input-number v-model="operation.sequenceNo" :min="1" :step="10" controls-position="right" aria-label="工序顺序" />
+          <el-input-number v-model="operation.sequenceNo" :min="1" :step="10" controls-position="right" :aria-label='uiText("工序顺序")' />
           <div data-test="business-operation-code-input">
             <el-input
               v-model="operation.businessOperationCode"
-              :placeholder="isProductLineRoute ? '可手工填写，如 NHD1010' : '系统追加机型/颜色编码，可人工修正'"
+              :placeholder="isProductLineRoute ? uiText('可手工填写，如 NHD1010') : uiText('系统追加机型/颜色编码，可人工修正')"
               maxlength="80"
               @input="() => handleBusinessOperationCodeInput(operation)"
               @change="() => handleBusinessOperationCodeInput(operation)"
             />
           </div>
           <div data-test="operation-name-input">
-            <el-input v-model="operation.processName" placeholder="输入工序名称" maxlength="100" />
+            <el-input v-model="operation.processName" :placeholder='uiText("输入工序名称")' maxlength="100" />
           </div>
           <div data-test="operation-craft-code-input">
             <el-input
               v-model="operation.operationCraftCode"
-              placeholder="输入基础工序编码，如 1010"
+              :placeholder='uiText("输入基础工序编码，如 1010")'
               maxlength="20"
               @input="() => refreshBusinessOperationCode(operation)"
               @change="() => refreshBusinessOperationCode(operation)"
@@ -856,7 +858,7 @@ watch(
             :loading="operationMasterLoading"
             clearable
             filterable
-            :placeholder="operation.operationSource === 'imported_snapshot' ? `${operation.processName} / 历史导入` : '可选：从工序库带入'"
+            :placeholder="operation.operationSource === 'imported_snapshot' ? uiText('{value0} / 历史导入',{value0:(operation.processName)}) : uiText('可选：从工序库带入')"
             @visible-change="(visible: boolean) => visible && loadOperationMasters()"
             @change="(processId: number | null) => applyOperationMaster(operation, processId)"
           >
@@ -871,7 +873,7 @@ watch(
             <el-select
               v-model="operation.materialStatusCode"
               clearable
-              placeholder="选择材料/状态"
+              :placeholder='uiText("选择材料/状态")'
               @change="() => handleMaterialStatusChange(operation)"
             >
               <el-option
@@ -885,43 +887,41 @@ watch(
           <div data-test="finished-product-checkbox">
             <el-checkbox
               v-model="operation.finishedProductFlag"
-            >
-              成品
-            </el-checkbox>
+            >{{ uiText(" 成品 ") }}</el-checkbox>
           </div>
-          <el-input-number v-model="operation.standardTimeMins" :min="0" :precision="2" controls-position="right" aria-label="标准工时，单位分钟" />
-          <el-input v-model="operation.processParamJson" :disabled="!!operation.nodeCode" placeholder='工艺参数 JSON，例如 {"pressure":30}' />
-          <el-input v-model="operation.qualityRequirement" placeholder="填写该工序的质量要求" maxlength="500" />
+          <el-input-number v-model="operation.standardTimeMins" :min="0" :precision="2" controls-position="right" :aria-label='uiText("标准工时，单位分钟")' />
+          <el-input v-model="operation.processParamJson" :disabled="!!operation.nodeCode" :placeholder='uiText("工艺参数 JSON，例如 {\"pressure\":30}")' />
+          <el-input v-model="operation.qualityRequirement" :placeholder='uiText("填写该工序的质量要求")' maxlength="500" />
           <div class="operation-row__actions">
-            <el-button :icon="ArrowUp" circle :disabled="index === 0" title="上移" @click="moveOperation(index, -1)" />
-            <el-button :icon="ArrowDown" circle :disabled="index === routeForm.operations.length - 1" title="下移" @click="moveOperation(index, 1)" />
-            <el-button :icon="Delete" circle type="danger" plain title="删除工序" @click="removeOperationRow(index)" />
+            <el-button :icon="ArrowUp" circle :disabled="index === 0" :title='uiText("上移")' @click="moveOperation(index, -1)" />
+            <el-button :icon="ArrowDown" circle :disabled="index === routeForm.operations.length - 1" :title='uiText("下移")' @click="moveOperation(index, 1)" />
+            <el-button :icon="Delete" circle type="danger" plain :title='uiText("删除工序")' @click="removeOperationRow(index)" />
           </div>
         </div>
       </div>
 
-      <h5 class="route-check-title">节点配置核对表</h5>
+      <h5 class="route-check-title">{{ uiText("节点配置核对表") }}</h5>
       <el-table :data="formNodeCheckRows" border stripe size="small" class="m4-panel__table">
-        <el-table-column prop="displayOrder" label="顺序" width="72" />
-        <el-table-column prop="businessOperationCode" label="产品工序编码" min-width="180" />
-        <el-table-column prop="operationCraftCode" label="基础工序编码" min-width="150" />
-        <el-table-column prop="operationName" label="工序名称" min-width="150" />
-        <el-table-column label="前置节点" min-width="180">
+        <el-table-column prop="displayOrder" :label='uiText("顺序")' width="72" />
+        <el-table-column prop="businessOperationCode" :label='uiText("产品工序编码")' min-width="180" />
+        <el-table-column prop="operationCraftCode" :label='uiText("基础工序编码")' min-width="150" />
+        <el-table-column prop="operationName" :label='uiText("工序名称")' min-width="150" />
+        <el-table-column :label='uiText("前置节点")' min-width="180">
           <template #default="{ row }">
             <span data-test="node-check-predecessor">{{ row.predecessorNodeNames.join('、') || '--' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="后置节点" min-width="180">
+        <el-table-column :label='uiText("后置节点")' min-width="180">
           <template #default="{ row }">
             <span data-test="node-check-successor">{{ row.successorNodeNames.join('、') || '--' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="保存状态" width="100"><template #default="{ row }"><el-tag size="small" :type="row.backendPersisted ? 'success' : 'info'">{{ row.backendPersisted ? '已落库' : '草稿' }}</el-tag></template></el-table-column>
+        <el-table-column :label='uiText("保存状态")' width="100"><template #default="{ row }"><el-tag size="small" :type="row.backendPersisted ? 'success' : 'info'">{{ row.backendPersisted ? uiText('已落库') : uiText('草稿') }}</el-tag></template></el-table-column>
       </el-table>
 
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button data-test="process-route-save" type="primary" :loading="actionLoading" @click="saveRoute">{{ creatingVersion ? '保存新版本' : '保存完整路线' }}</el-button>
+        <el-button @click="dialogVisible = false">{{ uiText("取消") }}</el-button>
+        <el-button data-test="process-route-save" type="primary" :loading="actionLoading" @click="saveRoute">{{ creatingVersion ? uiText('保存新版本') : uiText('保存完整路线') }}</el-button>
       </template>
     </el-dialog>
   </div>

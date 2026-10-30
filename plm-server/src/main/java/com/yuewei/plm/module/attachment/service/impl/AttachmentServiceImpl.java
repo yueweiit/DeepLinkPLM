@@ -57,7 +57,7 @@ public class AttachmentServiceImpl implements AttachmentService {
     private static final String PREVIEW_STATUS_READY = "ready";
     private static final String PREVIEW_STATUS_UNSUPPORTED = "unsupported";
     private static final Set<String> CATEGORIES = Set.of(
-        "sop", "sip", "testing", "drawing", "engineering", "customer_confirm", "sample_image", "other"
+        "sop", "sip", "testing", "drawing", "render_3d", "engineering", "customer_confirm", "sample_image", "other"
     );
     private static final Set<String> IMAGE_EXTENSIONS = Set.of("jpg", "jpeg", "png", "webp");
     private static final Set<String> TEXT_EXTENSIONS = Set.of("txt", "csv");
@@ -414,6 +414,9 @@ public class AttachmentServiceImpl implements AttachmentService {
         }
         if ("sample_image".equals(fileCategory) && !IMAGE_EXTENSIONS.contains(ext)) {
             throw new BusinessException(ErrorCodeConstants.FILE_TYPE_NOT_SUPPORTED, "SKU示例照片仅支持jpg、jpeg、png、webp");
+        }
+        if ("render_3d".equals(fileCategory) && !com.yuewei.plm.module.project.development.DevelopmentRules.PRODUCT_3D_RENDER_EXTENSIONS.contains(ext)) {
+            throw new BusinessException(ErrorCodeConstants.FILE_TYPE_NOT_SUPPORTED, "3D效果图仅支持jpg、jpeg、png、webp、pdf，请将3D源文件另存为图纸");
         }
     }
 

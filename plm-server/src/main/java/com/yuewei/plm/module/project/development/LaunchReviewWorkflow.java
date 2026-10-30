@@ -114,7 +114,7 @@ public class LaunchReviewWorkflow {
                 if("design".equals(gate))require(refs.stream().anyMatch(r->"bom".equals(r.get("type")))||!text(row.get("materialBasis")).isBlank(),"设计评审请填写初步用料与部件方案，或采用已有设计BOM；不要求量产编码及正式工艺");
                 else require(refs.stream().anyMatch(r->"bom".equals(r.get("type")))||!text(row.get("materialBasis")).isBlank(),"请填写本次试模实际用料说明；详细BOM在试产完善");
             }));
-            checks.add(check("DESIGN_DRAWING","本次采用的设计图纸版本","drawings",()->require(refs.stream().anyMatch(r->"drawing".equals(r.get("category"))),("design".equals(gate)?"设计":"T0")+"评审请采用具体图纸版本（可为设计草稿）")));
+            checks.add(check("DESIGN_DRAWING","本次采用的设计图纸版本","drawings",()->require(refs.stream().anyMatch(r->"drawing".equals(r.get("category"))||"design".equals(gate)&&product3dRender(r)),"design".equals(gate)?"设计评审请采用具体图纸或工程师指定的3D效果图版本（可为设计草稿）":"T0评审请采用具体图纸版本（可为设计草稿）")));
         }
         return checks;
     }

@@ -76,6 +76,7 @@ export interface CatalogModelSheetPreview {
 export interface CatalogModelSheetResult { style: CatalogStyle; replayed: boolean; changed: boolean }
 
 export interface CatalogStyle extends CatalogIdentity {
+  discarded?: boolean
   sourceCode: string
   sourceName: string
   recordVersion: number
@@ -96,6 +97,8 @@ export interface CatalogStyle extends CatalogIdentity {
   modelSheetFileDetails?: PartnerFile[]
   canMaintainModelSheet?: boolean
   color?: string
+  supplierColorIds?:number[]
+  supplierColors?:{id:number;name:string;supplierColorCode?:string}[]
   material?: string
   specification?: string
   thickness?: string

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getSalesCatalog, saveSalesProduct, type SalesProduct } from '@/api/modules/productionMetadata'
@@ -43,7 +45,7 @@ async function load() {
 
 async function save(row: CatalogRow) {
   if (saving.value !== undefined) return
-  if (!reason.value.trim()) return ElMessage.warning('请填写原因')
+  if (!reason.value.trim()) return ElMessage.warning(uiText('请填写原因'))
   const token = user.token
   epoch++
   loading.value = false
@@ -54,7 +56,7 @@ async function save(row: CatalogRow) {
     if (token !== user.token) return
     Object.assign(row, editable(result))
     workspace.changed()
-    ElMessage.success('已保存；开模覆盖与申请范围已同步')
+    ElMessage.success(uiText('已保存；开模覆盖与申请范围已同步'))
   } catch (e) {
     if (token === user.token) saveError.value = e instanceof Error ? e.message : '保存失败'
   } finally {
@@ -77,17 +79,17 @@ watch(() => user.token, () => {
 </script>
 
 <template>
-  <el-drawer v-model="visible" title="产品在售范围与审批款式别名" size="min(850px,96vw)">
+  <el-drawer v-model="visible" :title='uiText("产品在售范围与审批款式别名")' size="min(850px,96vw)">
     <div class="sales-catalog" v-loading="loading">
-      <div class="catalog-toolbar"><p>在此维护一次，开模覆盖、申请产品选择、编码预留与提交统一读取。在售状态与生产状态、归档状态分别保存；停售产品保留历史资料。</p><el-button size="small" :disabled="loading || saving !== undefined" @click="load">刷新目录</el-button></div>
-      <el-input v-model="reason" placeholder="修改原因"/>
+      <div class="catalog-toolbar"><p>{{ uiText("在此维护一次，开模覆盖、申请产品选择、编码预留与提交统一读取。在售状态与生产状态、归档状态分别保存；停售产品保留历史资料。") }}</p><el-button size="small" :disabled="loading || saving !== undefined" @click="load">{{ uiText("刷新目录") }}</el-button></div>
+      <el-input v-model="reason" :placeholder='uiText("修改原因")'/>
       <el-alert v-if="error" :title="error" type="error" :closable="false"/>
       <p v-if="notice" class="catalog-notice" role="status">{{ notice }}</p>
       <article v-for="p in rows" :key="p.id">
         <strong>{{ p.productName }}</strong>
-        <el-select v-model="p.pendingStatus" size="small" :disabled="saving === p.id"><el-option value="on_sale" label="在售 · 纳入覆盖"/><el-option value="off_sale" label="停售 · 保留历史"/><el-option value="unconfirmed" label="未确认"/></el-select>
-        <el-input v-model="p.aliasText" type="textarea" :rows="2" :disabled="saving === p.id" placeholder="审批原款式别名，每行一个（精确匹配，保留工艺差异）"/>
-        <el-button size="small" :loading="saving === p.id" :disabled="saving !== undefined" @click="save(p)">保存</el-button>
+        <el-select v-model="p.pendingStatus" size="small" :disabled="saving === p.id"><el-option value="on_sale" :label='uiText("在售 · 纳入覆盖")'/><el-option value="off_sale" :label='uiText("停售 · 保留历史")'/><el-option value="unconfirmed" :label='uiText("未确认")'/></el-select>
+        <el-input v-model="p.aliasText" type="textarea" :rows="2" :disabled="saving === p.id" :placeholder='uiText("审批原款式别名，每行一个（精确匹配，保留工艺差异）")'/>
+        <el-button size="small" :loading="saving === p.id" :disabled="saving !== undefined" @click="save(p)">{{ uiText("保存") }}</el-button>
       </article>
     </div>
   </el-drawer>

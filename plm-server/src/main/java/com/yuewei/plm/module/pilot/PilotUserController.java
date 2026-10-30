@@ -4,10 +4,12 @@ import jakarta.servlet.http.HttpServletRequest;import jakarta.validation.Valid;i
 @RestController @RequiredArgsConstructor @Validated @RequestMapping("/api/v1/pilot")
 public class PilotUserController {
  private final PilotUserService users;private final PilotAccessService access;
+ private final com.yuewei.plm.module.auth.service.UserLanguageService languages;
  private <T>ResponseVO<T> ok(T data,HttpServletRequest r){return ResponseVO.success(data,RequestIdUtil.getRequestId(r),OffsetDateTime.now());}
  @GetMapping("/me") public ResponseVO<?> me(HttpServletRequest r){return ok(access.userView(access.actor()),r);}
  @GetMapping("/users") public ResponseVO<?> users(HttpServletRequest r){return ok(users.users(),r);}
  @GetMapping("/roles") public ResponseVO<?> roles(HttpServletRequest r){return ok(users.roles(),r);}
+ @PatchMapping("/users/{id}/language") public ResponseVO<?> language(@PathVariable @Positive long id,@Valid @RequestBody com.yuewei.plm.module.auth.service.UserLanguageService.Input input,HttpServletRequest r){return ok(languages.save(id,input,r),r);}
  @GetMapping("/scope-options") public ResponseVO<?> options(@RequestParam String type,@RequestParam(defaultValue="") @Size(max=128) String keyword,HttpServletRequest r){return ok(users.scopeOptions(type,keyword),r);}
  @PostMapping("/users") public ResponseVO<?> create(@Valid @RequestBody PilotUserService.UserInput input,HttpServletRequest r){return ok(users.save(null,input,r),r);}
  @PutMapping("/users/{id}") public ResponseVO<?> update(@PathVariable @Positive long id,@Valid @RequestBody PilotUserService.UserInput input,HttpServletRequest r){return ok(users.save(id,input,r),r);}

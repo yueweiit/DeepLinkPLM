@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
@@ -161,10 +163,10 @@ function removeFieldOption(index: number) {
 
 function submitFieldDraft() {
   if (!fieldDraft.fieldName.trim()) {
-    ElMessage.warning('请填写字段名称')
+    ElMessage.warning(uiText('请填写字段名称'))
     return
   }
-  ElMessage.success('字段配置已保存（前端演示）')
+  ElMessage.success(uiText('字段配置已保存（前端演示）'))
   editVisible.value = false
 }
 
@@ -179,14 +181,14 @@ function getInputTypeLabel(type: SystemFieldInputType) {
 
 <template>
   <PageContainer
-    title="字段管理"
-    description="维护前端字段展示、枚举选项、显示规则与使用范围。本页面不修改数据库字段和后端接口。"
+    :title='uiText("字段管理")'
+    :description='uiText("维护前端字段展示、枚举选项、显示规则与使用范围。本页面不修改数据库字段和后端接口。")'
   >
     <!-- 筛选区 -->
     <section class="page-panel field-toolbar">
       <div class="field-toolbar__filters">
-        <el-input v-model="query.keyword" placeholder="搜索字段编码、名称或说明" clearable style="width: 240px" />
-        <el-select v-model="query.scope" placeholder="所属模块" clearable style="width: 140px">
+        <el-input v-model="query.keyword" :placeholder='uiText("搜索字段编码、名称或说明")' clearable style="width: 240px" />
+        <el-select v-model="query.scope" :placeholder='uiText("所属模块")' clearable style="width: 140px">
           <el-option
             v-for="(label, value) in systemFieldScopeLabels"
             :key="value"
@@ -194,7 +196,7 @@ function getInputTypeLabel(type: SystemFieldInputType) {
             :value="value"
           />
         </el-select>
-        <el-select v-model="query.inputType" placeholder="字段类型" clearable style="width: 130px">
+        <el-select v-model="query.inputType" :placeholder='uiText("字段类型")' clearable style="width: 130px">
           <el-option
             v-for="(label, value) in systemFieldInputTypeLabels"
             :key="value"
@@ -202,14 +204,14 @@ function getInputTypeLabel(type: SystemFieldInputType) {
             :value="value"
           />
         </el-select>
-        <el-select v-model="query.status" placeholder="状态" clearable style="width: 110px">
-          <el-option label="启用" value="active" />
-          <el-option label="停用" value="inactive" />
+        <el-select v-model="query.status" :placeholder='uiText("状态")' clearable style="width: 110px">
+          <el-option :label='uiText("启用")' value="active" />
+          <el-option :label='uiText("停用")' value="inactive" />
         </el-select>
-        <el-button type="primary" @click="() => {}">查询</el-button>
-        <el-button @click="handleReset">重置</el-button>
+        <el-button type="primary" @click="() => {}">{{ uiText("查询") }}</el-button>
+        <el-button @click="handleReset">{{ uiText("重置") }}</el-button>
       </div>
-      <el-button type="primary" @click="openCreateDrawer">新增字段配置</el-button>
+      <el-button type="primary" @click="openCreateDrawer">{{ uiText("新增字段配置") }}</el-button>
     </section>
 
     <!-- 主体：左侧分类 + 右侧列表 -->
@@ -223,64 +225,64 @@ function getInputTypeLabel(type: SystemFieldInputType) {
           :class="{ 'is-active': activeScope === tab.value }"
           @click="activeScope = tab.value"
         >
-          <span>{{ tab.label }}</span>
+          <span>{{ uiText(String((tab.label) ?? '')) }}</span>
           <em>{{ tab.count }}</em>
         </button>
       </aside>
 
       <article class="page-panel field-layout__table">
         <div class="toolbar-row">
-          <el-tag effect="light">{{ filteredFields.length }} 条</el-tag>
+          <el-tag effect="light">{{ filteredFields.length }}{{ uiText(" 条") }}</el-tag>
         </div>
 
         <FixedTableViewport v-slot="{ tableHeight }" compact :refresh-key="filteredFields">
         <el-table :data="filteredFields" :height="tableHeight" border stripe @row-click="openDetailDrawer">
-          <el-table-column prop="fieldCode" label="字段编码" min-width="160" />
-          <el-table-column prop="fieldName" label="字段名称" min-width="140" />
-          <el-table-column label="所属模块" width="110">
-            <template #default="{ row }">{{ getScopeLabel(row.scope) }}</template>
+          <el-table-column prop="fieldCode" :label='uiText("字段编码")' min-width="160" />
+          <el-table-column prop="fieldName" :label='uiText("字段名称")' min-width="140" />
+          <el-table-column :label='uiText("所属模块")' width="110">
+            <template #default="{ row }">{{ uiText(String((getScopeLabel(row.scope)) ?? '')) }}</template>
           </el-table-column>
-          <el-table-column label="字段类型" width="100">
-            <template #default="{ row }">{{ getInputTypeLabel(row.inputType) }}</template>
+          <el-table-column :label='uiText("字段类型")' width="100">
+            <template #default="{ row }">{{ uiText(String((getInputTypeLabel(row.inputType)) ?? '')) }}</template>
           </el-table-column>
-          <el-table-column label="必填" width="70">
+          <el-table-column :label='uiText("必填")' width="70">
             <template #default="{ row }">
               <el-tag :type="row.required ? 'danger' : 'info'" effect="light" size="small">
-                {{ row.required ? '是' : '否' }}
+                {{ row.required ? uiText('是') : uiText('否') }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="列表显示" width="90">
+          <el-table-column :label='uiText("列表显示")' width="90">
             <template #default="{ row }">
               <el-tag :type="row.visibleInList ? 'success' : 'info'" effect="light" size="small">
-                {{ row.visibleInList ? '是' : '否' }}
+                {{ row.visibleInList ? uiText('是') : uiText('否') }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="可编辑" width="80">
+          <el-table-column :label='uiText("可编辑")' width="80">
             <template #default="{ row }">
               <el-tag :type="row.editable ? 'success' : 'info'" effect="light" size="small">
-                {{ row.editable ? '是' : '否' }}
+                {{ row.editable ? uiText('是') : uiText('否') }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="80">
+          <el-table-column :label='uiText("状态")' width="80">
             <template #default="{ row }">
               <el-tag :type="row.status === 'active' ? 'success' : 'danger'" effect="light" size="small">
-                {{ row.status === 'active' ? '启用' : '停用' }}
+                {{ row.status === 'active' ? uiText('启用') : uiText('停用') }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="选项数" width="80">
+          <el-table-column :label='uiText("选项数")' width="80">
             <template #default="{ row }">{{ row.options.length }}</template>
           </el-table-column>
-          <el-table-column label="更新时间" width="120">
+          <el-table-column :label='uiText("更新时间")' width="120">
             <template #default="{ row }">{{ formatDate(row.updatedAt) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="140" fixed="right">
+          <el-table-column :label='uiText("操作")' width="140" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" size="small" @click.stop="openDetailDrawer(row)">详情</el-button>
-              <el-button link type="primary" size="small" @click.stop="openEditDrawer(row)">编辑</el-button>
+              <el-button link type="primary" size="small" @click.stop="openDetailDrawer(row)">{{ uiText("详情") }}</el-button>
+              <el-button link type="primary" size="small" @click.stop="openEditDrawer(row)">{{ uiText("编辑") }}</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -289,58 +291,58 @@ function getInputTypeLabel(type: SystemFieldInputType) {
     </section>
 
     <!-- 字段详情抽屉 -->
-    <el-drawer v-model="detailVisible" title="字段详情" size="680px">
+    <el-drawer v-model="detailVisible" :title='uiText("字段详情")' size="680px">
       <div v-if="selectedField" class="field-detail">
         <section class="field-detail__summary">
           <h3>{{ selectedField.fieldName }}</h3>
           <div class="field-detail__tags">
             <el-tag>{{ selectedField.fieldCode }}</el-tag>
-            <el-tag type="warning" effect="light" v-if="selectedField.isSystem">系统内置</el-tag>
+            <el-tag type="warning" effect="light" v-if="selectedField.isSystem">{{ uiText("系统内置") }}</el-tag>
           </div>
           <p class="subtle-text">{{ selectedField.description }}</p>
         </section>
 
         <el-descriptions :column="2" border size="small">
-          <el-descriptions-item label="所属模块">{{ getScopeLabel(selectedField.scope) }}</el-descriptions-item>
-          <el-descriptions-item label="字段类型">{{ getInputTypeLabel(selectedField.inputType) }}</el-descriptions-item>
-          <el-descriptions-item label="是否必填">{{ selectedField.required ? '是' : '否' }}</el-descriptions-item>
-          <el-descriptions-item label="列表显示">{{ selectedField.visibleInList ? '是' : '否' }}</el-descriptions-item>
-          <el-descriptions-item label="详情展示">{{ selectedField.visibleInDetail ? '是' : '否' }}</el-descriptions-item>
-          <el-descriptions-item label="筛选展示">{{ selectedField.visibleInFilter ? '是' : '否' }}</el-descriptions-item>
-          <el-descriptions-item label="是否可编辑">{{ selectedField.editable ? '是' : '否' }}</el-descriptions-item>
-          <el-descriptions-item label="状态">{{ selectedField.status === 'active' ? '启用' : '停用' }}</el-descriptions-item>
-          <el-descriptions-item label="排序">{{ selectedField.sortNo }}</el-descriptions-item>
-          <el-descriptions-item label="更新时间">{{ formatDate(selectedField.updatedAt) }}</el-descriptions-item>
+          <el-descriptions-item :label='uiText("所属模块")'>{{ uiText(String((getScopeLabel(selectedField.scope)) ?? '')) }}</el-descriptions-item>
+          <el-descriptions-item :label='uiText("字段类型")'>{{ uiText(String((getInputTypeLabel(selectedField.inputType)) ?? '')) }}</el-descriptions-item>
+          <el-descriptions-item :label='uiText("是否必填")'>{{ selectedField.required ? uiText('是') : uiText('否') }}</el-descriptions-item>
+          <el-descriptions-item :label='uiText("列表显示")'>{{ selectedField.visibleInList ? uiText('是') : uiText('否') }}</el-descriptions-item>
+          <el-descriptions-item :label='uiText("详情展示")'>{{ selectedField.visibleInDetail ? uiText('是') : uiText('否') }}</el-descriptions-item>
+          <el-descriptions-item :label='uiText("筛选展示")'>{{ selectedField.visibleInFilter ? uiText('是') : uiText('否') }}</el-descriptions-item>
+          <el-descriptions-item :label='uiText("是否可编辑")'>{{ selectedField.editable ? uiText('是') : uiText('否') }}</el-descriptions-item>
+          <el-descriptions-item :label='uiText("状态")'>{{ selectedField.status === 'active' ? uiText('启用') : uiText('停用') }}</el-descriptions-item>
+          <el-descriptions-item :label='uiText("排序")'>{{ selectedField.sortNo }}</el-descriptions-item>
+          <el-descriptions-item :label='uiText("更新时间")'>{{ formatDate(selectedField.updatedAt) }}</el-descriptions-item>
         </el-descriptions>
 
         <section v-if="selectedField.usageScenes.length">
-          <h4>使用位置</h4>
+          <h4>{{ uiText("使用位置") }}</h4>
           <div class="field-detail__scenes">
             <el-tag v-for="scene in selectedField.usageScenes" :key="scene" effect="light">{{ scene }}</el-tag>
           </div>
         </section>
 
         <section v-if="selectedField.options.length">
-          <h4>选项列表</h4>
+          <h4>{{ uiText("选项列表") }}</h4>
           <el-table :data="selectedField.options" border size="small">
-            <el-table-column label="选项名称" min-width="220">
+            <el-table-column :label='uiText("选项名称")' min-width="220">
               <template #default="{ row }">
                 <span class="field-option-text" :title="row.label">{{ row.label }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="value" label="选项值" min-width="140" />
-            <el-table-column prop="sortNo" label="排序" width="80" />
-            <el-table-column label="状态" width="90">
+            <el-table-column prop="value" :label='uiText("选项值")' min-width="140" />
+            <el-table-column prop="sortNo" :label='uiText("排序")' width="80" />
+            <el-table-column :label='uiText("状态")' width="90">
               <template #default="{ row }">
                 <el-tag :type="row.status === 'active' ? 'success' : 'danger'" effect="light" size="small">
-                  {{ row.status === 'active' ? '启用' : '停用' }}
+                  {{ row.status === 'active' ? uiText('启用') : uiText('停用') }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="系统内置" width="100">
+            <el-table-column :label='uiText("系统内置")' width="100">
               <template #default="{ row }">
                 <el-tag :type="row.isSystem ? 'warning' : 'info'" effect="light" size="small">
-                  {{ row.isSystem ? '是' : '否' }}
+                  {{ row.isSystem ? uiText('是') : uiText('否') }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -350,28 +352,28 @@ function getInputTypeLabel(type: SystemFieldInputType) {
     </el-drawer>
 
     <!-- 字段编辑抽屉 -->
-    <el-drawer v-model="editVisible" title="字段配置" size="760px">
+    <el-drawer v-model="editVisible" :title='uiText("字段配置")' size="760px">
       <el-form :model="fieldDraft" label-width="110px" class="field-edit-form">
         <el-alert
           type="info"
           show-icon
           :closable="false"
-          title="本页面只维护前端字段展示与选项配置，不修改数据库字段和后端接口。"
+          :title='uiText("本页面只维护前端字段展示与选项配置，不修改数据库字段和后端接口。")'
           style="margin-bottom: 16px"
         />
 
-        <el-divider content-position="left">基础配置</el-divider>
+        <el-divider content-position="left">{{ uiText("基础配置") }}</el-divider>
 
-        <el-form-item label="字段编码" required>
-          <el-input v-model="fieldDraft.fieldCode" :disabled="fieldDraft.isSystem" placeholder="字段编码" />
+        <el-form-item :label='uiText("字段编码")' required>
+          <el-input v-model="fieldDraft.fieldCode" :disabled="fieldDraft.isSystem" :placeholder='uiText("字段编码")' />
         </el-form-item>
-        <el-form-item label="字段名称" required>
-          <el-input v-model="fieldDraft.fieldName" placeholder="字段名称" />
+        <el-form-item :label='uiText("字段名称")' required>
+          <el-input v-model="fieldDraft.fieldName" :placeholder='uiText("字段名称")' />
         </el-form-item>
-        <el-form-item label="字段说明">
-          <el-input v-model="fieldDraft.description" type="textarea" :rows="2" placeholder="字段说明" />
+        <el-form-item :label='uiText("字段说明")'>
+          <el-input v-model="fieldDraft.description" type="textarea" :rows="2" :placeholder='uiText("字段说明")' />
         </el-form-item>
-        <el-form-item label="所属模块" v-if="!fieldDraft.isSystem">
+        <el-form-item :label='uiText("所属模块")' v-if="!fieldDraft.isSystem">
           <el-select v-model="fieldDraft.scope">
             <el-option
               v-for="(label, value) in systemFieldScopeLabels"
@@ -381,7 +383,7 @@ function getInputTypeLabel(type: SystemFieldInputType) {
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="字段类型" v-if="!fieldDraft.isSystem">
+        <el-form-item :label='uiText("字段类型")' v-if="!fieldDraft.isSystem">
           <el-select v-model="fieldDraft.inputType">
             <el-option
               v-for="(label, value) in systemFieldInputTypeLabels"
@@ -391,54 +393,54 @@ function getInputTypeLabel(type: SystemFieldInputType) {
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="排序">
+        <el-form-item :label='uiText("排序")'>
           <el-input-number v-model="fieldDraft.sortNo" :min="1" controls-position="right" />
         </el-form-item>
-        <el-form-item label="状态">
+        <el-form-item :label='uiText("状态")'>
           <el-switch v-model="fieldDraft.status" active-value="active" inactive-value="inactive" />
         </el-form-item>
 
-        <el-divider content-position="left">显示规则</el-divider>
+        <el-divider content-position="left">{{ uiText("显示规则") }}</el-divider>
 
         <div class="field-edit-form__checks">
-          <el-checkbox v-model="fieldDraft.required">必填</el-checkbox>
-          <el-checkbox v-model="fieldDraft.visibleInList">列表显示</el-checkbox>
-          <el-checkbox v-model="fieldDraft.visibleInDetail">详情页展示</el-checkbox>
-          <el-checkbox v-model="fieldDraft.visibleInFilter">筛选区展示</el-checkbox>
-          <el-checkbox v-model="fieldDraft.editable">可编辑</el-checkbox>
+          <el-checkbox v-model="fieldDraft.required">{{ uiText("必填") }}</el-checkbox>
+          <el-checkbox v-model="fieldDraft.visibleInList">{{ uiText("列表显示") }}</el-checkbox>
+          <el-checkbox v-model="fieldDraft.visibleInDetail">{{ uiText("详情页展示") }}</el-checkbox>
+          <el-checkbox v-model="fieldDraft.visibleInFilter">{{ uiText("筛选区展示") }}</el-checkbox>
+          <el-checkbox v-model="fieldDraft.editable">{{ uiText("可编辑") }}</el-checkbox>
         </div>
 
         <template v-if="fieldDraft.inputType === 'select' || fieldDraft.inputType === 'multi_select'">
-          <el-divider content-position="left">选项配置</el-divider>
+          <el-divider content-position="left">{{ uiText("选项配置") }}</el-divider>
 
           <div style="margin-bottom: 10px">
-            <el-button size="small" @click="addFieldOption">新增选项</el-button>
+            <el-button size="small" @click="addFieldOption">{{ uiText("新增选项") }}</el-button>
           </div>
 
           <el-table :data="fieldDraft.options" border size="small">
-            <el-table-column label="选项名称" min-width="140">
+            <el-table-column :label='uiText("选项名称")' min-width="140">
               <template #default="{ row }">
-                <el-input v-model="row.label" size="small" placeholder="选项名称" :title="row.label" />
+                <el-input v-model="row.label" size="small" :placeholder='uiText("选项名称")' :title="row.label" />
               </template>
             </el-table-column>
-            <el-table-column label="选项值" min-width="140">
+            <el-table-column :label='uiText("选项值")' min-width="140">
               <template #default="{ row }">
-                <el-input v-model="row.value" size="small" :disabled="row.isSystem" placeholder="选项值" />
+                <el-input v-model="row.value" size="small" :disabled="row.isSystem" :placeholder='uiText("选项值")' />
               </template>
             </el-table-column>
-            <el-table-column label="排序" width="100">
+            <el-table-column :label='uiText("排序")' width="100">
               <template #default="{ row }">
                 <el-input-number v-model="row.sortNo" size="small" :min="1" controls-position="right" />
               </template>
             </el-table-column>
-            <el-table-column label="状态" width="100">
+            <el-table-column :label='uiText("状态")' width="100">
               <template #default="{ row }">
                 <el-switch v-model="row.status" size="small" active-value="active" inactive-value="inactive" />
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="80">
+            <el-table-column :label='uiText("操作")' width="80">
               <template #default="{ $index, row }">
-                <el-button v-if="!row.isSystem" link type="danger" size="small" @click="removeFieldOption($index)">删除</el-button>
+                <el-button v-if="!row.isSystem" link type="danger" size="small" @click="removeFieldOption($index)">{{ uiText("删除") }}</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -446,8 +448,8 @@ function getInputTypeLabel(type: SystemFieldInputType) {
       </el-form>
 
       <template #footer>
-        <el-button @click="editVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitFieldDraft">保存配置</el-button>
+        <el-button @click="editVisible = false">{{ uiText("取消") }}</el-button>
+        <el-button type="primary" @click="submitFieldDraft">{{ uiText("保存配置") }}</el-button>
       </template>
     </el-drawer>
   </PageContainer>

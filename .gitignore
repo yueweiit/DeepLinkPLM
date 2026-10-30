@@ -66,3 +66,7 @@ output/
 plm-server/src/main/resources/db/migration/V20260727_1300__ecount_material_groups.sql
 plm-server/src/main/resources/db/migration/V20260730_1130__seed_inventory_from_ecount_workbook_and_archive_minor_groups.sql
 plm-server/src/main/resources/db/migration/V20260703_1600__m1_auth_and_operation_log.sql
+
+# Internal deployment and account acceptance notes
+/docs/aliyun-deployment-handoff-2026-10-16.md
+/docs/chinese-spanish-language-plan-20261029.md

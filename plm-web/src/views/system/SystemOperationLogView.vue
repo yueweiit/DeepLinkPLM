@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { useRoute } from 'vue-router'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getOperationLogs, getSystemUsers, type OperationLogItem, type OperationLogQuery } from '@/api/modules/system'
@@ -49,32 +51,32 @@ onBeforeUnmount(()=>{generation++;clearTimeout(timer)})
 </script>
 
 <template>
-  <PageContainer class="operation-log-page" :title="projectId?'系统日志 · 本项目':'系统日志'">
-    <template #actions><el-button @click="load(true)">刷新日志</el-button></template>
+  <PageContainer class="operation-log-page" :title="projectId?uiText('系统日志 · 本项目'):uiText('系统日志')">
+    <template #actions><el-button @click="load(true)">{{ uiText("刷新日志") }}</el-button></template>
     <section class="page-panel operation-log-panel">
       <div class="log-filters">
-        <el-select v-if="!projectId" v-model="operatorUserId" clearable filterable placeholder="全部真实账号" aria-label="操作账号"><el-option v-for="account in accounts" :key="account.userId" :value="account.userId" :label="`${account.displayName} · ${account.username}${account.status==='inactive'?'（已停用）':''}`" /></el-select>
-        <el-input v-model="action" clearable :placeholder="projectId?'操作类型，如 supplier_change':'动作代码，如 AUTH_LOGIN'" aria-label="动作代码" />
-        <el-date-picker v-model="timeRange" type="datetimerange" value-format="YYYY-MM-DDTHH:mm:ss" start-placeholder="开始时间（服务器本地）" end-placeholder="结束时间（服务器本地）" range-separator="至" aria-label="操作时间范围" />
-        <el-button @click="clearFilters">清除筛选</el-button>
+        <el-select v-if="!projectId" v-model="operatorUserId" clearable filterable :placeholder='uiText("全部真实账号")' :aria-label='uiText("操作账号")'><el-option v-for="account in accounts" :key="account.userId" :value="account.userId" :label="uiText('{value0} · {value1}{value2}',{value0:(account.displayName),value1:(account.username),value2:(account.status==='inactive'?'（已停用）':'')})" /></el-select>
+        <el-input v-model="action" clearable :placeholder="projectId?uiText('操作类型，如 supplier_change'):uiText('动作代码，如 AUTH_LOGIN')" :aria-label='uiText("动作代码")' />
+        <el-date-picker v-model="timeRange" type="datetimerange" value-format="YYYY-MM-DDTHH:mm:ss" start-placeholder="开始时间（服务器本地）" end-placeholder="结束时间（服务器本地）" range-separator="至" :aria-label='uiText("操作时间范围")' />
+        <el-button @click="clearFilters">{{ uiText("清除筛选") }}</el-button>
       </div>
 
       <el-alert v-if="error || request.error.value" :title="error || request.error.value" type="error" :closable="false" />
       <FixedTableViewport v-slot="{tableHeight}" fill :refresh-key="rows"><el-table :data="rows" :height="tableHeight" v-loading="request.loading.value" row-key="logId" border class="operation-log-table">
-        <el-table-column label="记录时间" width="180"><template #default="{row}">{{ timestamp(row.createdAt) }}</template></el-table-column>
-        <el-table-column label="真实操作者" min-width="180"><template #default="{row}"><strong>{{ display(row.operatorUserName) }}</strong><small v-if="row.operatorUserId!=null">账号 ID {{ row.operatorUserId }}<span v-if="loginName(row.operatorUserId)"> · {{ loginName(row.operatorUserId) }}</span></small></template></el-table-column>
-        <el-table-column prop="action" label="动作代码" min-width="230" />
-        <el-table-column label="业务对象" min-width="220"><template #default="{row}">{{ display(row.businessName) }}<small>{{ display(row.businessType) }} · ID {{ display(row.businessId) }}<span v-if="row.businessCode"> · {{ row.businessCode }}</span></small></template></el-table-column>
-        <el-table-column label="结果" width="100"><template #default="{row}"><el-tag :type="row.result==='success'?'success':'info'">{{ row.result==='success'?'成功':display(row.result) }}</el-tag></template></el-table-column>
-        <el-table-column prop="requestId" label="请求追踪 ID" min-width="220" />
-        <el-table-column label="已有详情" fixed="right" width="110"><template #default="{row}"><el-button link type="primary" @click="open(row)">查看详情</el-button></template></el-table-column>
-        <template #empty>暂无符合条件的实际操作记录。</template>
+        <el-table-column :label='uiText("记录时间")' width="180"><template #default="{row}">{{ timestamp(row.createdAt) }}</template></el-table-column>
+        <el-table-column :label='uiText("真实操作者")' min-width="180"><template #default="{row}"><strong>{{ display(row.operatorUserName) }}</strong><small v-if="row.operatorUserId!=null">{{ uiText("账号 ID ") }}{{ row.operatorUserId }}<span v-if="loginName(row.operatorUserId)"> · {{ loginName(row.operatorUserId) }}</span></small></template></el-table-column>
+        <el-table-column prop="action" :label='uiText("动作代码")' min-width="230" />
+        <el-table-column :label='uiText("业务对象")' min-width="220"><template #default="{row}">{{ display(row.businessName) }}<small>{{ display(row.businessType) }} · ID {{ display(row.businessId) }}<span v-if="row.businessCode"> · {{ row.businessCode }}</span></small></template></el-table-column>
+        <el-table-column :label='uiText("结果")' width="100"><template #default="{row}"><el-tag :type="row.result==='success'?'success':'info'">{{ row.result==='success'?uiText('成功'):display(row.result) }}</el-tag></template></el-table-column>
+        <el-table-column prop="requestId" :label='uiText("请求追踪 ID")' min-width="220" />
+        <el-table-column :label='uiText("已有详情")' fixed="right" width="110"><template #default="{row}"><el-button link type="primary" @click="open(row)">{{ uiText("查看详情") }}</el-button></template></el-table-column>
+        <template #empty>{{ uiText("暂无符合条件的实际操作记录。") }}</template>
       </el-table></FixedTableViewport>
       <el-pagination v-model:current-page="page" v-model:page-size="size" :page-sizes="[20,50,100]" :total="total" layout="total,sizes,prev,pager,next,jumper" @current-change="load()" />
     </section>
-    <el-drawer v-model="detailVisible" title="已有操作详情" size="min(1100px,95vw)"><section v-if="selected" class="log-detail">
-      <dl><dt>真实操作者（历史名称）</dt><dd>{{ display(selected.operatorUserName) }} · 账号 ID {{ display(selected.operatorUserId) }}</dd><dt>记录时间</dt><dd>{{ timestamp(selected.createdAt) }}</dd><dt>动作代码</dt><dd>{{ selected.action }}</dd><dt>业务对象</dt><dd>{{ display(selected.businessType) }} · {{ display(selected.businessId) }} · {{ display(selected.businessName) }}</dd><dt>请求追踪 ID</dt><dd>{{ display(selected.requestId) }}</dd></dl>
-      <el-alert title="下方为该记录已有的 detailJson；敏感凭据由服务器统一脱敏。没有详情不表示操作未发生，也不补造旧记录。" type="info" :closable="false" />
+    <el-drawer v-model="detailVisible" :title='uiText("已有操作详情")' size="min(1100px,95vw)"><section v-if="selected" class="log-detail">
+      <dl><dt>{{ uiText("真实操作者（历史名称）") }}</dt><dd>{{ display(selected.operatorUserName) }}{{ uiText(" · 账号 ID ") }}{{ display(selected.operatorUserId) }}</dd><dt>{{ uiText("记录时间") }}</dt><dd>{{ timestamp(selected.createdAt) }}</dd><dt>{{ uiText("动作代码") }}</dt><dd>{{ selected.action }}</dd><dt>{{ uiText("业务对象") }}</dt><dd>{{ display(selected.businessType) }} · {{ display(selected.businessId) }} · {{ display(selected.businessName) }}</dd><dt>{{ uiText("请求追踪 ID") }}</dt><dd>{{ display(selected.requestId) }}</dd></dl>
+      <el-alert :title='uiText("下方为该记录已有的 detailJson；敏感凭据由服务器统一脱敏。没有详情不表示操作未发生，也不补造旧记录。")' type="info" :closable="false" />
       <pre data-test="operation-log-detail">{{ detail }}</pre>
     </section></el-drawer>
   </PageContainer>

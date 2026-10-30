@@ -2,6 +2,7 @@ export type PilotRole = 'administrator' | 'domestic' | 'finance' | 'supplier' | 
 export type PilotEntity = 'item' | 'mold' | 'product' | 'file' | 'partner' | 'customer' | 'supplier_profile'
 export interface PilotScope { entityType: PilotEntity; entityId: number }
 export interface PilotUser {
+ preferredLanguage?: import('@/locales/language').Language
  userId: number; username: string; displayName: string; departmentName: string; status: 'active' | 'inactive'
  allPermissions: boolean; roleCode: PilotRole | null; allObjects: boolean | null; dingtalkUserId: string | null
  permissions: string[]; fieldGroups: string[]; scopes: PilotScope[]; version: number | null

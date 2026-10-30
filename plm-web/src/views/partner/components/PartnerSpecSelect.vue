@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import PhoneObjectSelect from '@/components/PhoneObjectSelect/index.vue'
 import type { PhoneObjectOption, PhoneObjectProvider } from '@/components/PhoneObjectSelect/types'
@@ -40,5 +42,5 @@ watch(() => props.modelValue.join(','), () => void resolve())
 watch(scopeKey, () => { generation++; known.value = new Map(); if (user.token) void resolve() }, { immediate: true })
 onBeforeUnmount(() => { generation++ })
 </script>
-<template><div class="partner-spec-select"><PhoneObjectSelect :model-value="selected" :provider="provider" :kinds="[{key:'partner_spec',type:'partner_spec',label:'商品规格',phoneFirst:true}]" :multiple="multiple" :disabled="disabled" :scope-key="scopeKey" :aria-label="ariaLabel" placeholder="请选择品牌、手机型号及商品规格" @update:model-value="confirm"/><p v-if="error" role="alert">{{error}}<el-button link @click="resolve">重试</el-button></p></div></template>
+<template><div class="partner-spec-select"><PhoneObjectSelect :model-value="selected" :provider="provider" :kinds="[{key:'partner_spec',type:'partner_spec',label:'商品规格',phoneFirst:true}]" :multiple="multiple" :disabled="disabled" :scope-key="scopeKey" :aria-label="ariaLabel" :placeholder='uiText("请选择品牌、手机型号及商品规格")' @update:model-value="confirm"/><p v-if="error" role="alert">{{error}}<el-button link @click="resolve">{{ uiText("重试") }}</el-button></p></div></template>
 <style scoped>.partner-spec-select{min-width:0;width:100%}.partner-spec-select>p{font-size:12px;color:var(--el-color-danger);line-height:18px;margin:4px 0}</style>

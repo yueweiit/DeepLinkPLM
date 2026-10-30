@@ -75,6 +75,8 @@ export interface DevelopmentRelease {
   responsibleUserId?: number;
 }
 export interface ProductResearchRow {
+  phoneModels?:{phoneModelId:number;modelName:string;brandName:string;status?:string;brandStatus?:string}[]
+  moldApplicationSummary?:import('./moldApplications').ResearchApplicationSummary
   productId: number;
   productName: string;
   productCode: string;
@@ -228,7 +230,7 @@ export interface DesignDraftInput {
 export interface StageReadiness {
   version: number;
   ready: boolean;
-  checks: { code: string; title: string; target: string; complete: boolean; message: string }[];
+  checks: { code: string; title: string; target: string; complete: boolean; message: string; blocking?: boolean }[];
 }
 export const checkResearchDesign = async (id:number,input:DesignDraftInput) =>
   unwrapResponse<StageReadiness>(await request.post(`/product-research/${id}/design-readiness`,input));

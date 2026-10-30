@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import {computed,onBeforeUnmount,ref,watch} from 'vue'
 import {newRequestId} from '@/api/modules/partner'
 import * as selectionFiles from '@/api/modules/partnerSelections'
@@ -87,93 +89,93 @@ function reset(){stop();generation++;job.value=undefined;sheetMappings.value=[];
 </script>
 
 <template>
-  <el-dialog :model-value="modelValue" class="selection-file-dialog" top="16px" :title="mode==='import'?(sourceContext?'导入供应商资料':'导入我方选品资料'):(sourceContext?'导出供应商资料':'导出选品模板')" width="min(1020px,96vw)" :close-on-click-modal="false" :show-close="!busy" :close-on-press-escape="!busy" append-to-body @update:model-value="emit('update:modelValue',$event)">
-    <ol v-if="mode==='import'" class="import-steps" aria-label="导入步骤">
+  <el-dialog :model-value="modelValue" class="selection-file-dialog" top="16px" :title="mode==='import'?(sourceContext?uiText('导入供应商资料'):uiText('导入我方选品资料')):(sourceContext?uiText('导出供应商资料'):uiText('导出选品模板'))" width="min(1020px,96vw)" :close-on-click-modal="false" :show-close="!busy" :close-on-press-escape="!busy" append-to-body @update:model-value="emit('update:modelValue',$event)">
+    <ol v-if="mode==='import'" class="import-steps" :aria-label='uiText("导入步骤")'>
       <li v-for="(label,index) in steps" :key="label" :class="{active:index===importStep,passed:index<importStep}" :aria-current="index===importStep?'step':undefined"><span>{{index+1}}</span>{{label}}</li>
     </ol>
     <div class="file-tasks">
       <slot name="source-files"/>
-      <div v-if="sourceContext&&mode==='import'" class="source-destination"><span>本次目标供应商</span><strong>{{targetSupplierName}}</strong></div>
+      <div v-if="sourceContext&&mode==='import'" class="source-destination"><span>{{ uiText("本次目标供应商") }}</span><strong>{{targetSupplierName}}</strong></div>
       <el-alert v-if="error" :title="error" type="error" :closable="false"/>
       <el-alert v-if="parseNotice" :title="parseNotice" type="info" :closable="false"/>
       <template v-if="mode==='import'&&!job">
-        <h3>{{sourceContext?'上传供应商原件或整理后的Excel':'导入已挑选的Excel或继续模板往返'}}</h3>
-        <p v-if="!sourceContext" class="task-help">这里只处理我方已选资料及原模板往返；供应商完整报价或目录请先到产品目录导入，再选款式和具体型号。<a href="#/partner-products?sourceManager=1">打开供应商目录导入</a></p>
-        <p class="task-help">XLSX可预览导入；XLS、PDF仅保留来源原件，不自动解析。下一步再选择整理后XLSX的工作表和供应商，不用先拆文件。</p>
-        <el-alert v-if="archivedOriginal" class="original-archive-notice" title="原件已保留（未解析）" :description="archivedOriginal.name+'；请再选择整理后的XLSX预览导入。'" type="success" :closable="false" show-icon/>
+        <h3>{{sourceContext?uiText('上传供应商原件或整理后的Excel'):uiText('导入已挑选的Excel或继续模板往返')}}</h3>
+        <p v-if="!sourceContext" class="task-help">{{ uiText("这里只处理我方已选资料及原模板往返；供应商完整报价或目录请先到产品目录导入，再选款式和具体型号。") }}<a href="#/partner-products?sourceManager=1">{{ uiText("打开供应商目录导入") }}</a></p>
+        <p class="task-help">{{ uiText("XLSX可预览导入；XLS、PDF仅保留来源原件，不自动解析。下一步再选择整理后XLSX的工作表和供应商，不用先拆文件。") }}</p>
+        <el-alert v-if="archivedOriginal" class="original-archive-notice" :title='uiText("原件已保留（未解析）")' :description="archivedOriginal.name+uiText('；请再选择整理后的XLSX预览导入。')" type="success" :closable="false" show-icon/>
         <el-upload class="original-upload" drag :show-file-list="false" accept=".xlsx,.xls,.pdf" :disabled="busy||!canWrite" :before-upload="uploadFile">
-          <strong>{{file?.name||'拖入XLSX、XLS或PDF原件，或点击选择'}}</strong><span>{{progress||'分片上传并校验原件；按报价资料权限保留。'}}</span>
+          <strong>{{file?.name||uiText('拖入XLSX、XLS或PDF原件，或点击选择')}}</strong><span>{{progress||uiText('分片上传并校验原件；按报价资料权限保留。')}}</span>
         </el-upload>
-        <el-button v-if="upload&&error" :disabled="busy" @click="newUploadSession">另开上传（保留旧内容）</el-button>
+        <el-button v-if="upload&&error" :disabled="busy" @click="newUploadSession">{{ uiText("另开上传（保留旧内容）") }}</el-button>
       </template>
       <template v-if="mode==='export'">
-        <p class="task-help">每家供应商一个工作表，保留图片及型号、颜色下拉。未实际收样的批次号留空，不冻结行列。</p>
-        <div class="task-toolbar"><el-select v-model="exportSupplier" filterable clearable placeholder="全部关联供应商，每家一页"><el-option v-for="supplier in suppliers" :key="supplier.code" :value="supplier.code" :label="supplier.name"/></el-select><el-button type="primary" :disabled="busy||running" @click="startExport">生成新版模板</el-button></div>
+        <p class="task-help">{{ uiText("每家供应商一个工作表，保留图片及型号、颜色下拉。未实际收样的批次号留空，不冻结行列。") }}</p>
+        <div class="task-toolbar"><el-select v-model="exportSupplier" filterable clearable :placeholder='uiText("全部关联供应商，每家一页")'><el-option v-for="supplier in suppliers" :key="supplier.code" :value="supplier.code" :label="supplier.name"/></el-select><el-button type="primary" :disabled="busy||running" @click="startExport">{{ uiText("生成新版模板") }}</el-button></div>
       </template>
-      <details v-if="history.length&&!running" class="task-history"><summary>继续上次{{mode==='import'?'导入':'导出'}}（{{history.length}}）</summary><el-button v-for="(item,index) in history" :key="item.id" text :disabled="busy" @click="restoreJob(item)">{{selectionFileHistoryLabel(item,index)}}</el-button></details>
+      <details v-if="history.length&&!running" class="task-history"><summary>{{ uiText("继续上次") }}{{mode==='import'?uiText('导入'):uiText('导出')}}（{{history.length}}）</summary><el-button v-for="(item,index) in history" :key="item.id" text :disabled="busy" @click="restoreJob(item)">{{uiText(selectionFileHistoryLabel(item,index))}}</el-button></details>
       <template v-if="job">
-        <div class="job-summary"><el-tag :type="completed?'success':job.status==='failed'?'danger':'info'">{{stateLabel}}</el-tag><strong v-if="job.stats&&(ready||completed||Number(job.stats.rowCount)>0||Number(imageCount)>0)">{{job.stats.rowCount||0}} 条款式<template v-if="imageCount!==undefined"> · {{imageCount}} 张图片</template></strong><el-button v-if="running||job.status==='failed'||parseUncertain" link :disabled="busy" @click="refresh">{{parseUncertain?'刷新核实进度':'刷新进度'}}</el-button><el-button v-if="job.status==='failed'" link type="primary" :disabled="busy||!canWrite" @click="retry">保留原件重试</el-button></div>
+        <div class="job-summary"><el-tag :type="completed?'success':job.status==='failed'?'danger':'info'">{{uiText(stateLabel)}}</el-tag><strong v-if="job.stats&&(ready||completed||Number(job.stats.rowCount)>0||Number(imageCount)>0)">{{job.stats.rowCount||0}}{{ uiText(" 条款式") }}<template v-if="imageCount!==undefined"> · {{imageCount}}{{ uiText(" 张图片") }}</template></strong><el-button v-if="running||job.status==='failed'||parseUncertain" link :disabled="busy" @click="refresh">{{parseUncertain?uiText('刷新核实进度'):uiText('刷新进度')}}</el-button><el-button v-if="job.status==='failed'" link type="primary" :disabled="busy||!canWrite" @click="retry">{{ uiText("保留原件重试") }}</el-button></div>
         <p v-if="job.error||job.message" class="task-error" role="alert">{{job.error||job.message}}</p>
         <template v-if="mode==='import'&&job.status==='awaiting_sheets'">
-          <h3>{{sourceContext?'选择本次导入的工作表':'选择工作表，分别指定供应商'}}</h3><p class="task-help">只处理勾选页，其余页面保留在原件中。{{sourceContext?'每个选中页都要核对实际归属；工作表名称仅供提示。其他供应商请另建来源资料。':'供应商从已有档案选择，不会按工作表名新建。'}}</p>
-          <div class="sheet-mappings"><article v-for="sheet in sheetMappings" :key="sheet.name"><div class="sheet-entry"><el-checkbox :model-value="sheet.selected" :disabled="busy||!canWrite" @change="selectSheet(sheet,Boolean($event))">{{sheet.name}}</el-checkbox><template v-if="sourceContext"><p v-if="sheet.selected&&sheetSupplierHint(sheet.name)&&sheetSupplierHint(sheet.name)?.code!==supplierCode" class="sheet-supplier-warning">页名提示：{{sheetSupplierHint(sheet.name)?.name}}，与本次目标不同。请核对原件的实际归属，不会自动关联。</p><p v-else-if="sheet.selected&&!sheetSupplierHint(sheet.name)" class="task-help">页名未对应已有供应商，请核对原件实际属于本次目标。</p><el-checkbox v-if="sheet.selected" v-model="sheet.supplierConfirmed" class="sheet-confirmation" :disabled="busy||!canWrite">已核对本页实际属于本次目标供应商</el-checkbox></template></div><span v-if="sourceContext" class="sheet-state" :class="{'needs-confirmation':sheet.selected&&!sheet.supplierConfirmed}">{{!sheet.selected?'未导入':sheet.supplierConfirmed?'将导入':'待确认归属'}}</span><el-select v-else v-model="sheet.supplierCode" filterable clearable :disabled="!sheet.selected||busy||!canWrite" :aria-label="sheet.name+'的供应商'" placeholder="选择供应商"><el-option v-for="supplier in suppliers" :key="supplier.code" :value="supplier.code" :label="supplier.name"/></el-select></article></div>
-          <p class="task-help">已选 {{selectedSheets.length}} 页<template v-if="sourceContext&&selectedSheets.some(sheet=>!sheet.supplierConfirmed)">，请逐页确认实际归属后再预览。</template><template v-else-if="selectedSheets.some(sheet=>!sheet.supplierCode)">，请补齐对应供应商。</template></p>
+          <h3>{{sourceContext?uiText('选择本次导入的工作表'):uiText('选择工作表，分别指定供应商')}}</h3><p class="task-help">{{ uiText("只处理勾选页，其余页面保留在原件中。") }}{{sourceContext?uiText('每个选中页都要核对实际归属；工作表名称仅供提示。其他供应商请另建来源资料。'):uiText('供应商从已有档案选择，不会按工作表名新建。')}}</p>
+          <div class="sheet-mappings"><article v-for="sheet in sheetMappings" :key="sheet.name"><div class="sheet-entry"><el-checkbox :model-value="sheet.selected" :disabled="busy||!canWrite" @change="selectSheet(sheet,Boolean($event))">{{sheet.name}}</el-checkbox><template v-if="sourceContext"><p v-if="sheet.selected&&sheetSupplierHint(sheet.name)&&sheetSupplierHint(sheet.name)?.code!==supplierCode" class="sheet-supplier-warning">{{ uiText("页名提示：") }}{{sheetSupplierHint(sheet.name)?.name}}{{ uiText("，与本次目标不同。请核对原件的实际归属，不会自动关联。") }}</p><p v-else-if="sheet.selected&&!sheetSupplierHint(sheet.name)" class="task-help">{{ uiText("页名未对应已有供应商，请核对原件实际属于本次目标。") }}</p><el-checkbox v-if="sheet.selected" v-model="sheet.supplierConfirmed" class="sheet-confirmation" :disabled="busy||!canWrite">{{ uiText("已核对本页实际属于本次目标供应商") }}</el-checkbox></template></div><span v-if="sourceContext" class="sheet-state" :class="{'needs-confirmation':sheet.selected&&!sheet.supplierConfirmed}">{{!sheet.selected?uiText('未导入'):sheet.supplierConfirmed?uiText('将导入'):uiText('待确认归属')}}</span><el-select v-else v-model="sheet.supplierCode" filterable clearable :disabled="!sheet.selected||busy||!canWrite" :aria-label="sheet.name+uiText('的供应商')" :placeholder='uiText("选择供应商")'><el-option v-for="supplier in suppliers" :key="supplier.code" :value="supplier.code" :label="supplier.name"/></el-select></article></div>
+          <p class="task-help">{{ uiText("已选 ") }}{{selectedSheets.length}}{{ uiText(" 页") }}<template v-if="sourceContext&&selectedSheets.some(sheet=>!sheet.supplierConfirmed)">{{ uiText("，请逐页确认实际归属后再预览。") }}</template><template v-else-if="selectedSheets.some(sheet=>!sheet.supplierCode)">{{ uiText("，请补齐对应供应商。") }}</template></p>
         </template>
-        <div v-if="running" class="processing-state" role="status"><strong>正在后台{{mode==='import'?'读取款式和图片':'生成模板'}}…</strong><p>可以关闭此窗口，稍后从“继续上次{{mode==='import'?'导入':'导出'}}”恢复。</p></div>
+        <div v-if="running" class="processing-state" role="status"><strong>{{ uiText("正在后台") }}{{mode==='import'?uiText('读取款式和图片'):uiText('生成模板')}}…</strong><p>{{ uiText("可以关闭此窗口，稍后从“继续上次") }}{{mode==='import'?uiText('导入'):uiText('导出')}}{{ uiText("”恢复。") }}</p></div>
         <template v-if="mode==='import'&&ready">
-          <div class="preview-heading"><h3>{{sourceContext?'核对供应商候选资料':'核对本次选品内容'}}</h3><span v-if="issueCount||unassignedCount" class="task-error">{{issueCount}} 处资料问题<template v-if="unassignedCount"> · {{unassignedCount}} 张图片待归属</template></span><span v-else class="success-note">{{sourceContext?'可以保存到供应商目录':'可以保存为选品草稿'}}</span></div>
-          <p class="task-help">已有资料只显示本次差异，缺行或空白不代表删除。{{sourceContext?'保存仅表示供应商提供这些款式，尚未加入我方选品，不创建产品或样品批次。':'保存草稿后仍可继续选品，不产生收样、质检或上架事实。'}}</p>
-          <section v-if="sourceContext&&previewMappings.length" class="preview-sheet-mappings" aria-label="本次工作表归属"><h4>{{job.selectedSheets?.length?'本次工作表归属':'当前预览页归属'}}</h4><ul><li v-for="mapping in previewMappings" :key="mapping.name"><strong>{{mapping.name}}</strong><span>→ {{supplierName(mapping.supplierCode)}}</span><small>{{mapping.supplierConfirmed?'工程已核对':'旧任务未记录逐页确认，请核对现有预览'}}</small></li></ul></section>
+          <div class="preview-heading"><h3>{{sourceContext?uiText('核对供应商候选资料'):uiText('核对本次选品内容')}}</h3><span v-if="issueCount||unassignedCount" class="task-error">{{issueCount}}{{ uiText(" 处资料问题") }}<template v-if="unassignedCount"> · {{unassignedCount}}{{ uiText(" 张图片待归属") }}</template></span><span v-else class="success-note">{{sourceContext?uiText('可以保存到供应商目录'):uiText('可以保存为选品草稿')}}</span></div>
+          <p class="task-help">{{ uiText("已有资料只显示本次差异，缺行或空白不代表删除。") }}{{sourceContext?uiText('保存仅表示供应商提供这些款式，尚未加入我方选品，不创建产品或样品批次。'):uiText('保存草稿后仍可继续选品，不产生收样、质检或上架事实。')}}</p>
+          <section v-if="sourceContext&&previewMappings.length" class="preview-sheet-mappings" :aria-label='uiText("本次工作表归属")'><h4>{{job.selectedSheets?.length?uiText('本次工作表归属'):uiText('当前预览页归属')}}</h4><ul><li v-for="mapping in previewMappings" :key="mapping.name"><strong>{{mapping.name}}</strong><span>→ {{supplierName(mapping.supplierCode)}}</span><small>{{mapping.supplierConfirmed?uiText('工程已核对'):uiText('旧任务未记录逐页确认，请核对现有预览')}}</small></li></ul></section>
           <div class="task-preview">
             <article v-for="row in rows" :key="row.rowId" class="staged-row">
-              <header><strong>{{row.values.name||'待补款名'}}</strong><el-tag size="small" :type="row.action==='conflict'?'warning':'info'">{{selectionImportActionLabel(row.action)}}</el-tag><el-button v-if="canWrite" link type="primary" :disabled="busy" @click="edit=JSON.parse(JSON.stringify(row))">{{row.messages.length?'修正问题':'修改本行'}}</el-button><small>{{row.sourceSheet}} · 第{{row.rowNumber}}行</small></header>
+              <header><strong>{{row.values.name||uiText('待补款名')}}</strong><el-tag size="small" :type="row.action==='conflict'?'warning':'info'">{{uiText(selectionImportActionLabel(row.action))}}</el-tag><el-button v-if="canWrite" link type="primary" :disabled="busy" @click="edit=JSON.parse(JSON.stringify(row))">{{row.messages.length?uiText('修正问题'):uiText('修改本行')}}</el-button><small>{{row.sourceSheet}}{{ uiText(" · 第") }}{{row.rowNumber}}{{ uiText("行") }}</small></header>
               <div class="staged-content">
                 <div v-if="row.values._images?.length" class="import-images"><SelectionImportPhoto v-for="image in row.values._images" :key="image.id" :id="id" :context="context" :job-id="job.id" :image-id="image.id" :name="image.name"/></div>
                 <dl class="row-business">
-                  <div><dt>手机型号</dt><dd class="preview-model">{{row.values.modelText||'未填写'}}</dd></div>
-                  <div v-if="row.values.supplierCode"><dt>供应商</dt><dd>{{suppliers.find(supplier=>supplier.code===row.values.supplierCode)?.name||'名称待核对'}}</dd></div>
-                  <div v-if="row.values.color"><dt>供方颜色</dt><dd>{{row.values.color}}</dd></div>
-                  <div v-if="row.values.material" data-preview-field="material"><dt>材质</dt><dd>{{row.values.material}}</dd></div>
-                  <div v-if="row.values.specification" data-preview-field="specification"><dt>配置</dt><dd>{{row.values.specification}}</dd></div>
-                  <div v-if="row.values.moq"><dt>起订条件原文</dt><dd>{{row.values.moq}}</dd></div>
-                  <div v-if="!row.values.priceOptions?.length&&row.values.unitPrice!==undefined&&row.values.unitPrice!==''"><dt>单价</dt><dd>{{supplierPriceSummary(row.values)}}</dd></div>
-                  <div v-if="row.values.sampleQty!==undefined"><dt>拟拿样</dt><dd>{{row.values.sampleQty}}（本行合计）</dd></div>
-                  <div v-for="fact in selectionImportPreviewFacts(row.values)" :key="fact.key" class="preview-extra-fact" :data-preview-field="fact.key"><dt>{{fact.label}}</dt><dd><details v-if="fact.expand" class="preview-source-text"><summary>展开原文</summary><p>{{fact.text}}</p></details><span v-else>{{fact.text}}</span></dd></div>
+                  <div><dt>{{ uiText("手机型号") }}</dt><dd class="preview-model">{{row.values.modelText||uiText('未填写')}}</dd></div>
+                  <div v-if="row.values.supplierCode"><dt>{{ uiText("供应商") }}</dt><dd>{{suppliers.find(supplier=>supplier.code===row.values.supplierCode)?.name||uiText('名称待核对')}}</dd></div>
+                  <div v-if="row.values.color"><dt>{{ uiText("供方颜色") }}</dt><dd>{{row.values.color}}</dd></div>
+                  <div v-if="row.values.material" data-preview-field="material"><dt>{{ uiText("材质") }}</dt><dd>{{row.values.material}}</dd></div>
+                  <div v-if="row.values.specification" data-preview-field="specification"><dt>{{ uiText("配置") }}</dt><dd>{{row.values.specification}}</dd></div>
+                  <div v-if="row.values.moq"><dt>{{ uiText("起订条件原文") }}</dt><dd>{{row.values.moq}}</dd></div>
+                  <div v-if="!row.values.priceOptions?.length&&row.values.unitPrice!==undefined&&row.values.unitPrice!==''"><dt>{{ uiText("单价") }}</dt><dd>{{supplierPriceSummary(row.values)}}</dd></div>
+                  <div v-if="row.values.sampleQty!==undefined"><dt>{{ uiText("拟拿样") }}</dt><dd>{{row.values.sampleQty}}{{ uiText("（本行合计）") }}</dd></div>
+                  <div v-for="fact in selectionImportPreviewFacts(row.values)" :key="fact.key" class="preview-extra-fact" :data-preview-field="fact.key"><dt>{{uiText(String((fact.label) ?? ''))}}</dt><dd><details v-if="fact.expand" class="preview-source-text"><summary>{{ uiText("展开原文") }}</summary><p>{{fact.text}}</p></details><span v-else>{{fact.text}}</span></dd></div>
                 </dl>
               </div>
-              <section v-if="row.values.priceOptions?.length" class="preview-price-options" aria-label="本款配置与报价"><h4>配置与报价</h4><article v-for="(option,index) in row.values.priceOptions" :key="index"><header><strong>{{option.label||`报价选项 ${index+1}`}}</strong><span>{{supplierPriceSummary(option)}}</span></header><dl><div v-for="fact in selectionImportPriceFacts(option)" :key="fact.key"><dt>{{fact.label}}</dt><dd><details v-if="fact.expand" class="preview-source-text"><summary>展开原文</summary><p>{{fact.text}}</p></details><span v-else>{{fact.text}}</span></dd></div></dl></article></section>
+              <section v-if="row.values.priceOptions?.length" class="preview-price-options" :aria-label='uiText("本款配置与报价")'><h4>{{ uiText("配置与报价") }}</h4><article v-for="(option,index) in row.values.priceOptions" :key="index"><header><strong>{{option.label||uiText('报价选项 {value0}',{value0:(index+1)})}}</strong><span>{{supplierPriceSummary(option)}}</span></header><dl><div v-for="fact in selectionImportPriceFacts(option)" :key="fact.key"><dt>{{uiText(String((fact.label) ?? ''))}}</dt><dd><details v-if="fact.expand" class="preview-source-text"><summary>{{ uiText("展开原文") }}</summary><p>{{fact.text}}</p></details><span v-else>{{fact.text}}</span></dd></div></dl></article></section>
               <p v-for="message in row.messages" :key="message" class="task-error">{{message}}</p>
-              <details v-if="selectionImportDifferences(row,suppliers).length" class="business-differences"><summary>查看 {{selectionImportDifferences(row,suppliers).length}} 项业务差异</summary><div v-for="change in selectionImportDifferences(row,suppliers)" :key="change.key"><strong>{{change.label}}</strong><span><small>原来</small>{{change.previous}}</span><span><small>本次</small>{{change.next}}</span></div></details>
+              <details v-if="selectionImportDifferences(row,suppliers).length" class="business-differences"><summary>{{ uiText("查看 ") }}{{selectionImportDifferences(row,suppliers).length}}{{ uiText(" 项业务差异") }}</summary><div v-for="change in selectionImportDifferences(row,suppliers)" :key="change.key"><strong>{{uiText(String((change.label) ?? ''))}}</strong><span><small>{{ uiText("原来") }}</small>{{change.previous}}</span><span><small>{{ uiText("本次") }}</small>{{change.next}}</span></div></details>
             </article>
           </div>
           <el-pagination v-model:current-page="page" :page-size="20" :total="total" :pager-count="5" layout="total,prev,pager,next" @current-change="loadRows"/>
           <section v-if="imageCorrectionVisible" class="image-assignment">
-            <div class="preview-heading"><h3>{{unassignedCount?'请确认未归属的图片':'复查图片归属'}}</h3><el-button v-if="!unassignedCount" link @click="imagesOpen=false">收起</el-button></div>
-            <p class="task-help">只修正有问题的图片，已对应的图片不用重复确认。目标从本页款式选择；其他行先翻上方预览页。</p>
-            <el-checkbox v-model="unassignedOnly" @change="imagePage=1;loadImages()">只看未归属图片</el-checkbox>
-            <article v-for="image in images" :key="image.id"><SelectionImportPhoto :id="id" :context="context" :job-id="job.id" :image-id="image.id" :name="image.name"/><div class="image-target"><span>{{image.sourceSheet}} · 原第{{image.sourceRow}}行</span><el-select v-model="imageTargets[image.id]" filterable placeholder="选择这张图对应的款式"><el-option v-for="row in rows" :key="row.rowId" :value="row.rowId" :label="(row.values.name||'待补款名')+' · '+row.sourceSheet+'第'+row.rowNumber+'行'"/></el-select><el-button :disabled="!imageTargets[image.id]||busy||!canWrite" @click="assignImage(image)">保存图片归属</el-button></div></article>
-            <p v-if="!images.length" class="task-help">当前没有需要处理的图片。</p><el-pagination v-model:current-page="imagePage" :total="imageTotal" :page-size="10" :pager-count="5" layout="total,prev,pager,next" @current-change="loadImages"/>
+            <div class="preview-heading"><h3>{{unassignedCount?uiText('请确认未归属的图片'):uiText('复查图片归属')}}</h3><el-button v-if="!unassignedCount" link @click="imagesOpen=false">{{ uiText("收起") }}</el-button></div>
+            <p class="task-help">{{ uiText("只修正有问题的图片，已对应的图片不用重复确认。目标从本页款式选择；其他行先翻上方预览页。") }}</p>
+            <el-checkbox v-model="unassignedOnly" @change="imagePage=1;loadImages()">{{ uiText("只看未归属图片") }}</el-checkbox>
+            <article v-for="image in images" :key="image.id"><SelectionImportPhoto :id="id" :context="context" :job-id="job.id" :image-id="image.id" :name="image.name"/><div class="image-target"><span>{{image.sourceSheet}}{{ uiText(" · 原第") }}{{image.sourceRow}}{{ uiText("行") }}</span><el-select v-model="imageTargets[image.id]" filterable :placeholder='uiText("选择这张图对应的款式")'><el-option v-for="row in rows" :key="row.rowId" :value="row.rowId" :label="(row.values.name||uiText('待补款名'))+' · '+row.sourceSheet+uiText('第')+row.rowNumber+uiText('行')"/></el-select><el-button :disabled="!imageTargets[image.id]||busy||!canWrite" @click="assignImage(image)">{{ uiText("保存图片归属") }}</el-button></div></article>
+            <p v-if="!images.length" class="task-help">{{ uiText("当前没有需要处理的图片。") }}</p><el-pagination v-model:current-page="imagePage" :total="imageTotal" :page-size="10" :pager-count="5" layout="total,prev,pager,next" @current-change="loadImages"/>
           </section>
-          <el-button v-else-if="job.stats?.imageCount" class="recheck-images" link :disabled="busy" @click="unassignedOnly=false;imagePage=1;loadImages()">需要时复查图片对应款式</el-button>
+          <el-button v-else-if="job.stats?.imageCount" class="recheck-images" link :disabled="busy" @click="unassignedOnly=false;imagePage=1;loadImages()">{{ uiText("需要时复查图片对应款式") }}</el-button>
         </template>
-        <div v-if="mode==='import'&&completed" class="completed-state" role="status"><h3>已保存到{{destination}}</h3><p>{{sourceContext?'原件和图片已保留。请回供应商目录选择需要的款式和具体型号，再加入我方选品。':'本次原件和图片已保留，可回到工作台继续选款。未自动创建收样、质检通过或上架记录。'}}</p></div>
-        <div v-if="mode==='export'&&ready" class="completed-state"><h3>模板已准备好</h3><p>点击下方“下载XLSX”，编辑后可作为原件重新导入核对差异。</p></div>
-        <details class="task-diagnostics"><summary>处理信息（需要协助时使用）</summary><label>任务编号<input :value="job.id" readonly aria-label="任务编号（供排查）" @focus="($event.target as HTMLInputElement).select()"/></label></details>
+        <div v-if="mode==='import'&&completed" class="completed-state" role="status"><h3>{{ uiText("已保存到") }}{{destination}}</h3><p>{{sourceContext?uiText('原件和图片已保留。请回供应商目录选择需要的款式和具体型号，再加入我方选品。'):uiText('本次原件和图片已保留，可回到工作台继续选款。未自动创建收样、质检通过或上架记录。')}}</p></div>
+        <div v-if="mode==='export'&&ready" class="completed-state"><h3>{{ uiText("模板已准备好") }}</h3><p>{{ uiText("点击下方“下载XLSX”，编辑后可作为原件重新导入核对差异。") }}</p></div>
+        <details class="task-diagnostics"><summary>{{ uiText("处理信息（需要协助时使用）") }}</summary><label>{{ uiText("任务编号") }}<input :value="job.id" readonly :aria-label='uiText("任务编号（供排查）")' @focus="($event.target as HTMLInputElement).select()"/></label></details>
       </template>
     </div>
     <template #footer>
       <div class="task-footer">
-        <el-button :disabled="busy" @click="emit('update:modelValue',false)">{{completed?(sourceContext?'完成，返回供应商目录':'完成，返回选品'):'稍后继续'}}</el-button>
-        <el-button v-if="job&&!running&&!busy" @click="reset">{{mode==='export'?'重新选择导出范围':completed?'导入另一份原件':'换一份原件'}}</el-button>
-        <el-button v-if="mode==='import'&&job?.status==='awaiting_sheets'" type="primary" :disabled="!canParse" @click="parse">下一步：预览所选页</el-button>
-        <el-button v-if="mode==='import'&&ready&&canWrite" type="primary" :loading="busy" :disabled="!canCommit" @click="commit">保存{{destination}}</el-button>
-        <el-button v-if="mode==='export'&&ready" type="primary" :loading="busy" @click="download">下载XLSX</el-button>
-        <span v-if="mode==='import'&&ready&&(issueCount||unassignedCount)" class="task-error">请先修正上方问题，再保存。</span>
+        <el-button :disabled="busy" @click="emit('update:modelValue',false)">{{completed?(sourceContext?uiText('完成，返回供应商目录'):uiText('完成，返回选品')):uiText('稍后继续')}}</el-button>
+        <el-button v-if="job&&!running&&!busy" @click="reset">{{mode==='export'?uiText('重新选择导出范围'):completed?uiText('导入另一份原件'):uiText('换一份原件')}}</el-button>
+        <el-button v-if="mode==='import'&&job?.status==='awaiting_sheets'" type="primary" :disabled="!canParse" @click="parse">{{ uiText("下一步：预览所选页") }}</el-button>
+        <el-button v-if="mode==='import'&&ready&&canWrite" type="primary" :loading="busy" :disabled="!canCommit" @click="commit">{{ uiText("保存") }}{{destination}}</el-button>
+        <el-button v-if="mode==='export'&&ready" type="primary" :loading="busy" @click="download">{{ uiText("下载XLSX") }}</el-button>
+        <span v-if="mode==='import'&&ready&&(issueCount||unassignedCount)" class="task-error">{{ uiText("请先修正上方问题，再保存。") }}</span>
       </div>
     </template>
-    <el-dialog :model-value="!!edit" title="修改本行预览（保存草稿前）" width="min(700px,94vw)" append-to-body @update:model-value="!$event&&(edit=undefined)">
-      <el-form v-if="edit" label-position="top"><el-form-item v-for="field in correctionFields" :key="field.key" :label="field.label"><el-input v-model="edit.values[field.key]" type="textarea" autosize/></el-form-item></el-form>
-      <template #footer><el-button @click="edit=undefined">取消</el-button><el-button type="primary" :loading="busy" :disabled="!canWrite" @click="saveRow">保存本行修正</el-button></template>
+    <el-dialog :model-value="!!edit" :title='uiText("修改本行预览（保存草稿前）")' width="min(700px,94vw)" append-to-body @update:model-value="!$event&&(edit=undefined)">
+      <el-form v-if="edit" label-position="top"><el-form-item v-for="field in correctionFields" :key="field.key" :label="uiText(field.label)"><el-input v-model="edit.values[field.key]" type="textarea" autosize/></el-form-item></el-form>
+      <template #footer><el-button @click="edit=undefined">{{ uiText("取消") }}</el-button><el-button type="primary" :loading="busy" :disabled="!canWrite" @click="saveRow">{{ uiText("保存本行修正") }}</el-button></template>
     </el-dialog>
   </el-dialog>
 </template>

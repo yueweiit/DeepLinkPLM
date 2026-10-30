@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed } from 'vue'
 import type { ProductTimelineNode, ProjectFlowNode } from '@/types/foundation'
 import { formatDate } from '@/utils/format'
@@ -137,16 +139,16 @@ const columns = computed(() => {
         v-for="col in columns"
         :key="col.prop"
         :prop="col.prop"
-        :label="col.label"
+        :label="uiText(col.label)"
         :width="col.width"
         :min-width="col.minWidth"
       >
         <template v-if="col.prop === 'status'" #default="{ row }">
           <el-tag :type="getFlowStatusType(row.status)" effect="light">
-            {{ getFlowStatusLabel(row.status) }}
+            {{ uiText(String((getFlowStatusLabel(row.status)) ?? '')) }}
           </el-tag>
           <el-tag v-if="row.gateLabel" type="danger" effect="light" size="small" style="margin-left: 4px">
-            {{ row.gateLabel }}
+            {{ uiText(String((row.gateLabel) ?? '')) }}
           </el-tag>
         </template>
 
@@ -157,7 +159,7 @@ const columns = computed(() => {
         <template v-else-if="col.prop === 'nextAction'" #default="{ row }">
           <span class="cell-next-action">{{ row.nextAction }}</span>
           <el-tooltip v-if="row.riskNote" :content="row.riskNote" placement="top">
-            <el-tag type="danger" size="small" effect="plain" style="margin-left: 6px">风险</el-tag>
+            <el-tag type="danger" size="small" effect="plain" style="margin-left: 6px">{{ uiText("风险") }}</el-tag>
           </el-tooltip>
         </template>
       </el-table-column>

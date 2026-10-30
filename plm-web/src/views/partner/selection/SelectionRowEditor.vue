@@ -1,16 +1,21 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import {computed,ref,watch} from 'vue'
 import PhoneModelMultiSelect from '@/components/PhoneModelMultiSelect/index.vue'
 import PartnerPhoto from '../PartnerPhoto.vue'
 import SupplierRangePanel from '@/views/supplier/SupplierRangePanel.vue'
+import SupplierColorPanel from '@/views/supplier/SupplierColorPanel.vue'
+import SupplierColorSelect from '@/views/supplier/SupplierColorSelect.vue'
 import type {PartnerFile} from '@/types/partner'
 import type {SelectionRow,SelectionRangeSnapshot} from '@/types/partnerSelections'
 import {changeSelectionSupplier,developmentLabels,pairCoverage,selectionRowFiles} from '@/utils/partnerSelections'
 import {resolveSupplierRanges,supplierColors,supplierRanges,type SupplierColor,type SupplierRange} from '@/api/modules/supplierRanges'
 import {partnerError} from '@/utils/partnerError'
-const props=defineProps<{row:SelectionRow;files:PartnerFile[];libraryFiles?:PartnerFile[];suppliers:{code:string;name:string;shortCode?:string}[];canWrite:boolean;canReadCost:boolean;context?:'selection'|'catalog'}>()
+const props=defineProps<{row:SelectionRow;files:PartnerFile[];libraryFiles?:PartnerFile[];suppliers:{code:string;name:string;shortCode?:string}[];canWrite:boolean;canReadCost:boolean;fixedSupplier?:boolean;context?:'selection'|'catalog'}>()
 const modelRanges=ref<SupplierRange[]>([]),colorRanges=ref<SupplierRange[]>([]),colors=ref<SupplierColor[]>([]),scopeOpen=ref(false),error=ref(''),scopeResult=ref(''),pairPhones=ref<number[]>([]),pairColor=ref<number>(),pairState=ref<'available'|'unavailable'|'unverified'>('unverified'),pairEvidence=ref('')
 const libraryOpen=ref(false),libraryKeyword=ref(''),libraryPage=ref(1),librarySize=6
+const colorOpen=ref(false)
 const fileMetadata=computed(()=>[...new Map([...(props.libraryFiles||[]),...props.files,...(props.row.fileDetails||[])].map(file=>[file.id,file])).values()])
 const adoptedFiles=computed(()=>selectionRowFiles(props.row,fileMetadata.value))
 const libraryMatches=computed(()=>{const keyword=libraryKeyword.value.trim().toLocaleLowerCase();return fileMetadata.value.filter(file=>!props.row.refs.some(ref=>ref.id===file.id)&&(!keyword||(file.name+' '+file.version).toLocaleLowerCase().includes(keyword)))})
@@ -43,90 +48,91 @@ const colorName=(id:number)=>props.row.pairings.find(pair=>pair.colorId===id&&pa
 </script>
 <template>
  <el-form class="selection-row-editor" label-position="top" :disabled="!canWrite" size="small">
-  <el-alert v-if="!canWrite" title="本行已确认或当前只读，原依据保留；新报价请在供应商目录录入，新一轮选样从目录选择。" type="info" :closable="false"/>
+  <el-alert v-if="!canWrite" :title='uiText("本行已确认或当前只读，原依据保留；新报价请在供应商目录录入，新一轮选样从目录选择。")' type="info" :closable="false"/>
   <el-alert v-if="error" :title="error" type="error" :closable="false"/>
   <section class="evidence adopted-evidence">
-   <h3>本行图片与附件 <small>（{{adoptedFiles.length}} 份）</small></h3>
-   <p v-if="!adoptedFiles.length">本行暂无关联资料；可从下方资料库选择，或在工作台上传后采用。</p>
+   <h3>{{ uiText("本行图片与附件 ") }}<small>（{{adoptedFiles.length}}{{ uiText(" 份）") }}</small></h3>
+   <p v-if="!adoptedFiles.length">{{ uiText("本行暂无关联资料；可从下方资料库选择，或在工作台上传后采用。") }}</p>
    <div v-else class="evidence-grid">
     <article v-for="item in adoptedFiles" :key="item.ref.id" class="evidence-file">
-     <PartnerPhoto v-if="item.file?.type?.startsWith('image/')" :id="item.ref.id" :allow-retry="true"/>
-     <div class="evidence-info"><span>{{item.file?.name||item.ref.name||'已关联资料 #'+item.ref.id}} · {{item.file?.version||item.ref.version||'版本待加载'}}</span><small v-if="!item.file">资料信息待加载，关联已保留</small><el-checkbox v-if="canWrite" :model-value="true" @change="adopt(item.ref.id,Boolean($event))">本行采用</el-checkbox></div>
+     <PartnerPhoto v-if="item.file?.type?.startsWith('image/')" :id="item.ref.id" :allow-retry="true" previewable :preview-files="adoptedFiles.filter(item=>item.file?.type?.startsWith('image/')).map(item=>({id:item.ref.id,name:item.file?.name||item.ref.name}))"/>
+     <div class="evidence-info"><span>{{item.file?.name||item.ref.name||uiText('已关联资料 #')+item.ref.id}} · {{item.file?.version||item.ref.version||uiText('版本待加载')}}</span><small v-if="!item.file">{{ uiText("资料信息待加载，关联已保留") }}</small><el-checkbox v-if="canWrite" :model-value="true" @change="adopt(item.ref.id,Boolean($event))">{{ uiText("本行采用") }}</el-checkbox></div>
     </article>
    </div>
    <details v-if="canWrite" class="other-materials" @toggle="libraryOpen=($event.target as HTMLDetailsElement).open">
-    <summary>从资料库选择其他资料</summary>
+    <summary>{{ uiText("从资料库选择其他资料") }}</summary>
     <div v-if="libraryOpen" class="material-library">
-     <p>仅当前选品最近可访问的 {{fileMetadata.length}} 份资料，并非全部资料库；选择不会改变其他行的关联。</p>
-     <el-input v-model="libraryKeyword" clearable aria-label="搜索其他资料" placeholder="搜索资料名称或版本"/>
-     <div class="evidence-grid library-grid"><article v-for="file in visibleLibrary" :key="file.id" class="evidence-file"><PartnerPhoto v-if="file.type?.startsWith('image/')" :id="file.id" :allow-retry="true"/><div class="evidence-info"><span>{{file.name}} · {{file.version}}</span><el-checkbox :model-value="false" @change="adopt(file.id,Boolean($event))">采用到本行</el-checkbox></div></article></div>
-     <p v-if="!libraryMatches.length">没有其他符合条件的资料。</p>
+     <p>{{ uiText("仅当前选品最近可访问的 ") }}{{fileMetadata.length}}{{ uiText(" 份资料，并非全部资料库；选择不会改变其他行的关联。") }}</p>
+     <el-input v-model="libraryKeyword" clearable :aria-label='uiText("搜索其他资料")' :placeholder='uiText("搜索资料名称或版本")'/>
+     <div class="evidence-grid library-grid"><article v-for="file in visibleLibrary" :key="file.id" class="evidence-file"><PartnerPhoto v-if="file.type?.startsWith('image/')" :id="file.id" :allow-retry="true" previewable/><div class="evidence-info"><span>{{file.name}} · {{file.version}}</span><el-checkbox :model-value="false" @change="adopt(file.id,Boolean($event))">{{ uiText("采用到本行") }}</el-checkbox></div></article></div>
+     <p v-if="!libraryMatches.length">{{ uiText("没有其他符合条件的资料。") }}</p>
      <el-pagination v-if="libraryMatches.length>librarySize" v-model:current-page="libraryPage" :page-size="librarySize" :total="libraryMatches.length" :pager-count="5" layout="total,prev,pager,next"/>
     </div>
    </details>
   </section>
   <section class="common-fields">
-   <h3>常用资料</h3>
+   <h3>{{ uiText("常用资料") }}</h3>
    <div class="field-grid">
-    <el-form-item label="款式名称 *"><el-input v-model="row.name" type="textarea" autosize/></el-form-item>
-    <el-form-item label="供应商 *"><el-select :model-value="row.supplierCode" filterable clearable @update:model-value="changeSelectionSupplier(row,String($event||''))"><el-option v-for="supplier in suppliers" :key="supplier.code" :value="supplier.code" :label="supplier.name"><span>{{supplier.name}}</span><small v-if="supplier.shortCode" class="supplier-option-code">{{supplier.shortCode}}</small></el-option></el-select></el-form-item>
-    <el-form-item label="供方款号"><el-input v-model="row.supplierItemCode" type="textarea" autosize/></el-form-item>
-    <el-form-item label="供应商颜色原文"><el-input v-model="row.color" type="textarea" autosize/><el-button v-if="canWrite&&row.supplierCode" link type="primary" @click="scopeOpen=true">维护供应商原色</el-button></el-form-item>
-    <el-form-item class="full-width" label="型号原文"><el-input v-model="row.modelText" type="textarea" autosize/><el-checkbox v-if="context==='catalog'" class="phone-scope-declaration" :model-value="row.phoneScopeDeclaration==='not_provided'" :disabled="!canWrite||hasPhoneScopeEvidence&&row.phoneScopeDeclaration!=='not_provided'" @change="setPhoneScopeDeclaration(Boolean($event))">已核对原件，供应商确实未注明型号</el-checkbox></el-form-item>
-    <el-form-item class="full-width" label="本次所选型号"><PhoneModelMultiSelect v-model="row.phoneModelIds" :members="row.sourcePhones||row.phones" :allowed-ids="row.sourcePhoneModelIds" :disabled="!canWrite"/><small v-if="row.sourcePhoneModelIds">{{row.catalogSourceSnapshot?.phoneScopeMode==='unspecified'?'供应商未注明型号；本行可调整此前选择，新增请用增选规格。':'仅从本款供应商来源范围内选择；不修改供应商原始资料。'}}</small></el-form-item>
+    <el-form-item :label='uiText("款式名称 *")'><el-input v-model="row.name" type="textarea" autosize/></el-form-item>
+    <el-form-item :label='uiText("供应商 *")'><el-select :model-value="row.supplierCode" :disabled="fixedSupplier" filterable clearable @update:model-value="changeSelectionSupplier(row,String($event||''))"><el-option v-for="supplier in suppliers" :key="supplier.code" :value="supplier.code" :label="supplier.name"><span>{{supplier.name}}</span><small v-if="supplier.shortCode" class="supplier-option-code">{{supplier.shortCode}}</small></el-option></el-select></el-form-item>
+    <el-form-item :label='uiText("供方款号")'><el-input v-model="row.supplierItemCode" type="textarea" autosize/></el-form-item>
+    <el-form-item :label='uiText("供应商颜色")'><SupplierColorSelect :row="row" :disabled="!canWrite"/><el-button v-if="canWrite&&row.supplierCode" link type="primary" @click="colorOpen=true">{{ uiText("管理颜色") }}</el-button></el-form-item>
+    <el-form-item class="full-width" :label='uiText("型号原文")'><el-input v-model="row.modelText" type="textarea" autosize/><el-checkbox v-if="context==='catalog'" class="phone-scope-declaration" :model-value="row.phoneScopeDeclaration==='not_provided'" :disabled="!canWrite||hasPhoneScopeEvidence&&row.phoneScopeDeclaration!=='not_provided'" @change="setPhoneScopeDeclaration(Boolean($event))">{{ uiText("已核对原件，供应商确实未注明型号") }}</el-checkbox></el-form-item>
+    <el-form-item class="full-width" :label='uiText("本次所选型号")'><PhoneModelMultiSelect v-model="row.phoneModelIds" :members="row.sourcePhones||row.phones" :allowed-ids="row.sourcePhoneModelIds" :disabled="!canWrite"/><small v-if="row.sourcePhoneModelIds">{{row.catalogSourceSnapshot?.phoneScopeMode==='unspecified'?uiText('供应商未注明型号；本行可调整此前选择，新增请用增选规格。'):uiText('仅从本款供应商来源范围内选择；不修改供应商原始资料。')}}</small></el-form-item>
     <template v-if="canReadCost">
-     <el-form-item label="数值单价"><el-input v-model="row.unitPrice" inputmode="decimal" placeholder="明确数值；复杂报价填原文"/></el-form-item>
-     <el-form-item label="币种"><el-select v-model="row.currency" clearable filterable allow-create placeholder="按来源依据" @change="row.currencySource=row.currency?'explicit':'historical_unknown'"><el-option v-for="currency in ['CNY','USD','MXN','EUR','HKD']" :key="currency" :value="currency" :label="currency"/></el-select><small v-if="row.currencySource==='business_default'">供应商报价业务默认CNY；原始记录另保留。</small></el-form-item><el-form-item label="计价单位"><el-input v-model="row.priceUnit" placeholder="件、套等"/></el-form-item>
+     <el-form-item :label='uiText("数值单价")'><el-input v-model="row.unitPrice" inputmode="decimal" :placeholder='uiText("明确数值；复杂报价填原文")'/></el-form-item>
+     <el-form-item :label='uiText("币种")'><el-select v-model="row.currency" clearable filterable allow-create :placeholder='uiText("按来源依据")' @change="row.currencySource=row.currency?'explicit':'historical_unknown'"><el-option v-for="currency in ['CNY','USD','MXN','EUR','HKD']" :key="currency" :value="currency" :label="currency"/></el-select><small v-if="row.currencySource==='business_default'">{{ uiText("供应商报价业务默认CNY；原始记录另保留。") }}</small></el-form-item><el-form-item :label='uiText("计价单位")'><el-input v-model="row.priceUnit" :placeholder='uiText("件、套等")'/></el-form-item>
     </template>
-    <el-form-item label="起订数量"><el-input v-model="row.moqQuantity" inputmode="decimal" placeholder="未知留空"/></el-form-item><el-form-item label="起订单位"><el-input v-model="row.moqUnit" placeholder="个、件、套"/></el-form-item><el-form-item label="起订口径"><el-select v-model="row.moqScope" clearable><el-option label="整款" value="style"/><el-option label="每型号" value="model"/><el-option label="每颜色" value="color"/><el-option label="每型号每颜色" value="model_color"/></el-select></el-form-item><el-form-item label="起订补充条件"><el-input v-model="row.moqNote" type="textarea" autosize/></el-form-item>
-    <el-form-item v-if="context!=='catalog'" label="拟拿样合计（本行）"><el-input-number v-model="sampleQuantity" :min="0" :precision="0"/><small>计划数量，不代表实收，也不平均分配到规格。</small></el-form-item>
-    <el-form-item class="full-width" label="补充说明"><el-input v-model="row.notes" type="textarea" autosize/></el-form-item>
+    <el-form-item :label='uiText("起订数量")'><el-input v-model="row.moqQuantity" inputmode="decimal" :placeholder='uiText("未知留空")'/></el-form-item><el-form-item :label='uiText("起订单位")'><el-input v-model="row.moqUnit" :placeholder='uiText("个、件、套")'/></el-form-item><el-form-item :label='uiText("起订口径")'><el-select v-model="row.moqScope" clearable><el-option :label='uiText("整款")' value="style"/><el-option :label='uiText("每型号")' value="model"/><el-option :label='uiText("每颜色")' value="color"/><el-option :label='uiText("每型号每颜色")' value="model_color"/></el-select></el-form-item><el-form-item :label='uiText("起订补充条件")'><el-input v-model="row.moqNote" type="textarea" autosize/></el-form-item>
+    <el-form-item v-if="context!=='catalog'" :label='uiText("拟拿样合计（本行）")'><el-input-number v-model="sampleQuantity" :min="0" :precision="0"/><small>{{ uiText("计划数量，不代表实收，也不平均分配到规格。") }}</small></el-form-item>
+    <el-form-item class="full-width" :label='uiText("补充说明")'><el-input v-model="row.notes" type="textarea" autosize/></el-form-item>
    </div>
   </section>
   <details class="advanced-section">
-   <summary>款式补充：系列、材质、结构、报价与包装</summary>
-   <div class="field-grid advanced-body"><el-form-item v-for="field in fields.filter(field=>['series','material','specification','thickness','features','leadTimeNote','packaging'].includes(field.key))" :key="field.key" :label="field.label"><el-input v-model="row[field.key]" :aria-label="field.label" type="textarea" autosize/></el-form-item><el-form-item v-if="canReadCost" class="full-width" label="报价原文"><el-input v-model="row.priceNote" type="textarea" autosize/></el-form-item><el-form-item v-if="canReadCost" class="full-width" label="样品费及退抵约定"><el-input v-model="row.sampleFeeNote" aria-label="样品费及退抵约定" type="textarea" autosize placeholder="按本次实际约定记录，未知可留空"/></el-form-item></div>
+   <summary>{{ uiText("款式补充：系列、材质、结构、报价与包装") }}</summary>
+   <div class="field-grid advanced-body"><el-form-item v-for="field in fields.filter(field=>['series','material','specification','thickness','features','leadTimeNote','packaging'].includes(field.key))" :key="field.key" :label="uiText(field.label)"><el-input v-model="row[field.key]" :aria-label="uiText(field.label)" type="textarea" autosize/></el-form-item><el-form-item v-if="canReadCost" class="full-width" :label='uiText("报价原文")'><el-input v-model="row.priceNote" type="textarea" autosize/></el-form-item><el-form-item v-if="canReadCost" class="full-width" :label='uiText("样品费及退抵约定")'><el-input v-model="row.sampleFeeNote" :aria-label='uiText("样品费及退抵约定")' type="textarea" autosize :placeholder='uiText("按本次实际约定记录，未知可留空")'/></el-form-item></div>
    <section v-if="canReadCost" class="selection-price-options">
-    <header><h3>配置／包装的多种报价</h3><el-button :disabled="!canWrite" @click="addPriceOption">添加报价选项</el-button></header>
-    <p>仅有一档报价时用常用资料里的单价；配置、包装或起订条件不同，再分别填写。币种不明留空。</p>
-    <article v-for="(option,index) in row.priceOptions||[]" :key="index" class="selection-price-option"><header><strong>报价 {{index+1}}</strong><el-button :disabled="!canWrite" link type="danger" @click="removePriceOption(index)">移除此报价</el-button></header><div class="field-grid">
-     <el-form-item label="适用配置／包装"><el-input v-model="option.label" :aria-label="`报价${index+1}适用配置`" type="textarea" autosize/></el-form-item>
-     <el-form-item label="数值单价"><el-input v-model="option.unitPrice" :aria-label="`报价${index+1}单价`" inputmode="decimal" placeholder="只填明确数值"/></el-form-item>
-     <el-form-item label="币种"><el-select v-model="option.currency" :aria-label="`报价${index+1}币种`" clearable filterable allow-create placeholder="未知留空"><el-option v-for="currency in ['CNY','USD','MXN','EUR','HKD']" :key="currency" :value="currency" :label="currency"/></el-select></el-form-item>
-     <el-form-item label="计价单位"><el-input v-model="option.priceUnit" :aria-label="`报价${index+1}计价单位`"/></el-form-item><el-form-item label="起订数量"><el-input v-model="option.moqQuantity" :aria-label="`报价${index+1}起订数量`" inputmode="decimal"/></el-form-item><el-form-item label="起订单位"><el-input v-model="option.moqUnit" :aria-label="`报价${index+1}起订单位`"/></el-form-item><el-form-item label="起订口径"><el-select v-model="option.moqScope" :aria-label="`报价${index+1}起订口径`" clearable><el-option label="整款" value="style"/><el-option label="每型号" value="model"/><el-option label="每颜色" value="color"/><el-option label="每型号每颜色" value="model_color"/></el-select></el-form-item><el-form-item label="起订补充"><el-input v-model="option.moqNote" :aria-label="`报价${index+1}起订补充`" type="textarea" autosize/></el-form-item>
-     <el-form-item label="本档包装"><el-input v-model="option.packaging" :aria-label="`报价${index+1}包装`" type="textarea" autosize/></el-form-item>
-     <el-form-item label="本档报价说明"><el-input v-model="option.priceNote" :aria-label="`报价${index+1}说明`" type="textarea" autosize/></el-form-item>
+    <header><h3>{{ uiText("配置／包装的多种报价") }}</h3><el-button :disabled="!canWrite" @click="addPriceOption">{{ uiText("添加报价选项") }}</el-button></header>
+    <p>{{ uiText("仅有一档报价时用常用资料里的单价；配置、包装或起订条件不同，再分别填写。币种不明留空。") }}</p>
+    <article v-for="(option,index) in row.priceOptions||[]" :key="index" class="selection-price-option"><header><strong>{{ uiText("报价 ") }}{{index+1}}</strong><el-button :disabled="!canWrite" link type="danger" @click="removePriceOption(index)">{{ uiText("移除此报价") }}</el-button></header><div class="field-grid">
+     <el-form-item :label='uiText("适用配置／包装")'><el-input v-model="option.label" :aria-label="uiText('报价{value0}适用配置',{value0:(index+1)})" type="textarea" autosize/></el-form-item>
+     <el-form-item :label='uiText("数值单价")'><el-input v-model="option.unitPrice" :aria-label="uiText('报价{value0}单价',{value0:(index+1)})" inputmode="decimal" :placeholder='uiText("只填明确数值")'/></el-form-item>
+     <el-form-item :label='uiText("币种")'><el-select v-model="option.currency" :aria-label="uiText('报价{value0}币种',{value0:(index+1)})" clearable filterable allow-create :placeholder='uiText("未知留空")'><el-option v-for="currency in ['CNY','USD','MXN','EUR','HKD']" :key="currency" :value="currency" :label="currency"/></el-select></el-form-item>
+     <el-form-item :label='uiText("计价单位")'><el-input v-model="option.priceUnit" :aria-label="uiText('报价{value0}计价单位',{value0:(index+1)})"/></el-form-item><el-form-item :label='uiText("起订数量")'><el-input v-model="option.moqQuantity" :aria-label="uiText('报价{value0}起订数量',{value0:(index+1)})" inputmode="decimal"/></el-form-item><el-form-item :label='uiText("起订单位")'><el-input v-model="option.moqUnit" :aria-label="uiText('报价{value0}起订单位',{value0:(index+1)})"/></el-form-item><el-form-item :label='uiText("起订口径")'><el-select v-model="option.moqScope" :aria-label="uiText('报价{value0}起订口径',{value0:(index+1)})" clearable><el-option :label='uiText("整款")' value="style"/><el-option :label='uiText("每型号")' value="model"/><el-option :label='uiText("每颜色")' value="color"/><el-option :label='uiText("每型号每颜色")' value="model_color"/></el-select></el-form-item><el-form-item :label='uiText("起订补充")'><el-input v-model="option.moqNote" :aria-label="uiText('报价{value0}起订补充',{value0:(index+1)})" type="textarea" autosize/></el-form-item>
+     <el-form-item :label='uiText("本档包装")'><el-input v-model="option.packaging" :aria-label="uiText('报价{value0}包装',{value0:(index+1)})" type="textarea" autosize/></el-form-item>
+     <el-form-item :label='uiText("本档报价说明")'><el-input v-model="option.priceNote" :aria-label="uiText('报价{value0}说明',{value0:(index+1)})" type="textarea" autosize/></el-form-item>
     </div></article>
    </section>
   </details>
-  <p v-if="changedScopes.length" class="range-change-notice">引用范围有版本变化，请在下方展开核对后再确认。</p>
+  <p v-if="changedScopes.length" class="range-change-notice">{{ uiText("引用范围有版本变化，请在下方展开核对后再确认。") }}</p>
   <details class="advanced-section supply-scope">
-   <summary>型号、颜色范围与实际供货配对 <small>（按需核对，不自动组合）</small></summary>
+   <summary>{{ uiText("型号、颜色范围与实际供货配对 ") }}<small>{{ uiText("（按需核对，不自动组合）") }}</small></summary>
    <div class="advanced-body">
-    <header><h3>本供应商的范围</h3><el-button v-if="row.supplierCode&&canWrite" link type="primary" @click="scopeOpen=true">维护范围后返回</el-button></header>
-    <p>期望型号不等于可供；范围也不自动拼接型号 × 颜色。更换供应商会清除原范围与配对结论，原文和期望型号保留。</p>
-    <div class="field-grid"><el-form-item v-for="type in (['model','color'] as const)" :key="type" :label="type==='model'?'型号范围（名称或编码）':'颜色范围（名称或编码）'"><el-select :model-value="rangeValue(type)" filterable remote allow-create clearable :remote-method="type==='model'?searchModelRanges:searchColorRanges" :disabled="!row.supplierCode" @update:model-value="setRange(type,String($event||''))"><el-option v-for="range in type==='model'?modelRanges:colorRanges" :key="range.id" :value="range.code" :label="range.name+' · '+range.code+' · V'+range.version"/></el-select></el-form-item></div>
-    <el-button :disabled="!row.supplierCode||!row.rangeRefs.length" @click="checkRefs">核对范围与版本</el-button><p v-if="scopeResult" role="status">{{scopeResult}}</p>
-    <section v-for="snapshot in changedScopes" :key="snapshot.id" class="range-version-diff"><strong>{{snapshot.name||snapshot.code}}：引用 V{{snapshot.version}}，当前 V{{snapshot.currentVersion}}</strong><p>新版增加：{{JSON.stringify(snapshot.memberChanges?.added||[])}}</p><p>新版移除：{{JSON.stringify(snapshot.memberChanges?.removed||[])}}</p><el-checkbox :model-value="row.rangeVersionAcknowledgements?.some(item=>item.id===snapshot.id&&item.currentVersion===snapshot.currentVersion)" @change="acknowledge(snapshot,Boolean($event))">我已核对差异，按当前引用的旧版本确认，不自动扩大范围</el-checkbox></section>
-    <h3>实际供货配对</h3>
-    <p v-if="!canReadCost">报价及供货依据仅有成本维护权限可修改；仍可从下方已记录的配对中选择本次型号和颜色。</p><div v-if="canReadCost" class="pair-add"><PhoneModelMultiSelect v-model="pairPhones" :members="row.sourcePhones||row.phones" :allowed-ids="row.phoneModelIds" :disabled="!canWrite||!row.supplierCode" aria-label="新增配对的手机型号"/><el-select v-model="pairColor" filterable remote :remote-method="loadColors" placeholder="选本供应商的一个原色" :disabled="!row.supplierCode"><el-option v-for="color in colors" :key="color.id" :value="color.id" :label="color.name+' · '+(color.supplierColorCode||color.code)"/></el-select><el-select v-model="pairState"><el-option label="待核实" value="unverified"/><el-option label="已明确可供" value="available"/><el-option label="已明确不供" value="unavailable"/></el-select><el-input v-model="pairEvidence" placeholder="供方确认依据／说明"/><el-button :disabled="!pairColor||!pairPhones.length" @click="addPairs">记录所选型号与此颜色的配对</el-button></div>
-    <div class="pair-list"><article v-for="pair in row.pairings" :key="pairKey(pair.phoneModelId,pair.colorId)"><el-checkbox v-if="context!=='catalog'" :model-value="hasPair(pair.phoneModelId,pair.colorId)" :disabled="pair.state==='unavailable'" @change="selectPair(pair.phoneModelId,pair.colorId,Boolean($event))">{{phoneName(pair.phoneModelId)}} · {{colorName(pair.colorId)}}</el-checkbox><span v-else>{{phoneName(pair.phoneModelId)}} · {{colorName(pair.colorId)}}</span><el-select v-if="canReadCost" v-model="pair.state" size="small"><el-option label="待核实" value="unverified"/><el-option label="明确可供" value="available"/><el-option label="明确不供" value="unavailable"/></el-select><el-input v-if="canReadCost" v-model="pair.evidence" size="small" placeholder="本配对依据"/><span v-else class="pair-readonly-state">{{pair.state==='available'?'明确可供':pair.state==='unavailable'?'明确不供':'待核实'}}</span></article><p v-if="!row.pairings.length">尚未记录精确配对；可先存草稿，确认选样前再核实。</p></div>
-    <p v-if="context!=='catalog'">本次选择：可供 {{coverage.available}} · 不供 {{coverage.unavailable}} · 待核实 {{coverage.unverified}}；未勾选的不自动算选品。</p>
+    <header><h3>{{ uiText("本供应商的范围") }}</h3><el-button v-if="row.supplierCode&&canWrite" link type="primary" @click="scopeOpen=true">{{ uiText("维护范围后返回") }}</el-button></header>
+    <p>{{ uiText("期望型号不等于可供；范围也不自动拼接型号 × 颜色。更换供应商会清除原范围与配对结论，原文和期望型号保留。") }}</p>
+    <div class="field-grid"><el-form-item v-for="type in (['model','color'] as const)" :key="type" :label="type==='model'?uiText('型号范围（名称或编码）'):uiText('颜色范围（名称或编码）')"><el-select :model-value="rangeValue(type)" filterable remote allow-create clearable :remote-method="type==='model'?searchModelRanges:searchColorRanges" :disabled="!row.supplierCode" @update:model-value="setRange(type,String($event||''))"><el-option v-for="range in type==='model'?modelRanges:colorRanges" :key="range.id" :value="range.code" :label="range.name+' · '+range.code+' · V'+range.version"/></el-select></el-form-item></div>
+    <el-button :disabled="!row.supplierCode||!row.rangeRefs.length" @click="checkRefs">{{ uiText("核对范围与版本") }}</el-button><p v-if="scopeResult" role="status">{{scopeResult}}</p>
+    <section v-for="snapshot in changedScopes" :key="snapshot.id" class="range-version-diff"><strong>{{snapshot.name||snapshot.code}}{{ uiText("：引用 V") }}{{snapshot.version}}{{ uiText("，当前 V") }}{{snapshot.currentVersion}}</strong><p>{{ uiText("新版增加：") }}{{JSON.stringify(snapshot.memberChanges?.added||[])}}</p><p>{{ uiText("新版移除：") }}{{JSON.stringify(snapshot.memberChanges?.removed||[])}}</p><el-checkbox :model-value="row.rangeVersionAcknowledgements?.some(item=>item.id===snapshot.id&&item.currentVersion===snapshot.currentVersion)" @change="acknowledge(snapshot,Boolean($event))">{{ uiText("我已核对差异，按当前引用的旧版本确认，不自动扩大范围") }}</el-checkbox></section>
+    <h3>{{ uiText("实际供货配对") }}</h3>
+    <p v-if="!canReadCost">{{ uiText("报价及供货依据仅有成本维护权限可修改；仍可从下方已记录的配对中选择本次型号和颜色。") }}</p><div v-if="canReadCost" class="pair-add"><PhoneModelMultiSelect v-model="pairPhones" :members="row.sourcePhones||row.phones" :allowed-ids="row.phoneModelIds" :disabled="!canWrite||!row.supplierCode" :aria-label='uiText("新增配对的手机型号")'/><el-select v-model="pairColor" filterable remote :remote-method="loadColors" :placeholder='uiText("选本供应商的一个原色")' :disabled="!row.supplierCode"><el-option v-for="color in colors" :key="color.id" :value="color.id" :label="color.name+' · '+(color.supplierColorCode||color.code)"/></el-select><el-select v-model="pairState"><el-option :label='uiText("待核实")' value="unverified"/><el-option :label='uiText("已明确可供")' value="available"/><el-option :label='uiText("已明确不供")' value="unavailable"/></el-select><el-input v-model="pairEvidence" :placeholder='uiText("供方确认依据／说明")'/><el-button :disabled="!pairColor||!pairPhones.length" @click="addPairs">{{ uiText("记录所选型号与此颜色的配对") }}</el-button></div>
+    <div class="pair-list"><article v-for="pair in row.pairings" :key="pairKey(pair.phoneModelId,pair.colorId)"><el-checkbox v-if="context!=='catalog'" :model-value="hasPair(pair.phoneModelId,pair.colorId)" :disabled="pair.state==='unavailable'" @change="selectPair(pair.phoneModelId,pair.colorId,Boolean($event))">{{phoneName(pair.phoneModelId)}} · {{colorName(pair.colorId)}}</el-checkbox><span v-else>{{phoneName(pair.phoneModelId)}} · {{colorName(pair.colorId)}}</span><el-select v-if="canReadCost" v-model="pair.state" size="small"><el-option :label='uiText("待核实")' value="unverified"/><el-option :label='uiText("明确可供")' value="available"/><el-option :label='uiText("明确不供")' value="unavailable"/></el-select><el-input v-if="canReadCost" v-model="pair.evidence" size="small" :placeholder='uiText("本配对依据")'/><span v-else class="pair-readonly-state">{{pair.state==='available'?uiText('明确可供'):pair.state==='unavailable'?uiText('明确不供'):uiText('待核实')}}</span></article><p v-if="!row.pairings.length">{{ uiText("尚未记录精确配对；可先存草稿，确认选样前再核实。") }}</p></div>
+    <p v-if="context!=='catalog'">{{ uiText("本次选择：可供 ") }}{{coverage.available}}{{ uiText(" · 不供 ") }}{{coverage.unavailable}}{{ uiText(" · 待核实 ") }}{{coverage.unverified}}{{ uiText("；未勾选的不自动算选品。") }}</p>
    </div>
   </details>
   <details class="advanced-section">
-   <summary>开发先后与来源</summary>
+   <summary>{{ uiText("开发先后与来源") }}</summary>
    <div class="field-grid advanced-body">
-    <el-form-item v-for="field in fields.filter(field=>['sourcePosition','sameStyleKey','developmentEvidence'].includes(field.key))" :key="field.key" :label="field.label"><el-input v-model="row[field.key]" type="textarea" autosize/></el-form-item>
-    <el-form-item label="开发先后确认"><el-select v-model="row.developmentStatus"><el-option v-for="(label,value) in developmentLabels" :key="value" :value="value" :label="label"/></el-select></el-form-item>
-    <el-form-item label="已核实开发日期"><el-date-picker v-model="row.developedOn" type="date" value-format="YYYY-MM-DD" clearable/></el-form-item>
+    <el-form-item v-for="field in fields.filter(field=>['sourcePosition','sameStyleKey','developmentEvidence'].includes(field.key))" :key="field.key" :label="uiText(field.label)"><el-input v-model="row[field.key]" type="textarea" autosize/></el-form-item>
+    <el-form-item :label='uiText("开发先后确认")'><el-select v-model="row.developmentStatus"><el-option v-for="(label,value) in developmentLabels" :key="value" :value="value" :label="label"/></el-select></el-form-item>
+    <el-form-item :label='uiText("已核实开发日期")'><el-date-picker v-model="row.developedOn" type="date" value-format="YYYY-MM-DD" clearable/></el-form-item>
    </div>
   </details>
-  <section v-if="row.catalogStyleCode||row.catalogStyleLabel||row.productCode||row.sampleBatches?.length" class="existing-identities"><h3>目录款式与实收批次</h3><p v-if="row.catalogStyleCode||row.catalogStyleLabel">目录款式 {{row.catalogStyleLabel||row.catalogStyleCode}}</p><p v-if="row.productCode">经营档案 {{row.productCode}}</p><p v-for="batch in row.sampleBatches" :key="batch.id">{{batch.displayLabel||batch.label||batch.code}} · {{batch.receivedAt||batch.date||'实收日期待补'}} · {{batch.qty??'数量见台账'}}</p><p v-if="!row.sampleBatches?.length">未实际收样，不生成样品批次号。</p></section>
+  <section v-if="row.catalogStyleCode||row.catalogStyleLabel||row.productCode||row.sampleBatches?.length" class="existing-identities"><h3>{{ uiText("目录款式与实收批次") }}</h3><p v-if="row.catalogStyleCode||row.catalogStyleLabel">{{ uiText("目录款式 ") }}{{row.catalogStyleLabel||row.catalogStyleCode}}</p><p v-if="row.productCode">{{ uiText("经营档案 ") }}{{row.productCode}}</p><p v-for="batch in row.sampleBatches" :key="batch.id">{{batch.displayLabel||batch.label||batch.code}} · {{batch.receivedAt||batch.date||uiText('实收日期待补')}} · {{batch.qty??uiText('数量见台账')}}</p><p v-if="!row.sampleBatches?.length">{{ uiText("本行未列出实收批次，实际收样请查看样品台账。") }}</p></section>
  </el-form>
- <el-dialog v-model="scopeOpen" title="供应商型号与颜色范围" width="min(1000px,96vw)" append-to-body><SupplierRangePanel v-if="scopeOpen" :supplier-code="row.supplierCode" :can-write="canWrite" initial-tab="colors" :initial-color-text="row.color"/><template #footer><el-button @click="scopeOpen=false;loadRanges('model');loadRanges('color');loadColors()">返回本行（保留本行填写）</el-button></template></el-dialog>
+ <el-dialog v-model="colorOpen" top="20px" class="supplier-color-manager" :title='uiText("供应商颜色")' width="min(800px,96vw)" append-to-body><SupplierColorPanel v-if="colorOpen" :supplier-code="row.supplierCode" :can-write="canWrite"/><template #footer><el-button @click="colorOpen=false;loadColors()">{{ uiText("返回产品编辑") }}</el-button></template></el-dialog>
+ <el-dialog v-model="scopeOpen" :title='uiText("供应商资料设置")' width="min(1000px,96vw)" append-to-body><SupplierRangePanel v-if="scopeOpen" :supplier-code="row.supplierCode" :can-write="canWrite"/><template #footer><el-button @click="scopeOpen=false;loadRanges('model');loadRanges('color');loadColors()">{{ uiText("返回本行（保留本行填写）") }}</el-button></template></el-dialog>
 </template>
-<style scoped>
+<style scoped>:global(.supplier-color-manager){display:flex;flex-direction:column;max-height:calc(100dvh - 40px);margin-bottom:20px}:global(.supplier-color-manager>.el-dialog__body){min-height:0;overflow-y:auto}
 .selection-price-options{min-width:0}.selection-price-options>header,.selection-price-option>header{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}.selection-price-options h3{margin:0!important}.selection-price-option{border:1px solid #e2eaf4;border-radius:5px;padding:10px;margin-top:8px;min-width:0}.selection-price-option>header{font-size:13px;margin-bottom:8px}.selection-price-options :deep(.el-button){white-space:normal;height:auto;line-height:1.5;max-width:100%}
 .selection-row-editor{min-width:0;container-type:inline-size}
 .selection-row-editor h3{font-size:14px;margin:0 0 7px}

@@ -39,7 +39,9 @@ public class PilotAccessService {
   var result=com.yuewei.plm.module.auth.vo.CurrentUserVO.from(a.actor());
   result.setPermissions(a.permissions());result.setRoleCode(a.role());
   result.setCanMaintainEngineeringData(canMaintainEngineeringData(a));
-  result.setDepartmentName(jdbc.queryForObject("select department_name from sys_user where user_id=?",String.class,a.actor().userId()));
+  var preferences=jdbc.queryForMap("select department_name,preferred_language from sys_user where user_id=?",a.actor().userId());
+  result.setDepartmentName((String)preferences.get("department_name"));
+  result.setPreferredLanguage((String)preferences.get("preferred_language"));
   return result;
  }
  public CurrentUser actor(){return access().actor();}

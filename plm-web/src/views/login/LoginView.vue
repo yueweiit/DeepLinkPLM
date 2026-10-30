@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import {sampleAwareLoginTarget} from '@/utils/sampleScanRoute'
 import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -9,6 +11,7 @@ import { useUserStore } from '@/stores/user'
 import { t } from '@/locales'
 import brandLogo from '@/assets/brand/deeplinkplm-logo.png'
 import { getPilotSsoStatus } from '@/api/modules/pilot'
+import LanguageSwitcher from '@/components/LanguageSwitcher/index.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,7 +24,7 @@ async function dingApi():Promise<DingApi>{
  await new Promise<void>((resolve,reject)=>{const script=document.createElement('script');script.src='https://g.alicdn.com/dingding/dingtalk-jsapi/2.0.0/dingtalk.open.js';script.onload=()=>resolve();script.onerror=()=>reject(new Error('钉钉SDK加载失败'));document.head.appendChild(script)})
  const dd=(window as Window&{dd?:DingApi}).dd;if(!dd)throw new Error('请在已配置的钉钉轻应用内免登');return dd
 }
-async function handleDingLogin(){loading.value=true;try{const dd=await dingApi();const code=await new Promise<string>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('钉钉免登超时，请在应用内重试')),15000);dd.ready(()=>dd.runtime.permission.requestAuthCode({corpId:sso.value.corpId,onSuccess:r=>{clearTimeout(timer);resolve(r.code)},onFail:()=>{clearTimeout(timer);reject(new Error('钉钉免登失败，请使用网页登录'))}}))});await userStore.loginDingTalk(code);router.push(sampleAwareLoginTarget(userStore.profile?.roleCode,route.query.redirect,userStore.hasPermission('dashboard:view')?'/dashboard':'/pilot/tasks'))}catch(error){ElMessage.error(error instanceof Error?error.message:'钉钉免登失败')}finally{loading.value=false}}
+async function handleDingLogin(){loading.value=true;try{const dd=await dingApi();const code=await new Promise<string>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('钉钉免登超时，请在应用内重试')),15000);dd.ready(()=>dd.runtime.permission.requestAuthCode({corpId:sso.value.corpId,onSuccess:r=>{clearTimeout(timer);resolve(r.code)},onFail:()=>{clearTimeout(timer);reject(new Error('钉钉免登失败，请使用网页登录'))}}))});await userStore.loginDingTalk(code);router.push(sampleAwareLoginTarget(userStore.profile?.roleCode,route.query.redirect,userStore.hasPermission('dashboard:view')?'/dashboard':'/pilot/tasks'))}catch(error){ElMessage.error(error instanceof Error?error.message:uiText('钉钉免登失败'))}finally{loading.value=false}}
 onMounted(async()=>{try{sso.value=await getPilotSsoStatus()}catch{sso.value.message='无法读取免登配置，可使用网页登录'}})
 
 const form = reactive({
@@ -39,11 +42,11 @@ async function handleLogin() {
   loading.value = true
   try {
     await userStore.login(form)
-    ElMessage.success('登录成功')
+    ElMessage.success(t('登录成功'))
     const home = userStore.hasPermission('dashboard:view') ? '/dashboard' : userStore.hasPermission('pilot:tasks') ? '/pilot/tasks' : userStore.hasPermission('collaboration:view') ? '/market-watch' : '/403'
     router.push(sampleAwareLoginTarget(userStore.profile?.roleCode,route.query.redirect,home))
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '登录失败')
+    ElMessage.error(error instanceof Error ? error.message : uiText('登录失败'))
   } finally {
     loading.value = false
   }
@@ -57,17 +60,17 @@ async function handleLogin() {
         <img class="login-identity__logo" :src="brandLogo" alt="" width="44" height="44" />
         <div>
           <strong>{{ t('common.appName') }}</strong>
-          <span>产品生命周期管理</span>
+          <span>{{ uiText("产品生命周期管理") }}</span>
         </div>
       </div>
-      <span class="login-header__note">连接产品的每一步</span>
+      <span class="login-header__note">{{ t('连接产品的每一步') }}</span><LanguageSwitcher />
     </header>
 
     <main class="login-main">
       <section class="login-story" aria-labelledby="login-story-title">
         <div class="login-story__eyebrow"><span /> PRODUCT LIFECYCLE MANAGEMENT</div>
-        <h2 id="login-story-title">让每个好想法，<br />成为好产品。</h2>
-        <p class="login-story__description">连接研发、工程与协作，<br />让产品从构想到交付，清晰可循。</p>
+        <h2 id="login-story-title">{{ uiText("让每个好想法，") }}<br />{{ uiText("成为好产品。") }}</h2>
+        <p class="login-story__description">{{ uiText("连接研发、工程与协作，") }}<br />{{ uiText("让产品从构想到交付，清晰可循。") }}</p>
 
         <svg class="login-story__art" viewBox="0 0 600 300" fill="none" aria-hidden="true">
           <defs>
@@ -98,33 +101,33 @@ async function handleLogin() {
         </svg>
 
         <div class="login-story__stages">
-          <span><i />产品研发</span><span><i />工程协同</span><span><i />交付追溯</span>
+          <span><i />{{ uiText("产品研发") }}</span><span><i />{{ uiText("工程协同") }}</span><span><i />{{ uiText("交付追溯") }}</span>
         </div>
       </section>
 
       <section class="login-panel" aria-labelledby="login-title">
         <div class="login-panel__heading">
-          <span class="login-panel__eyebrow">欢迎回来</span>
-          <h1 id="login-title">登录工作空间</h1>
-          <p>登录 {{ t('common.appName') }}，继续产品协作。</p>
+          <span class="login-panel__eyebrow">{{ uiText("欢迎回来") }}</span>
+          <h1 id="login-title">{{ uiText("登录工作空间") }}</h1>
+          <p>{{ t('登录 {app}，继续产品协作。', { app: t('common.appName') }) }}</p>
         </div>
 
         <el-form class="login-panel__form" :model="form" label-position="top">
-          <el-form-item label="用户名">
-            <el-input v-model="form.username" :prefix-icon="User" placeholder="请输入用户名" autocomplete="username" />
+          <el-form-item :label='uiText("用户名")'>
+            <el-input v-model="form.username" :prefix-icon="User" :placeholder='uiText("请输入用户名")' autocomplete="username" />
           </el-form-item>
-          <el-form-item label="密码">
-            <el-input v-model="form.password" :prefix-icon="Lock" placeholder="请输入密码" type="password" autocomplete="current-password" show-password @keyup.enter="handleLogin" />
+          <el-form-item :label='uiText("密码")'>
+            <el-input v-model="form.password" :prefix-icon="Lock" :placeholder='uiText("请输入密码")' type="password" autocomplete="current-password" show-password @keyup.enter="handleLogin" />
           </el-form-item>
-          <el-button class="login-panel__submit" type="primary" :loading="loading" @click="handleLogin"><span>登录</span><el-icon><ArrowRight /></el-icon></el-button>
+          <el-button class="login-panel__submit" type="primary" :loading="loading" @click="handleLogin"><span>{{ uiText("登录") }}</span><el-icon><ArrowRight /></el-icon></el-button>
         </el-form>
 
-        <div class="login-panel__divider"><span>其他登录方式</span></div>
-        <el-button class="login-panel__sso" :disabled="!sso.enabled" :loading="loading" @click="handleDingLogin"><el-icon><Connection /></el-icon><span>钉钉轻应用免登</span></el-button>
-        <p class="login-panel__sso-status" role="status">{{sso.message}}</p>
+        <div class="login-panel__divider"><span>{{ uiText("其他登录方式") }}</span></div>
+        <el-button class="login-panel__sso" :disabled="!sso.enabled" :loading="loading" @click="handleDingLogin"><el-icon><Connection /></el-icon><span>{{ uiText("钉钉轻应用免登") }}</span></el-button>
+        <p class="login-panel__sso-status" role="status">{{t(sso.message)}}</p>
 
         <div v-if="development" class="login-panel__tips">
-          <strong>后端 M1 测试账号</strong>
+          <strong>{{ uiText("后端 M1 测试账号") }}</strong>
           <ul>
             <li v-for="item in accounts" :key="item">{{ item }}</li>
           </ul>
@@ -132,7 +135,7 @@ async function handleLogin() {
       </section>
     </main>
 
-    <footer class="login-footer"><span>{{ t('common.appName') }}</span><span>产品研发协同平台</span></footer>
+    <footer class="login-footer"><span>{{ t('common.appName') }}</span><span>{{ uiText("产品研发协同平台") }}</span></footer>
   </div>
 </template>
 

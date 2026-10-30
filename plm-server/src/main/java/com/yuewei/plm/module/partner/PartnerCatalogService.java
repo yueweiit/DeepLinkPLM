@@ -19,12 +19,13 @@ public class PartnerCatalogService {
     private static final List<String> SUMMARY_FIELDS = List.of("name", "series", "supplierItemCode",
         "modelText", "color", "material", "specification", "moq", "packaging", "styleKey", "configKey",
         "quoteVersion", "sourcePosition", "sourceSheet", "sourceVersion", "productId", "productCode",
-        "thickness", "features", "leadTimeNote", "catalogStyleId", "catalogStyleCode", "catalogStyleLabel", "moqQuantity", "moqUnit", "moqScope", "moqNote");
+        "thickness", "features", "leadTimeNote", "catalogStyleId", "catalogStyleCode", "catalogStyleLabel", "moqQuantity", "moqUnit", "moqScope", "moqNote", "discarded", "supplierColorIds", "supplierColors");
+    private static final Set<String> EDITABLE_FIELDS = Set.of("name","series","supplierItemCode","modelText","color","material","specification","moq","packaging","styleKey","configKey","unitPrice","currency","priceNote","notes","phoneModelIds","phoneScopeDeclaration","availablePhoneModelIds","unavailablePhoneModelIds","rangeRefs","pairings","rangeVersionAcknowledgements","supplyScopeNote","thickness","features","leadTimeNote","sampleFeeNote","priceOptions","priceUnit","moqQuantity","moqUnit","moqScope","moqNote","refs","discarded","sourcePosition","sameStyleKey","developmentEvidence","developmentStatus","developedOn","supplierColorIds","newSupplierColors");
     private static final List<String> COPY_FIELDS = List.of("name", "series", "supplierItemCode", "modelText",
         "color", "material", "specification", "moq", "packaging", "styleKey", "configKey", "quoteVersion",
         "sourcePosition", "sourceSheet", "sourceVersion", "unitPrice", "currency", "priceNote", "notes",
         "quoteId", "quoteLineId", "phoneModelIds", "availablePhoneModelIds", "unavailablePhoneModelIds",
-        "rangeRefs", "pairings", "rangeVersionAcknowledgements", "supplyScopeNote",
+        "rangeRefs", "pairings", "rangeVersionAcknowledgements", "supplyScopeNote", "supplierColorIds",
         "thickness", "features", "leadTimeNote", "sampleFeeNote", "priceOptions", "priceUnit", "moqQuantity", "moqUnit", "moqScope", "moqNote", "currencySource", "rawQuoteFields");
     private final PartnerStore store;
     private final PartnerOperationsAccess permissions;
@@ -40,30 +41,7 @@ public class PartnerCatalogService {
     }
 
     /** The row supplier is explicit. A blank row in a mixed selection never inherits another supplier. */
-    private String sourceSql() {
-        String scope = store.access.visibleSqlClause("partner", "r.record_id");
-        return """
-            select 'selection' as source_kind,r.record_id,r.code as source_code,r.name as source_name,
-                   r.version as record_version,r.status as source_status,r.updated_at,s.row_id::text as row_id,s.row_version,
-                   s.sort_order,s.data,s.confirmed,s.data->>'supplierCode' as supplier_code,
-                   case when coalesce(r.data->>'catalogSource','false')='true' then 'catalog_source' else 'my_selection' end as source_purpose
-              from plm_partner_selection_row s join plm_partner_record r on r.record_id=s.record_id
-             where r.kind='selection' and r.deleted_flag=0
-               and (coalesce(r.data->>'purpose','')<>'my_selection' or r.data->>'catalogSource'='true')
-               and coalesce(s.data->>'discarded','false')<>'true'
-               and not exists(select 1 from plm_partner_event e where e.record_id=r.record_id
-                   and e.action='catalog_add' and (e.data->'createdRowIds') @> jsonb_build_array(s.row_id::text))
-               and (%s)
-            union all
-            select 'quote',r.record_id,r.code,r.name,r.version,r.status,r.updated_at,q.line_id::text,q.row_version,
-                   q.sort_order,q.data,false,coalesce(nullif(q.data->>'supplierCode',''),r.supplier_code),'catalog_source'
-              from plm_partner_quote_line q join plm_partner_record r on r.record_id=q.record_id
-             where r.kind='supplier_quote' and r.deleted_flag=0
-               and coalesce(q.data->>'discarded','false')<>'true'
-               and (coalesce(q.data->>'supplierCode','')='' or q.data->>'supplierCode'=r.supplier_code)
-               and (%s)
-            """.formatted(scope, scope);
-    }
+    private String sourceSql(Map<String,String> query){var styles=new PartnerCatalogStyles(store);return "true".equals(query.get("deleted"))?"select * from ("+styles.sourceSql(true)+") removed where coalesce(removed.data->>'discarded','false')='true'":styles.sourceSql(false);}
 
     @Transactional(readOnly = true)
     public Map<String, Object> suppliers(Map<String, String> query) {
@@ -76,7 +54,7 @@ public class PartnerCatalogService {
             for (int i = 0; i < 3; i++) arguments.add("%" + keyword + "%");
         }
         long page = page(query), size = size(query);
-        String catalog = "with catalog as (" + sourceSql() + "), catalog_suppliers as ("
+        String catalog = "with catalog as (" + sourceSql(query) + "), catalog_suppliers as ("
             + "select supplier_code,count(*) as style_count from catalog group by supplier_code) ";
         String scopedSuppliers = "from plm_supplier_profile p join catalog_suppliers c on c.supplier_code=p.supplier_code where " + filter;
         long total = store.jdbc.queryForObject(catalog + "select count(*) " + scopedSuppliers,
@@ -254,7 +232,9 @@ public class PartnerCatalogService {
         String supplier = required(query.get("supplierCode"), "请先选择供应商");
         Map<String, Object> profile = profiles.requireSupplier(supplier);
         long page = page(query), size = size(query);
-        var filter = new Filter("c.supplier_code=?", List.of(supplier));
+        var clauses=new ArrayList<String>(List.of("c.supplier_code=?"));var arguments=new ArrayList<Object>(List.of(supplier));
+        if(!text(query.get("sourceRecordId")).isEmpty()){long source=number(query.get("sourceRecordId"));String kind=text(query.get("sourceKind"));require(source>0&&Set.of("selection","quote").contains(kind),"来源资料筛选无效");clauses.add("c.record_id=? and c.source_kind=?");arguments.add(source);arguments.add(kind);}
+        var filter = new Filter(String.join(" and ",clauses),arguments,sourceSql(query));
         String keyword = text(query.getOrDefault("keyword", query.get("q"))).toLowerCase(Locale.ROOT);
         // A previous readable label must still resolve after the supplier short code changes.
         // Load only the authorized supplier's aliases once, not one query per catalogue row.
@@ -262,7 +242,7 @@ public class PartnerCatalogService {
         List<Map<String, Object>> result;
         long total;
         if (text(query.get("phoneModelId")).isEmpty() && keyword.isEmpty()) {
-            total = store.jdbc.queryForObject("select count(*) from (" + sourceSql() + ") c where " + filter.sql,
+            total = store.jdbc.queryForObject("select count(*) from (" + filter.sourceSql + ") c where " + filter.sql,
                 Long.class, filter.arguments.toArray());
             result = phones.resolveAll(fetch(filter, size, offset(page, size)));
         } else {
@@ -290,7 +270,7 @@ public class PartnerCatalogService {
         return out;
     }
 
-    private record Filter(String sql, List<Object> arguments) {}
+    private record Filter(String sql, List<Object> arguments,String sourceSql) {}
 
     private boolean matches(Map<String, Object> row, String keyword, List<String> shortCodeHistory) {
         if (keyword.isEmpty()) return true;
@@ -309,13 +289,13 @@ public class PartnerCatalogService {
         var args = new ArrayList<>(filter.arguments);
         args.add(size);
         args.add(offset);
-        return store.jdbc.queryForList("select c.*,c.data::text as row_data from (" + sourceSql() + ") c where "
+        return store.jdbc.queryForList("select c.*,c.data::text as row_data from (" + filter.sourceSql + ") c where "
             + filter.sql + " order by c.updated_at desc,c.record_id desc,c.sort_order,c.row_id limit ? offset ?", args.toArray())
             .stream().map(this::decodeSource).toList();
     }
 
     private Map<String, Object> decodeSource(Map<String, Object> source) {
-        var row = decode(store.json, source.get("row_data"));
+        var row = PartnerCatalogStyles.currentData(decode(store.json, source.get("row_data")));
         // Classify the untouched declaration before resolution may drop malformed IDs.
         // Never trust a source/client-supplied mode, or infer absence from a failed match.
         row.put("_catalogPhoneScopeMode",PartnerCatalogPhoneResolver.supplierScopeMode(row));
@@ -334,6 +314,9 @@ public class PartnerCatalogService {
     }
 
     private Map<String, Object> source(String kind, long id, String rowId, String supplier) {
+        return source(kind,id,rowId,supplier,false);
+    }
+    private Map<String,Object> source(String kind,long id,String rowId,String supplier,boolean includeDiscarded){
         require(Set.of("quote", "selection").contains(kind), "目录来源类型无效");
         require(id > 0 && PartnerSelectionService.validRowId(rowId), "目录行标识无效");
         var header = store.load(id, kind.equals("quote") ? "supplier_quote" : "selection", false);
@@ -348,7 +331,7 @@ public class PartnerCatalogService {
             "select exists(select 1 from plm_partner_event where record_id=? and action='catalog_add' and (data->'createdRowIds') @> jsonb_build_array(?::text))",
             Boolean.class, id, rowId)), "该行是已转入选品的副本，请从供应商目录选择原款式");
         var db = found.get(0);
-        var data = decode(store.json, db.get("row_data"));
+        var data = PartnerCatalogStyles.currentData(decode(store.json, db.get("row_data")));
         String actual = text(data.get("supplierCode"));
         if (kind.equals("quote")) {
             String quoteSupplier = text(header.get("supplierCode"));
@@ -356,7 +339,7 @@ public class PartnerCatalogService {
             actual = quoteSupplier;
         }
         require(!supplier.isEmpty() && supplier.equals(actual), "目录款式不属于当前供应商");
-        require(!Boolean.TRUE.equals(data.get("discarded")), "该款已排除，不在可选目录中");
+        require(includeDiscarded||!Boolean.TRUE.equals(data.get("discarded")), "该款已排除，不在可选目录中");
         db.put("source_kind", kind);
         db.put("record_id", id);
         db.put("source_code", header.get("code"));
@@ -370,33 +353,50 @@ public class PartnerCatalogService {
 
     @Transactional(readOnly = true)
     public Map<String, Object> detail(String kind, long id, String rowId, String supplier) {
+        return detail(kind,id,rowId,supplier,false);
+    }
+    @Transactional(readOnly=true)
+    public Map<String,Object> detail(String kind,long id,String rowId,String supplier,boolean includeDiscarded){
         view();
         var profile = profiles.requireSupplier(required(supplier, "请先选择供应商"));
-        return projectBatch(phones.resolveAll(List.of(source(kind, id, rowId, supplier))), profile, true).get(0);
+        return projectBatch(phones.resolveAll(List.of(source(kind, id, rowId, supplier,includeDiscarded))), profile, true).get(0);
     }
 
     private record SourceRowState(Map<String,Object> header, Map<String,Object> row, Map<String,Object> data) {}
 
     @Transactional
-    public Map<String,Object> renameStyle(String kind,long id,String rowId,String supplier,Map<String,Object> input){
+    public Map<String,Object> updateStyle(String kind,long id,String rowId,String supplier,Map<String,Object> input){
         permissions.engineer();
-        require(Set.of("name","rowVersion","recordVersion","requestId").containsAll(input.keySet()),"本次只修改款式名称");
-        String name=required(input.get("name"),"款式名称"),request=required(input.get("requestId"),"提交标识");
-        require(name.length()<=12000&&request.length()<=80,"款式名称或提交标识过长");
+        require(Set.of("name","changes","rowVersion","recordVersion","requestId").containsAll(input.keySet())&&!(input.containsKey("name")&&input.containsKey("changes")),"请只提交本次修改字段及原版本");
+        var changes=input.containsKey("changes")?map(input.get("changes")):Map.<String,Object>of("name",required(input.get("name"),"款式名称"));
+        require(!changes.isEmpty()&&EDITABLE_FIELDS.containsAll(changes.keySet()),"目录修改包含不可编辑的系统字段");
+        String request=required(input.get("requestId"),"提交标识");require(request.length()<=80,"提交标识过长");
         require(Set.of("quote","selection").contains(kind),"目录来源类型无效");
+        profiles.requireSupplier(required(supplier,"供应商"));
         var header=store.load(id,kind.equals("quote")?"supplier_quote":"selection",true);
-        var row=source(kind,id,rowId,supplier);
+        var row=source(kind,id,rowId,supplier,true);
         require(input.containsKey("rowVersion")&&input.containsKey("recordVersion")
             &&number(input.get("rowVersion"))==number(row.get("rowVersion"))
-            &&number(input.get("recordVersion"))==number(row.get("recordVersion")),"款式资料已变化，请刷新后再修改名称");
+            &&number(input.get("recordVersion"))==number(row.get("recordVersion")),"款式资料已变化，请刷新后再保存");
         var current=new SourceRowState(header,row,sourceData(kind,id,rowId,true));
-        boolean changed=!name.equals(text(current.data.get("name")));
+        var effective=PartnerCatalogStyles.currentData(current.data);
+        var mutable=new LinkedHashMap<>(effective);mutable.put("confirmed",false);mutable.put("rowId",rowId);
+        var command=new LinkedHashMap<>(changes);command.put("rowId",rowId);
+        var canonical=selections.canonicalRow(id,mutable,command);
+        var after=new LinkedHashMap<>(current.data);var metadata=new LinkedHashMap<>(map(current.data.get("catalogCurrent")));
+        var changedFields=new LinkedHashSet<>(changes.keySet());changedFields.remove("newSupplierColors");
+        if(changes.containsKey("color")||changes.containsKey("supplierColorIds")||changes.containsKey("newSupplierColors"))changedFields.addAll(List.of("supplierColorIds","supplierColors","color"));
+        for(String field:changedFields)if(!signature(store.json,effective.get(field)).equals(signature(store.json,canonical.get(field))))metadata.put(field,canonical.get(field));
+        if(changes.containsKey("currency")&&metadata.containsKey("currency"))metadata.put("currencySource",canonical.get("currencySource"));
+        if(!metadata.isEmpty())after.put("catalogCurrent",metadata);
+        var next=PartnerCatalogStyles.currentData(after);require(!text(next.get("name")).isEmpty(),"款式名称不能为空");
+        boolean changed=!signature(store.json,current.data).equals(signature(store.json,after));
         if(changed){
-            var after=new LinkedHashMap<>(current.data);after.put("name",name);
             saveSourceData(current,after,request);
-            store.event(id,"catalog_style_rename",Map.of("sourceKind",kind,"rowId",rowId,"before",text(current.data.get("name")),"after",name,"reason","更正目录款式名称"),request);
+            selections.refreshCatalogDrafts(kind,id,rowId,next,changedFields,request);
+            store.event(id,"catalog_style_update",Map.of("sourceKind",kind,"rowId",rowId,"before",effective,"after",next,"fields",changedFields,"reason","维护目录当前资料；确认和实收历史保留"),request);
         }
-        return Map.of("name",name,"rowVersion",number(row.get("rowVersion"))+(changed?1:0),"recordVersion",number(row.get("recordVersion"))+(changed?1:0),"changed",changed);
+        return Map.of("name",next.get("name"),"rowVersion",number(row.get("rowVersion"))+(changed?1:0),"recordVersion",number(row.get("recordVersion"))+(changed?1:0),"changed",changed);
     }
 
     private Map<String,Object> sourceData(String kind,long id,String rowId,boolean lock){
@@ -406,6 +406,9 @@ public class PartnerCatalogService {
     }
 
     private void saveSourceData(SourceRowState current,Map<String,Object> after,String request){
+        var metadata=new LinkedHashMap<>(map(after.get("catalogCurrent")));
+        metadata.keySet().removeIf(field->!signature(store.json,current.data.get(field)).equals(signature(store.json,after.get(field))));
+        if(metadata.isEmpty())after.remove("catalogCurrent");else after.put("catalogCurrent",metadata);
         String kind=text(current.row.get("sourceKind")),rowId=text(current.row.get("rowId"));long id=number(current.row.get("recordId")),next=number(current.row.get("rowVersion"))+1;
         String table=kind.equals("quote")?"plm_partner_quote_line":"plm_partner_selection_row",column=kind.equals("quote")?"line_id":"row_id";
         require(store.jdbc.update("update "+table+" set data=?::jsonb,row_version=?,updated_at=now(),updated_by=? where record_id=? and "+column+"=?::uuid and row_version=?",
@@ -442,25 +445,26 @@ public class PartnerCatalogService {
     }
 
     private Map<String,Object> modelSheetPlan(Map<String,Object> input, SourceRowState current, boolean lock) {
+        var data=PartnerCatalogStyles.currentData(current.data);
         var entries = PartnerCatalogModelSheet.resolve(input.get("entries"), phones.newScope());
         var originalByIndex = new HashMap<Long,String>();
         for (var entry : entries) originalByIndex.put(number(entry.get("supplierIndex")), Objects.toString(entry.get("rawModelText"), ""));
-        for (var previous : maps(current.data.get("supplierModelEntries"))) require(Objects.equals(originalByIndex.get(number(previous.get("supplierIndex"))), Objects.toString(previous.get("rawModelText"), "")),
+        for (var previous : maps(data.get("supplierModelEntries"))) require(Objects.equals(originalByIndex.get(number(previous.get("supplierIndex"))), Objects.toString(previous.get("rawModelText"), "")),
             "本次缺少或改写已保存的供方原型号条目；请保留全部原记录，不能将漏行当作删除");
         long id = number(current.row.get("recordId"));
         require(input.get("modelSheetRefs") instanceof List<?>, "请明确本款型号表原图引用");
         var refs = new LinkedHashMap<Long,Map<String,Object>>();
-        for (var ref : store.canonicalFiles(id, current.data.get("modelSheetRefs"), lock)) refs.put(number(ref.get("id")), ref);
+        for (var ref : store.canonicalFiles(id, data.get("modelSheetRefs"), lock)) refs.put(number(ref.get("id")), ref);
         for (var ref : store.canonicalFiles(id, input.get("modelSheetRefs"), lock)) refs.put(number(ref.get("id")), ref);
         require(!refs.isEmpty(), "请关联本款型号表原图，不能只保存无原件的转录");
         for (long file : refs.keySet()) require(Boolean.TRUE.equals(store.jdbc.queryForObject("select exists(select 1 from plm_partner_file f join plm_attachment a on a.attachment_id=f.attachment_id where f.record_id=? and f.attachment_id=? and f.purpose='photo' and a.deleted_flag=0 and a.content_type like 'image/%')", Boolean.class, id, file)), "型号依据须为当前来源已授权的型号表原图，不能引用财务或整本报价资料");
         var previousSheetIds = new LinkedHashSet<Long>();
-        for (var entry : maps(current.data.get("supplierModelEntries"))) previousSheetIds.addAll(PartnerSelectionService.scopeIds(entry.get("phoneModelIds")));
-        var independentIds = new LinkedHashSet<Long>(PartnerSelectionService.scopeIds(current.data.get("phoneModelIds")));
+        for (var entry : maps(data.get("supplierModelEntries"))) previousSheetIds.addAll(PartnerSelectionService.scopeIds(entry.get("phoneModelIds")));
+        var independentIds = new LinkedHashSet<Long>(PartnerSelectionService.scopeIds(data.get("phoneModelIds")));
         independentIds.removeAll(previousSheetIds);
         // A pre-existing explicit ID can overlap the first table. The original audit,
         // rather than a new ledger or a numeric-ID guess, preserves that provenance.
-        if (!maps(current.data.get("supplierModelEntries")).isEmpty()) {
+        if (!maps(data.get("supplierModelEntries")).isEmpty()) {
             var first = store.jdbc.queryForList("select (e.data->'before')::text as original_data from plm_partner_event e join plm_partner_record r on r.record_id=e.record_id where e.record_id=? and e.action='catalog_model_sheet' and e.data->>'sourceKind'=? and e.data->>'rowId'=? and r.deleted_flag=0 and (" + store.access.visibleSqlClause("partner", "r.record_id") + ") order by e.event_id limit 1",
                 id, text(current.row.get("sourceKind")), text(current.row.get("rowId")));
             require(first.size() == 1, "已有型号表缺少最初关联审计，不能猜测删除原有范围；请核对来源后再维护");
@@ -479,7 +483,7 @@ public class PartnerCatalogService {
         out.put("entries", entries); out.put("summary", PartnerCatalogModelSheet.summary(entries));
         out.put("before", before); out.put("after", after); out.put("canSave", true);
         out.put("preservedIndependentPhoneModelIds", new ArrayList<>(independentIds));
-        out.put("removedPhoneModelIds", PartnerSelectionService.scopeIds(current.data.get("phoneModelIds")).stream().filter(phone -> !ids.contains(phone)).toList());
+        out.put("removedPhoneModelIds", PartnerSelectionService.scopeIds(data.get("phoneModelIds")).stream().filter(phone -> !ids.contains(phone)).toList());
         out.put("messages", List.of("仅更新当前款式型号依据；原报价、图片、其他款式和既有选品快照不变，未匹配原文仍保留。"));
         out.put("previewToken", digest(out));
         return out;

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import {computed,ref,watch} from 'vue'
 import {onBeforeRouteLeave,onBeforeRouteUpdate} from 'vue-router'
 import {ElMessage,ElMessageBox} from 'element-plus'
@@ -178,7 +180,7 @@ watch([()=>props.record?.id,()=>props.action,()=>props.context,()=>props.editabl
   if(props.record&&props.editable)void inspect()
 },{immediate:true})
 function changeAction(value:MasterDataLifecycleAction){action.value=value;attempt=undefined;error.value=''}
-async function mayLeave(){if(busy.value)return false;if(!reason.value.trim())return true;try{await ElMessageBox.confirm('本次操作原因尚未提交，确定放弃？','未提交内容',{type:'warning'});return true}catch{return false}}
+async function mayLeave(){if(busy.value)return false;if(!reason.value.trim())return true;try{await ElMessageBox.confirm(uiText('本次操作原因尚未提交，确定放弃？'),uiText('未提交内容'),{type:'warning'});return true}catch{return false}}
 async function close(){if(await mayLeave()){++generation;emit('close')}}
 async function leave(){if(!props.record)return true;const allowed=await mayLeave();if(allowed){++generation;emit('close')}return allowed}
 onBeforeRouteLeave(leave);onBeforeRouteUpdate(leave)
@@ -194,7 +196,7 @@ async function submit(){
   try{
     const result=await props.perform(record.id,action.value,{...input,requestId:attempt.requestId})
     if(!current(serial,record.id,context))return
-    attempt=undefined;reason.value='';ElMessage.success(`${props.kindLabel}已${label.value}`);emit('completed',result);emit('close')
+    attempt=undefined;reason.value='';ElMessage.success(uiText('{value0}已{value1}',{value0:(props.kindLabel),value1:(label.value)}));emit('completed',result);emit('close')
   }catch(e){
     if(!current(serial,record.id,context))return
     error.value=partnerError(e)
@@ -208,23 +210,23 @@ function openReference(path?:string){if(path?.startsWith('/')&&!path.startsWith(
     <div v-if="record" class="record-lifecycle" v-loading="loading">
       <strong class="record-identity">{{references?.name||record.name}} <span>{{references?.code||record.code||record.id}}</span></strong>
       <el-alert v-if="error" type="error" :title="error" :closable="false"/>
-      <div class="reference-toolbar"><h3>业务引用</h3><el-button link :disabled="busy||loading" @click="inspect()">{{references?'重新检查':'重试检查'}}</el-button></div>
+      <div class="reference-toolbar"><h3>{{ uiText("业务引用") }}</h3><el-button link :disabled="busy||loading" @click="inspect()">{{references?uiText('重新检查'):uiText('重试检查')}}</el-button></div>
       <section v-if="references" class="reference-check">
-        <el-alert v-if="references.hasRestrictedReferences" title="还有当前无权查看的业务引用，不能删除。" type="warning" :closable="false"/>
+        <el-alert v-if="references.hasRestrictedReferences" :title='uiText("还有当前无权查看的业务引用，不能删除。")' type="warning" :closable="false"/>
         <section v-for="group in references.references" :key="group.kind" class="reference-group">
-          <h4>{{referenceGroupLabel(group)}} · {{group.count}}</h4>
+          <h4>{{uiText(String((referenceGroupLabel(group)) ?? ''))}} · {{group.count}}</h4>
           <div v-for="(item,index) in group.items" :key="`${item.id}:${index}`" class="reference-item">
-            <el-button v-if="item.targetPath" link type="primary" :disabled="busy" @click="openReference(item.targetPath)">{{referenceItemLabel(group,item)}}</el-button><span v-else>{{referenceItemLabel(group,item)}}</span><el-tag v-if="item.history" size="small" type="info">历史记录</el-tag>
-            <el-tag v-if="item.needsReview" size="small" type="warning">待核对</el-tag><span v-if="item.needsReview&&item.matchBasis" class="muted" :title="item.matchBasis">{{item.matchBasis}}</span>
+            <el-button v-if="item.targetPath" link type="primary" :disabled="busy" @click="openReference(item.targetPath)">{{referenceItemLabel(group,item)}}</el-button><span v-else>{{referenceItemLabel(group,item)}}</span><el-tag v-if="item.history" size="small" type="info">{{ uiText("历史记录") }}</el-tag>
+            <el-tag v-if="item.needsReview" size="small" type="warning">{{ uiText("待核对") }}</el-tag><span v-if="item.needsReview&&item.matchBasis" class="muted" :title="item.matchBasis">{{item.matchBasis}}</span>
           </div>
         </section>
-        <p v-if="!references.references.length&&!references.hasRestrictedReferences" class="muted">暂无业务引用</p>
-        <p v-if="action==='delete'&&!references.canDelete" class="blocked-delete">{{references.blockedReason||`当前不能删除此${kindLabel}，可停用并保留历史业务。`}}</p>
-        <p v-if="action==='activate'&&!references.canActivate" class="blocked-delete">{{references.blockedReason||`此${kindLabel}暂不可启用，请先核对档案。`}}</p>
-        <el-form label-position="top" :disabled="busy"><el-form-item :label="`${label}原因`" required><el-input v-model="reason" type="textarea" :autosize="{minRows:2}" maxlength="2000" show-word-limit :placeholder="action==='delete'?'例如：误建、重复建档':'填写本次操作原因'"/></el-form-item></el-form>
+        <p v-if="!references.references.length&&!references.hasRestrictedReferences" class="muted">{{ uiText("暂无业务引用") }}</p>
+        <p v-if="action==='delete'&&!references.canDelete" class="blocked-delete">{{references.blockedReason||uiText('当前不能删除此{value0}，可停用并保留历史业务。',{value0:(kindLabel)})}}</p>
+        <p v-if="action==='activate'&&!references.canActivate" class="blocked-delete">{{references.blockedReason||uiText('此{value0}暂不可启用，请先核对档案。',{value0:(kindLabel)})}}</p>
+        <el-form label-position="top" :disabled="busy"><el-form-item :label="uiText('{value0}原因',{value0:(label)})" required><el-input v-model="reason" type="textarea" :autosize="{minRows:2}" maxlength="2000" show-word-limit :placeholder="action==='delete'?uiText('例如：误建、重复建档'):uiText('填写本次操作原因')"/></el-form-item></el-form>
       </section>
     </div>
-    <template #footer><el-button :disabled="busy" @click="close">取消</el-button><el-button v-if="action==='delete'&&references?.canDeactivate" :disabled="busy||loading" @click="changeAction('deactivate')">改为停用</el-button><el-button :type="action==='delete'?'danger':'primary'" :loading="busy" :disabled="!allowed||loading" @click="submit">确认{{label}}</el-button></template>
+    <template #footer><el-button :disabled="busy" @click="close">{{ uiText("取消") }}</el-button><el-button v-if="action==='delete'&&references?.canDeactivate" :disabled="busy||loading" @click="changeAction('deactivate')">{{ uiText("改为停用") }}</el-button><el-button :type="action==='delete'?'danger':'primary'" :loading="busy" :disabled="!allowed||loading" @click="submit">{{ uiText("确认") }}{{label}}</el-button></template>
   </el-dialog>
 </template>
 <style scoped>

@@ -33,6 +33,7 @@ export const ENGINEERING_UPLOAD_ACCEPT = [
 
 export const FILE_CATEGORY_OPTIONS = [
   { label: '图纸', value: 'drawing' },
+  { label: '3D效果图（工程师指定）', value: 'render_3d' },
   { label: '工程文件', value: 'engineering' },
   { label: 'SOP', value: 'sop' },
   { label: 'SIP', value: 'sip' },

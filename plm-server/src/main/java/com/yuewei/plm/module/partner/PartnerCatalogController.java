@@ -46,15 +46,15 @@ public class PartnerCatalogController {
 
     @GetMapping("/styles/{sourceKind}/{recordId}/{rowId}")
     public ResponseVO<?> detail(@PathVariable String sourceKind, @PathVariable long recordId,
-                               @PathVariable String rowId, @RequestParam String supplierCode,
+                               @PathVariable String rowId, @RequestParam String supplierCode,@RequestParam(defaultValue="false") boolean deleted,
                                HttpServletRequest request) {
-        return ok(catalog.detail(sourceKind, recordId, rowId, supplierCode), request);
+        return ok(catalog.detail(sourceKind, recordId, rowId, supplierCode,deleted), request);
     }
 
     @PatchMapping("/styles/{sourceKind}/{recordId}/{rowId}")
-    public ResponseVO<?> rename(@PathVariable String sourceKind,@PathVariable long recordId,@PathVariable String rowId,
+    public ResponseVO<?> update(@PathVariable String sourceKind,@PathVariable long recordId,@PathVariable String rowId,
                                 @RequestParam String supplierCode,@RequestBody Map<String,Object> input,HttpServletRequest request){
-        return ok(catalog.renameStyle(sourceKind,recordId,rowId,supplierCode,input),request);
+        return ok(catalog.updateStyle(sourceKind,recordId,rowId,supplierCode,input),request);
     }
 
     @PostMapping("/selection-additions")

@@ -6,6 +6,30 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
 class DevelopmentRulesTest {
+    @Test void product3dRequiresAnExplicitFilePurposeAndSupportedFormatWithoutReclassifyingImages(){
+        var nativeFile=Map.<String,Object>of("type","file","category","drawing","fileExt",".STEP");
+        assertThat(DevelopmentRules.product3dSource(nativeFile)).isTrue();assertThat(DevelopmentRules.product3dRender(nativeFile)).isFalse();
+        for(String ext:List.of("png","JPG","jpeg","webp","pdf")){
+            var render=Map.<String,Object>of("type","file","category","render_3d","fileExt",ext);
+            assertThat(DevelopmentRules.product3dRender(render)).as(ext).isTrue();assertThat(DevelopmentRules.product3dSource(render)).isFalse();assertThat(DevelopmentRules.product3dDrawing(render)).isTrue();assertThat(DevelopmentRules.technicalReference(render)).isTrue();
+            assertThat(DevelopmentRules.requirementReferences(List.of(render))).isEmpty();
+        }
+        assertThat(DevelopmentRules.product3dDrawing(Map.of("type","file","category","drawing","fileExt","png"))).isFalse();
+        assertThat(DevelopmentRules.product3dDrawing(Map.of("type","file","category","sample_image","fileExt","jpg"))).isFalse();
+        assertThat(DevelopmentRules.product3dDrawing(Map.of("type","file","category","other","fileExt","step"))).isFalse();
+        assertThat(DevelopmentRules.product3dDrawing(Map.of("type","file","category","render_3d","fileExt","step"))).isFalse();
+        assertThat(DevelopmentRules.product3dDrawing(Map.of("type","bom","category","render_3d","fileExt","png"))).isFalse();
+    }
+    @Test void followupChecksAreVisibleButOnlyBlockingFailuresStopTheOriginalWriteGate(){
+        var old=new DevelopmentRules.ReadinessCheck("OWNER","负责人","owner",false,"请选择负责人");
+        var later=DevelopmentRules.check("DRAWING","3D图","drawings",false,()->{throw DevelopmentWorkflowStore.invalid("3D图可后补");});
+        assertThat(old.blocking()).isTrue();assertThat(old.satisfied()).isFalse();
+        assertThat(later.complete()).isFalse();assertThat(later.blocking()).isFalse();assertThat(later.satisfied()).isTrue();
+        assertThatCode(()->DevelopmentRules.requireChecks(List.of(later))).doesNotThrowAnyException();
+        assertThatThrownBy(()->DevelopmentRules.requireChecks(List.of(later,old))).hasMessage("请选择负责人");
+        var json=new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(later);
+        assertThat(json.path("blocking").booleanValue()).isFalse();assertThat(json.path("complete").booleanValue()).isFalse();
+    }
     @Test void incompleteRequirementsExposeEveryMissingFieldAndTheWriteGateUsesTheSameFailure(){
         var profile=Map.<String,Object>of("productName","透甲2.0");
         var missing=DevelopmentRules.requirementChecks(profile,false).stream().filter(c->!c.complete()).toList();

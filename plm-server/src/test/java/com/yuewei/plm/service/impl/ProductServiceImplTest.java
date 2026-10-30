@@ -69,6 +69,33 @@ class ProductServiceImplTest {
         var dto=new ProductUpdateDTO();dto.setUpdatedBy("client-claimed-updater");dto.setProductSpecificCode(code);return dto;
     }
 
+    @Test void automaticResearchIdentityUsesTheFirstUnusedPrefixAndPreservesTheOriginalProjectAndStage() {
+        var f=researchIdentityFixture(null);
+        var jdbc=mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(f.service(),"masterDataJdbc",jdbc);
+        when(jdbc.queryForList(Mockito.anyString(),Mockito.eq(String.class))).thenReturn(List.of("AA","AB","XY"));
+        when(jdbc.queryForObject(Mockito.anyString(),Mockito.eq(Long.class),Mockito.any())).thenReturn(0L);
+        assertThat(f.service().ensureResearchProductSpecificCode(42L,"real-engineer")).isEqualTo("AC");
+        assertThat(f.product().getProductCode()).isEqualTo("PRD-RESEARCH-0042");
+        assertThat(f.product().getProductCodePrefix()).isEqualTo("AC");
+        assertThat(f.product().getMoldCodePrefix()).isEqualTo("MAC");
+        assertThat(f.product().getStatus()).isEqualTo("developing");
+        assertThat(f.product().getCurrentStepNo()).isEqualTo(4);
+        verify(f.products()).updateById(f.product());
+        verify(f.audit()).logRequired(Mockito.any(),Mockito.eq(new CurrentUser(7L,"real-engineer","真实工程账号",false)));
+        assertThat(f.service().ensureResearchProductSpecificCode(42L,"real-engineer")).isEqualTo("AC");
+        verify(f.products()).updateById(f.product());
+    }
+
+    @Test void automaticResearchIdentityNeverReplacesAnExistingCodeOrAllocatesToAFrozenProject() {
+        var existing=researchIdentityFixture("BA");
+        assertThat(existing.service().ensureResearchProductSpecificCode(42L,"engineer")).isEqualTo("BA");
+        verify(existing.products(),never()).updateById(Mockito.any(Product.class));
+        var frozen=researchIdentityFixture(null);frozen.product().setLockStatus("frozen");
+        assertThatThrownBy(()->frozen.service().ensureResearchProductSpecificCode(42L,"engineer")).hasMessageContaining("冻结");
+        verify(frozen.products(),never()).updateById(Mockito.any(Product.class));
+    }
+
     @Test void releasedResearchCanFillItsEmptyCodeThroughBothOriginalWritersWithoutEditingTechnicalFacts() {
         for(boolean basic:List.of(false,true)){
             var f=researchIdentityFixture(null);f.product().setStatus("released");f.product().setLockStatus("unlocked");

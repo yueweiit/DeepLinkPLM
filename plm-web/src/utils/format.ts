@@ -1,4 +1,5 @@
 import dayjs from 'dayjs'
+import { currentLanguage } from '@/locales'
 
 export function formatDate(value: string | Date | null | undefined, pattern = 'YYYY-MM-DD') {
   if (!value) {
@@ -21,7 +22,7 @@ export function formatAmount(amount: number | null | undefined, currency = 'CNY'
     return '--'
   }
 
-  return new Intl.NumberFormat('zh-CN', {
+  return new Intl.NumberFormat(currentLanguage.value === 'es' ? 'es-MX' : 'zh-CN', {
     style: 'currency',
     currency,
     minimumFractionDigits: 2

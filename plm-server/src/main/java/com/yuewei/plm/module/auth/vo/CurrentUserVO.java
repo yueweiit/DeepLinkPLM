@@ -20,6 +20,8 @@ public class CurrentUserVO {
     private String roleCode;
     private String departmentName;
     private boolean canMaintainEngineeringData;
+    @Builder.Default
+    private String preferredLanguage = "zh-CN";
 
     public static CurrentUserVO from(CurrentUser currentUser) {
         return CurrentUserVO.builder()

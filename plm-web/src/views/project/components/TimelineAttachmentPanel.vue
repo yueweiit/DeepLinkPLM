@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { Delete, Download, Refresh, Upload, View } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox, type UploadFile, type UploadUserFile } from 'element-plus'
 import { computed, reactive, ref, watch } from 'vue'
@@ -87,7 +89,7 @@ function handleFileChange(uploadFile: UploadFile) {
   const file = uploadFile.raw || null
   if (!file) return
   if (file.size > MAX_UPLOAD_FILE_SIZE_BYTES) {
-    ElMessage.warning(`单个文件不能超过 ${formatFileSize(MAX_UPLOAD_FILE_SIZE_BYTES)}`)
+    ElMessage.warning(uiText('单个文件不能超过 {value0}',{value0:(formatFileSize(MAX_UPLOAD_FILE_SIZE_BYTES))}))
     selectedFile.value = null
     fileList.value = []
     return
@@ -103,11 +105,11 @@ function handleFileRemove() {
 
 async function uploadFile() {
   if (isNodeScope.value && !props.nodeKey) {
-    ElMessage.warning('当前项目没有可用的时间轴节点')
+    ElMessage.warning(uiText('当前项目没有可用的时间轴节点'))
     return
   }
   if (!selectedFile.value) {
-    ElMessage.warning('请先选择文件')
+    ElMessage.warning(uiText('请先选择文件'))
     return
   }
   uploading.value = true
@@ -127,22 +129,22 @@ async function uploadFile() {
     uploadForm.remark = ''
     await loadAttachments()
     emit('changed')
-    ElMessage.success(isNodeScope.value ? '当前节点资料已上传' : '项目文件已上传')
+    ElMessage.success(isNodeScope.value ? uiText('当前节点资料已上传') : uiText('项目文件已上传'))
   } finally {
     uploading.value = false
   }
 }
 
 async function removeFile(attachment: AttachmentVO) {
-  await ElMessageBox.confirm(`确认删除“${attachment.originalFileName}”吗？`, '删除附件', {
-    confirmButtonText: '删除',
-    cancelButtonText: '取消',
+  await ElMessageBox.confirm(uiText('确认删除“{value0}”吗？',{value0:(attachment.originalFileName)}), uiText('删除附件'), {
+    confirmButtonText: uiText('删除'),
+    cancelButtonText: uiText('取消'),
     type: 'warning'
   })
   await deleteAttachment(attachment.attachmentId)
   await loadAttachments()
   emit('changed')
-  ElMessage.success('附件已删除')
+  ElMessage.success(uiText('附件已删除'))
 }
 
 watch([() => props.projectId, () => props.nodeKey, () => props.scope], loadAttachments, { immediate: true })
@@ -152,20 +154,20 @@ watch([() => props.projectId, () => props.nodeKey, () => props.scope], loadAttac
   <div class="attachment-panel" v-loading="loading">
     <div class="attachment-panel__toolbar">
       <div>
-        <h4 class="section-title">{{ panelTitle }}</h4>
+        <h4 class="section-title">{{ uiText(String((panelTitle) ?? '')) }}</h4>
         <p class="page-panel-desc">{{ panelDescription }}</p>
       </div>
-      <el-button :icon="Refresh" circle title="刷新附件" @click="loadAttachments" />
+      <el-button :icon="Refresh" circle :title='uiText("刷新附件")' @click="loadAttachments" />
     </div>
 
     <el-alert v-if="loadError" :title="loadError" type="error" show-icon :closable="false" />
 
     <div class="attachment-upload-bar">
-      <el-select v-model="uploadForm.fileCategory" aria-label="文件分类" placeholder="文件分类">
-        <el-option v-for="item in categoryOptions" :key="item.value" :label="item.label" :value="item.value" />
+      <el-select v-model="uploadForm.fileCategory" :aria-label='uiText("文件分类")' :placeholder='uiText("文件分类")'>
+        <el-option v-for="item in categoryOptions" :key="item.value" :label="uiText(item.label)" :value="item.value" />
       </el-select>
-      <el-input v-model="uploadForm.versionNo" aria-label="文件版本" placeholder="版本，例如 V1" maxlength="50" />
-      <el-input v-model="uploadForm.remark" aria-label="附件备注" placeholder="备注" maxlength="500" />
+      <el-input v-model="uploadForm.versionNo" :aria-label='uiText("文件版本")' :placeholder='uiText("版本，例如 V1")' maxlength="50" />
+      <el-input v-model="uploadForm.remark" :aria-label='uiText("附件备注")' :placeholder='uiText("备注")' maxlength="500" />
       <el-upload
         v-model:file-list="fileList"
         action="#"
@@ -175,7 +177,7 @@ watch([() => props.projectId, () => props.nodeKey, () => props.scope], loadAttac
         :on-change="handleFileChange"
         :on-remove="handleFileRemove"
       >
-        <el-button :icon="Upload">选择文件</el-button>
+        <el-button :icon="Upload">{{ uiText("选择文件") }}</el-button>
       </el-upload>
       <el-button
         data-test="attachment-upload"
@@ -184,32 +186,30 @@ watch([() => props.projectId, () => props.nodeKey, () => props.scope], loadAttac
         :disabled="!canUpload"
         :loading="uploading"
         @click="uploadFile"
-      >
-        上传
-      </el-button>
+      >{{ uiText(" 上传 ") }}</el-button>
     </div>
 
     <template v-if="!loadError">
       <el-table :data="attachments" border stripe size="small" class="attachment-panel__table">
-        <el-table-column prop="originalFileName" label="文件名称" min-width="220" />
-        <el-table-column label="归属节点" min-width="150">
+        <el-table-column prop="originalFileName" :label='uiText("文件名称")' min-width="220" />
+        <el-table-column :label='uiText("归属节点")' min-width="150">
           <template #default="{ row }">{{ row.timelineStepName || row.timelineStageName || row.timelineNodeKey || '--' }}</template>
         </el-table-column>
-        <el-table-column label="分类" width="110"><template #default="{ row }">{{ fileCategoryLabel(row.fileCategory) }}</template></el-table-column>
-        <el-table-column prop="versionNo" label="版本" width="90" />
-        <el-table-column label="大小" width="100"><template #default="{ row }">{{ formatFileSize(row.fileSize) }}</template></el-table-column>
-        <el-table-column prop="createdBy" label="上传人" width="120" />
-        <el-table-column prop="createdAt" label="上传时间" min-width="170" />
-        <el-table-column prop="remark" label="备注" min-width="150"><template #default="{ row }">{{ row.remark || '--' }}</template></el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column :label='uiText("分类")' width="110"><template #default="{ row }">{{ uiText(fileCategoryLabel(row.fileCategory)) }}</template></el-table-column>
+        <el-table-column prop="versionNo" :label='uiText("版本")' width="90" />
+        <el-table-column :label='uiText("大小")' width="100"><template #default="{ row }">{{ formatFileSize(row.fileSize) }}</template></el-table-column>
+        <el-table-column prop="createdBy" :label='uiText("上传人")' width="120" />
+        <el-table-column prop="createdAt" :label='uiText("上传时间")' min-width="170" />
+        <el-table-column prop="remark" :label='uiText("备注")' min-width="150"><template #default="{ row }">{{ row.remark || '--' }}</template></el-table-column>
+        <el-table-column :label='uiText("操作")' width="150" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" :icon="View" title="查看" @click="viewAttachment(row)" />
-            <el-button link type="primary" :icon="Download" title="下载" @click="downloadFile(row)" />
-            <el-button link type="danger" :icon="Delete" title="删除" @click="removeFile(row)" />
+            <el-button link type="primary" :icon="View" :title='uiText("查看")' @click="viewAttachment(row)" />
+            <el-button link type="primary" :icon="Download" :title='uiText("下载")' @click="downloadFile(row)" />
+            <el-button link type="danger" :icon="Delete" :title='uiText("删除")' @click="removeFile(row)" />
           </template>
         </el-table-column>
       </el-table>
-      <el-empty v-if="!attachments.length" :description="isNodeScope ? '当前节点还没有附件' : '当前项目还没有附件'" />
+      <el-empty v-if="!attachments.length" :description="isNodeScope ? uiText('当前节点还没有附件') : uiText('当前项目还没有附件')" />
     </template>
   </div>
 </template>

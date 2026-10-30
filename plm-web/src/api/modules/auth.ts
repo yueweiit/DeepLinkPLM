@@ -1,5 +1,6 @@
 import request, { unwrapResponse } from '../request'
 import type { UserProfile } from '@/types/common'
+import { normalizeLanguage, type Language } from '@/locales/language'
 
 export interface LoginRequest {
   username: string
@@ -7,6 +8,7 @@ export interface LoginRequest {
 }
 
 interface BackendCurrentUser {
+  preferredLanguage?: string
   userId: number
   username: string
   displayName: string
@@ -41,6 +43,7 @@ export interface ProfileResponse {
 
 function toProfile(user: BackendCurrentUser): UserProfile {
   return {
+    preferredLanguage: normalizeLanguage(user.preferredLanguage),
     userId: Number(user.userId),
     canMaintainEngineeringData: user.allPermissions || user.canMaintainEngineeringData === true,
     roleCode: user.roleCode,
@@ -72,6 +75,10 @@ export async function login(payload: LoginRequest): Promise<LoginResponse> {
 }
 
 export const loginByPassword = login
+
+export async function saveOwnLanguage(language: Language, originalLanguage: Language): Promise<{preferredLanguage: Language}> {
+  return unwrapResponse(await request.patch('/auth/language', {language, originalLanguage}))
+}
 
 export async function loginByDingTalkCode(code: string): Promise<LoginResponse> {
   return toSession(unwrapResponse<BackendLoginResponse>(await request.post('/pilot/dingtalk/login', { code })))

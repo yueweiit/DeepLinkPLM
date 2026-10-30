@@ -18,8 +18,14 @@ import ProductResearchView from "../ProductLaunchView.vue";
 import DevelopmentReviewPanel from "../components/DevelopmentReviewPanel.vue";
 import StageReadinessChecklist from "../components/StageReadinessChecklist.vue";
 import ResearchMaterialsPanel from "../components/ResearchMaterialsPanel.vue";
+import Product3dMaterials from "../components/Product3dMaterials.vue";
+import ResearchMoldCoding from "../components/ResearchMoldCoding.vue";
 import SupplierFeedbackPanel from "../components/SupplierFeedbackPanel.vue";
 import EngineeringBasisPanel from "../components/EngineeringBasisPanel.vue";
+import MoldApplicationFile from '@/views/mold-applications/components/MoldApplicationFile.vue';
+import MoldApplicationDetailDrawer from '@/views/mold-applications/components/MoldApplicationDetailDrawer.vue';
+import PhoneModelMultiSelect from '@/components/PhoneModelMultiSelect/index.vue';
+import {authorizedBlobs} from '@/utils/authorizedBlobQueue';
 import { useCollaborationWorkspace } from '@/stores/collaborationWorkspace';
 import SharedCompatiblePhoneSelector from "@/views/mold/components/SharedCompatiblePhoneSelector.vue";
 import {
@@ -52,7 +58,7 @@ import {
 } from "@/api/modules/project";
 import { createProductResearch } from "@/api/modules/product";
 import { PRODUCT_RESEARCH_STAGES } from "@/constants/productResearch";
-import { getMoldApplication, getResearchMoldApplicationContext, startResearchMoldApplication } from "@/api/modules/moldApplications";
+import { archiveMoldFiles, downloadMoldFile, getMoldApplication, getResearchMoldApplicationContext, saveResearchMoldCoding, startResearchMoldApplication } from "@/api/modules/moldApplications";
 const moldEditorOpen=vi.hoisted(()=>vi.fn());
 const moldEditorOpenResearch=vi.hoisted(()=>vi.fn());
 vi.mock('@/views/mold-applications/components/MoldApplicationEditor.vue',()=>({default:{name:'MoldApplicationEditor',setup(_:unknown,{expose}:{expose:(api:unknown)=>void}){expose({open:moldEditorOpen,openResearch:moldEditorOpenResearch});return()=>null;}}}));
@@ -91,13 +97,18 @@ vi.mock("@/api/modules/phoneReference", () => ({
 vi.mock("@/api/modules/supplier", () => ({
   getSupplierCenterSnapshot: vi.fn().mockResolvedValue({ suppliers: [] }),
 }));
-vi.mock("@/api/modules/moldApplications", () => ({
+vi.mock("@/api/modules/moldApplications", async original => ({
+  ...await original<typeof import('@/api/modules/moldApplications')>(),
+  getMoldOptions:vi.fn().mockResolvedValue({processCode:'research',syncRunning:false,controls:[],configs:[],productLines:[],originators:[],canCreate:true,canConvert:false,administrator:false,canSubmit:false,writeEnabled:false,centralCodeEnabled:false}),
   getMoldApplications: vi.fn().mockResolvedValue({ content: [] }),
   getMoldTargetOptions: vi.fn().mockResolvedValue({ existingApplications: [] }),
   startResearchMoldApplication: vi.fn(),
   getResearchMoldApplicationContext: vi.fn(),
   getMoldApplication: vi.fn(),
-  moldBusinessStatusNames:{draft:'草稿',awaiting_approval:'待 Tiffany 审核',approved:'Tiffany 已同意'},
+  archiveMoldFiles: vi.fn(),
+  saveResearchMoldCoding: vi.fn(),
+  downloadMoldFile: vi.fn(),
+  moldBusinessStatusNames:{draft:'草稿',awaiting_approval:'待 Tiffany 审核',approved:'Tiffany 已同意',rejected:'已拒绝',withdrawn:'已撤回',terminated:'已终止',approval_unknown:'审批待核对'},
 }));
 vi.mock("@/composables/useAttachmentViewer", () => ({
   useAttachmentViewer: () => ({ viewAttachment: vi.fn(), downloadFile: vi.fn() }),
@@ -224,7 +235,7 @@ beforeEach(() => {
   moldEditorOpen.mockResolvedValue(undefined);
   moldEditorOpenResearch.mockResolvedValue(undefined);
   vi.mocked(getResearchMoldApplicationContext).mockResolvedValue(researchContext() as any);
-  vi.mocked(getMoldApplication).mockResolvedValue({applicationId:88,status:'draft',canEditDraft:true,files:[]} as any);
+  vi.mocked(getMoldApplication).mockResolvedValue({applicationId:88,productLineId:42,status:'draft',canEditDraft:true,form:{},files:[],activities:[]} as any);
   vi.mocked(checkResearchDesign).mockResolvedValue({version:2,ready:true,checks:[]});
   vi.mocked(checkResearchStage).mockResolvedValue({version:2,ready:true,checks:[]});
   vi.mocked(getPhoneModelOptions).mockResolvedValue([]);
@@ -252,7 +263,7 @@ beforeEach(() => {
     nodes: PRODUCT_RESEARCH_STAGES.map(s=>({stepNo:s.step,nodeKey:`RESEARCH_${s.key}`,nodeName:s.name} as TimelineNodeVO)),
   });
 });
-afterEach(() => {wrapper?.unmount();vi.restoreAllMocks();});
+afterEach(() => {wrapper?.unmount();authorizedBlobs.clear();vi.restoreAllMocks();});
 
 vi.mock("@/api/modules/development", () => ({
   getFinanceRows: vi.fn().mockResolvedValue({ content: [], totalElements: 0 }),
@@ -274,6 +285,69 @@ async function launch(d=current(),shown=d.currentStepNo){
 const nextButton=(step:number)=>step===1?'确认立项，开始画图':step===8?'完成本项目发模':`完成本步，进入${PRODUCT_RESEARCH_STAGES[step]!.name}`;
 const fields=(name:string)=>wrapper.findAll('.el-form-item').find(f=>f.find('.el-form-item__label').exists()&&f.get('.el-form-item__label').text()===name)!;
 const missing=(target:string,title:string)=>({code:target.toUpperCase(),title,target,complete:false,message:`请补齐${title}`});
+
+describe('research application continuity and inline approval details',()=>{
+ const refused=()=>({applicationId:88,version:4,productLineId:42,projectId:null,approvalNo:'APP-REFUSED',status:'completed',businessStatus:'rejected',terminal:true,phoneModelId:99,model:'Honor 600 lite',canEditDraft:false,refusal:{reason:'这个型号不好卖',actorName:'周汉琴',actorId:'verified',occurredAt:'2026-10-29T10:00:00+08:00'}});
+ const nextPhone={id:2,phoneModelId:2,brandId:1,brandName:'Apple',modelName:'iPhone 18 Pro',status:'enabled',phoneModelCode:'1217',codeItemId:72,aliases:[]};
+ function nextSource(){const source=researchContext();return {...source,phoneModelId:2,form:{...source.form,model:'iPhone 18 Pro'},activeApplications:[],historyApplications:[refused()],existingApplications:[],sourceSnapshot:{research:{...source.sourceSnapshot.research,phoneModelId:2,phoneModelName:'iPhone 18 Pro'}}};}
+ it('shows current phones separately from the refused phone and opens its real detail in the list page',async()=>{
+  const old=refused(),active={...old,applicationId:89,approvalNo:'APP-DRAFT',phoneModelId:2,model:'iPhone 18 Pro',status:'draft',businessStatus:'draft',terminal:false,refusal:null};
+  const older={...old,applicationId:87,model:'旧手机',approvalNo:'OLDER-REFUSAL',refusal:{...old.refusal,reason:'过去的审批意见'}};
+  vi.mocked(getProductResearch).mockResolvedValue({content:[{...record(),currentStepNo:2,currentStage:'画3D产品图',model:'--',phoneModels:[nextPhone],nextAction:'采用开发型号与3D图纸',moldApplicationSummary:{applications:[active,old,older],activeApplications:[active],historyApplications:[old,older],activeCount:1,historyCount:2,totalCount:3,canCreate:true}}],totalElements:1} as any);
+  vi.mocked(getMoldApplication).mockResolvedValue({...old,sourceSystem:'dingtalk',form:{},files:[],activities:[]} as any);
+  const router=await start('/product-research');const row=wrapper.get('.project-row');expect(row.text()).toContain('本次开发型号');expect(row.text()).toContain('iPhone 18 Pro');expect(row.text()).toContain('Honor 600 lite · 已拒绝');expect(row.text()).toContain('这个型号不好卖');expect(row.findAll('.approval-line')).toHaveLength(2);expect(row.text()).not.toContain('过去的审批意见');expect(getMoldApplication).not.toHaveBeenCalled();
+  await button('查看原审批',row).trigger('click');await flushPromises();expect(getMoldApplication).toHaveBeenCalledWith(88);expect(router.currentRoute.value.fullPath).toBe('/product-research');expect(wrapper.getComponent(MoldApplicationDetailDrawer).text()).toContain('APP-REFUSED');expect(startResearchMoldApplication).not.toHaveBeenCalled();
+ });
+ it('selects another real phone after rejection and prepares the original editor without changing project or creating on open',async()=>{
+  const d=current(2);d.applications=[refused()];vi.mocked(getPhoneModelOptions).mockResolvedValue([nextPhone] as any);const source=nextSource();vi.mocked(getResearchMoldApplicationContext).mockResolvedValue(source as any);const router=await launch(d);
+  await button('选择其他型号',wrapper.get('[aria-label="LEMOS开模申请"]')).trigger('click');await flushPromises();expect(getResearchMoldApplicationContext).not.toHaveBeenCalled();
+  const picker=wrapper.findAllComponents(PhoneModelMultiSelect).find(item=>item.props('ariaLabel')==='选择其他型号')!;expect(picker.exists()).toBe(true);picker.vm.$emit('update:modelValue',[2]);await flushPromises();await button('为所选型号填写申请').trigger('click');await flushPromises();
+  expect(getResearchMoldApplicationContext).toHaveBeenCalledWith({projectId:42,version:2,phoneModelId:2});expect(moldEditorOpenResearch).toHaveBeenCalledWith(source,{projectInputUnsaved:false});expect(router.currentRoute.value.query).toEqual({step:'drawing',productId:'42'});expect(d.applications[0]).toEqual(refused());expect(startResearchMoldApplication).not.toHaveBeenCalled();expect(researchAction).not.toHaveBeenCalled();expect(saveResearchDesignDraft).not.toHaveBeenCalled();
+ });
+ it('opens an existing approval for the selected phone in the same page instead of preparing another one',async()=>{
+  const d=current(2);d.applications=[refused()];vi.mocked(getPhoneModelOptions).mockResolvedValue([nextPhone] as any);const active={...refused(),applicationId:89,phoneModelId:2,model:'iPhone 18 Pro',status:'submitted',businessStatus:'awaiting_approval',terminal:false,refusal:null};
+  vi.mocked(getResearchMoldApplicationContext).mockResolvedValue({...nextSource(),existingApplication:active} as any);vi.mocked(getMoldApplication).mockResolvedValue({...active,form:{},files:[],activities:[]} as any);const router=await launch(d);
+  await button('选择其他型号',wrapper.get('[aria-label="LEMOS开模申请"]')).trigger('click');await flushPromises();wrapper.findAllComponents(PhoneModelMultiSelect).find(item=>item.props('ariaLabel')==='选择其他型号')!.vm.$emit('update:modelValue',[2]);await flushPromises();await button('为所选型号填写申请').trigger('click');await flushPromises();
+  expect(getMoldApplication).toHaveBeenCalledWith(89);expect(router.currentRoute.value.path).toBe('/product-research');expect(wrapper.getComponent(MoldApplicationDetailDrawer).text()).toContain('iPhone 18 Pro');expect(moldEditorOpenResearch).not.toHaveBeenCalled();expect(startResearchMoldApplication).not.toHaveBeenCalled();
+ });
+});
+
+describe('step-five coding uses the existing save action',()=>{
+ function codingRecord(){const d=current(5);d.applications=[{applicationId:88,version:3,status:'submitted',businessStatus:'approved',model:'既有标准手机',canMaintainResearchCoding:true,authorization:{approverUserId:'real-tiffany',approverName:'周汉琴',taskId:'task-88'},researchCoding:{status:'pending',missingFields:['operationCode'],materialCodes:['10','20'],generatedMoldCodes:['MHA100030','MHA200030'],operationOptions:[{code:'4020',name:'既有最终工序'}]}}];return d;}
+ it('keeps one coding block inside step five and saves a missing process with the latest application version',async()=>{
+  const d=codingRecord();await launch(d)
+  expect(wrapper.findAllComponents(ResearchMoldCoding)).toHaveLength(1)
+  expect(wrapper.get('.project-header').text()).not.toContain('LEMOS')
+  const panel=wrapper.getComponent(ResearchMoldCoding)
+  panel.vm.$emit('update:inputs',{88:{operationCode:'4020'}});await flushPromises()
+  vi.mocked(getMoldApplication).mockResolvedValue({...d.applications[0],version:9})
+  vi.mocked(saveResearchMoldCoding).mockImplementation(async()=>{d.applications[0]={...d.applications[0],version:10,researchCoding:{...d.applications[0].researchCoding,status:'ready',missingFields:[],generatedProductCodes:['NHA4020003002']}};return d.applications[0]})
+  await button('保存草稿').trigger('click');await flushPromises()
+  expect(saveResearchMoldCoding).toHaveBeenCalledExactlyOnceWith(88,{version:9,operationCode:'4020'})
+  expect(researchAction).toHaveBeenCalledWith(42,'launch_draft',2,expect.not.objectContaining({researchCodingInputs:expect.anything()}))
+  expect(panel.text()).toContain('NHA4020003002');expect(panel.props('inputs')).toEqual({})
+  expect(startResearchMoldApplication).not.toHaveBeenCalled();expect(confirmTimelineNode).not.toHaveBeenCalled()
+ })
+ it('retains missing-field input after a conflict and retries through the same save action',async()=>{
+  const d=codingRecord();await launch(d)
+  const panel=wrapper.getComponent(ResearchMoldCoding);panel.vm.$emit('update:inputs',{88:{operationCode:'4020'}});await flushPromises()
+  vi.mocked(getMoldApplication).mockResolvedValue({...d.applications[0],version:9})
+  vi.mocked(saveResearchMoldCoding).mockRejectedValueOnce(new Error('申请已更新，请刷新后保存编码资料')).mockImplementationOnce(async()=>{d.applications[0]={...d.applications[0],version:11,researchCoding:{status:'ready',missingFields:[],generatedMoldCodes:['MHA100030'],generatedProductCodes:['NHA4020003002']}};return d.applications[0]})
+  await button('保存草稿').trigger('click');await flushPromises()
+  expect(wrapper.text()).toContain('申请已更新');expect(panel.props('inputs')).toEqual({88:{operationCode:'4020'}})
+  vi.mocked(getMoldApplication).mockResolvedValue({...d.applications[0],version:10})
+  await button('保存草稿').trigger('click');await flushPromises()
+  expect(vi.mocked(saveResearchMoldCoding).mock.calls.map(call=>call[1].version)).toEqual([9,10])
+  expect(panel.props('inputs')).toEqual({});expect(startResearchMoldApplication).not.toHaveBeenCalled()
+ })
+ it('checks the current login before writing coding inputs returned by a late detail response',async()=>{
+  const d=codingRecord();await launch(d)
+  wrapper.getComponent(ResearchMoldCoding).vm.$emit('update:inputs',{88:{operationCode:'4020'}});await flushPromises()
+  let finish!:(row:any)=>void;vi.mocked(getMoldApplication).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}))
+  await button('保存草稿').trigger('click');await flushPromises();useUserStore().token='another-login';finish({...d.applications[0],version:9});await flushPromises()
+  expect(saveResearchMoldCoding).not.toHaveBeenCalled();expect(wrapper.text()).toContain('重新载入核对保存结果')
+ })
+})
 
 describe('supplier feedback summary opens the existing project panel',()=>{
  const summary=(values:Partial<SupplierFeedbackSummary>={}):SupplierFeedbackSummary=>({cannotAcceptSupplierCount:2,nextSupplierPending:true,hasFeedback:true,restricted:false,...values});
@@ -387,6 +461,12 @@ describe('one project and eight steps',()=>{
   expect(alert).toHaveBeenCalledWith(expect.stringContaining('开发需求'),'本步缺项');expect(confirm).not.toHaveBeenCalled();expect(confirmTimelineNode).not.toHaveBeenCalled();
   await vi.waitFor(()=>expect(wrapper.get('[data-readiness-target="owner"] .el-form-item__error').text()).toBe('请补齐项目负责人'));
  });
+ it.each([2,3])('completes step %s with a server-deferred 3D drawing without adopting files or skipping the confirmation action',async(step)=>{
+  const d=current(step);d.workflow.stage2Basis={references:[]};if(step===3)d.rounds=[{...record().rounds[0],roundId:81,status:'confirmed',result:'pending',details:{samplePurpose:'prototype_3d',phoneModelIds:[1]}}];vi.mocked(checkResearchStage).mockResolvedValue({version:2,ready:true,checks:[{code:step===2?'PRODUCT_3D_DRAWING':'PROTOTYPE_DRAWING',title:'3D产品图',target:'drawings',complete:false,blocking:false,message:'3D图可后补，不影响本步'}]});const alert=vi.spyOn(ElMessageBox,'alert').mockResolvedValue('confirm' as any);vi.spyOn(ElMessageBox,'confirm').mockResolvedValue('confirm' as any);const router=await launch(d);expect(confirmTimelineNode).not.toHaveBeenCalled();await button(nextButton(step)).trigger('click');await flushPromises();expect(alert).not.toHaveBeenCalled();expect(confirmTimelineNode).toHaveBeenCalledWith(42,`RESEARCH_${PRODUCT_RESEARCH_STAGES[step-1]!.key}`,`完成${PRODUCT_RESEARCH_STAGES[step-1]!.name}`,2);expect(router.currentRoute.value.query.step).toBe(PRODUCT_RESEARCH_STAGES[step]!.key);if(step===2)expect(researchAction).toHaveBeenCalledWith(42,'launch_draft',2,expect.objectContaining({stage:2,references:[]}));expect(uploadProjectAttachment).not.toHaveBeenCalled();expect(startResearchMoldApplication).not.toHaveBeenCalled();
+ });
+ it('still blocks missing representative phones when the 3D drawing alone is deferred',async()=>{
+  vi.mocked(checkResearchStage).mockResolvedValue({version:2,ready:false,checks:[{code:'PRODUCT_3D_DRAWING',title:'3D产品图',target:'drawings',complete:false,blocking:false,message:'3D图可后补，不影响本步'},missing('phones','本次开发型号')]});const alert=vi.spyOn(ElMessageBox,'alert').mockResolvedValue('confirm' as any),confirm=vi.spyOn(ElMessageBox,'confirm').mockResolvedValue('confirm' as any);await launch(current(2));await button(nextButton(2)).trigger('click');await flushPromises();expect(alert).toHaveBeenCalledWith('请补齐：请补齐本次开发型号','本步缺项');expect(confirm).not.toHaveBeenCalled();expect(confirmTimelineNode).not.toHaveBeenCalled();
+ });
  it('confirms initiation with optional dates and the owner dropdown still loading',async()=>{
   const d=current();delete d.workflow.planDraft.phoneModelIds;d.workflow.profileDraft.phoneModelIds=[];
   vi.mocked(getResearchOwnerOptions).mockReturnValue(new Promise(()=>{}));vi.spyOn(ElMessageBox,'confirm').mockResolvedValue('confirm' as any);
@@ -493,8 +573,8 @@ describe('engineering evidence is produced at the right step',()=>{
   const router=await launch(current(6),1);expect(wrapper.findComponent(ElForm).props('disabled')).toBe(true);await button('发起LEMOS开模申请').trigger('click');await flushPromises();expect(moldEditorOpenResearch).toHaveBeenCalledOnce();expect(router.currentRoute.value.query.step).toBe('initiation');expect(researchAction).not.toHaveBeenCalled();expect(saveResearchDesignDraft).not.toHaveBeenCalled();
  });
  it('continues an existing draft without replacing its manual form or adopting it as mold design',async()=>{
-  const d=current(5);d.applications=[{applicationId:88,status:'draft',canEditDraft:true,phoneModelId:1},{applicationId:89,status:'draft',canEditDraft:true,phoneModelId:null}];vi.mocked(getMoldApplication).mockResolvedValue({applicationId:88,status:'draft',canEditDraft:true,form:{remark:'原申请人工填写'}} as any);await launch(d);
-  const summaries=wrapper.get('[aria-label="LEMOS开模申请"]').findAll('.research-application-row');expect(summaries[0]!.text()).toContain('申请 #88 · 标准手机资料待读取 · 草稿');expect(summaries[1]!.text()).toContain('申请 #89 · 标准手机待补充 · 草稿');expect(summaries[1]!.text()).not.toContain('#null');
+  const d=current(5);d.applications=[{applicationId:88,status:'draft',canEditDraft:true,phoneModelId:1},{applicationId:89,status:'draft',canEditDraft:true,phoneModelId:null}];vi.mocked(getMoldApplication).mockResolvedValue({applicationId:88,productLineId:42,status:'draft',canEditDraft:true,form:{remark:'原申请人工填写'}} as any);await launch(d);
+  const summaries=wrapper.get('[aria-label="LEMOS开模申请"]').findAll('.research-application-row');expect(summaries[0]!.text()).toContain('申请 #88 · 标准手机资料待读取');expect(summaries[1]!.text()).toContain('申请 #89 · 标准手机待补充');expect(wrapper.get('[aria-label="LEMOS开模申请"]').text()).toContain('草稿');expect(summaries[1]!.text()).not.toContain('#null');
   await button('继续填写',wrapper.get('[aria-label="LEMOS开模申请"]')).trigger('click');await flushPromises();
   expect(moldEditorOpen).toHaveBeenCalledWith(expect.objectContaining({applicationId:88,form:{remark:'原申请人工填写'}}));expect(startResearchMoldApplication).not.toHaveBeenCalled();expect(researchAction).not.toHaveBeenCalled();
  });
@@ -507,24 +587,42 @@ describe('engineering evidence is produced at the right step',()=>{
   await button('发起LEMOS开模申请').trigger('click');await flushPromises();expect(getResearchMoldApplicationContext).toHaveBeenCalledWith({projectId:42,version:2});expect(moldEditorOpenResearch).toHaveBeenCalledWith(expect.objectContaining({phoneModelId:null,form:expect.objectContaining({model:'Honor 600 Lite'})}),expect.any(Object));expect(startResearchMoldApplication).not.toHaveBeenCalled();expect(researchAction).not.toHaveBeenCalled();
  });
  it('prioritizes the original linked approval on the research header and shows its actual phone name without code guesses',async()=>{
-  const d=current(2);d.applications=[{applicationId:88,approvalNo:'original-approval',status:'submitted',businessStatus:'awaiting_approval',canEditDraft:false,phoneModelId:1333,model:'Honor 600 Lite 5G'}];const router=await launch(d);
-  const header=wrapper.get('.project-header');expect(header.text()).toContain('查看LEMOS审批进度');expect(header.text()).not.toContain('发起LEMOS开模申请');const entry=wrapper.get('[aria-label="LEMOS开模申请"]');expect(entry.text()).toContain('original-approval · Honor 600 Lite 5G · 待 Tiffany 审核');expect(entry.text()).not.toContain('#1333');await button('查看LEMOS审批进度',header).trigger('click');await flushPromises();expect(router.currentRoute.value.query.applicationId).toBe('88');expect(getResearchMoldApplicationContext).not.toHaveBeenCalled();expect(startResearchMoldApplication).not.toHaveBeenCalled();expect(researchAction).not.toHaveBeenCalled();
+  const d=current(2);d.applications=[{applicationId:88,approvalNo:'original-approval',status:'submitted',businessStatus:'awaiting_approval',canEditDraft:false,phoneModelId:1333,model:'Honor 600 Lite 5G'}];vi.mocked(getMoldApplication).mockResolvedValue({...d.applications[0],productLineId:42,form:{model:'Honor 600 Lite 5G'},files:[],activities:[]} as any);const router=await launch(d);
+  const header=wrapper.get('.project-header');expect(header.text()).toContain('查看LEMOS审批进度');expect(header.text()).not.toContain('发起LEMOS开模申请');const entry=wrapper.get('[aria-label="LEMOS开模申请"]');expect(entry.text()).toContain('original-approval · Honor 600 Lite 5G · 待 Tiffany 审核');expect(entry.text()).not.toContain('#1333');await button('查看LEMOS审批进度',header).trigger('click');await flushPromises();expect(router.currentRoute.value.path).toBe('/product-research');expect(router.currentRoute.value.query.step).toBe('drawing');expect(wrapper.getComponent(MoldApplicationDetailDrawer).text()).toContain('Honor 600 Lite 5G');expect(getResearchMoldApplicationContext).not.toHaveBeenCalled();expect(startResearchMoldApplication).not.toHaveBeenCalled();expect(researchAction).not.toHaveBeenCalled();
  });
  it('prioritizes continuing the original editable research draft instead of offering a new application',async()=>{
-  const d=current(2);d.applications=[{applicationId:88,status:'draft',canEditDraft:true,model:'待确认机型'}];vi.mocked(getMoldApplication).mockResolvedValue({applicationId:88,status:'draft',canEditDraft:true,form:{remark:'工程原草稿'}} as any);await launch(d);await button('继续LEMOS草稿',wrapper.get('.project-header')).trigger('click');await flushPromises();expect(moldEditorOpen).toHaveBeenCalledWith(expect.objectContaining({applicationId:88,form:{remark:'工程原草稿'}}));expect(getResearchMoldApplicationContext).not.toHaveBeenCalled();expect(startResearchMoldApplication).not.toHaveBeenCalled();
+  const d=current(2);d.applications=[{applicationId:88,status:'draft',canEditDraft:true,model:'待确认机型'}];vi.mocked(getMoldApplication).mockResolvedValue({applicationId:88,productLineId:42,status:'draft',canEditDraft:true,form:{remark:'工程原草稿'}} as any);await launch(d);await button('继续LEMOS草稿',wrapper.get('.project-header')).trigger('click');await flushPromises();expect(moldEditorOpen).toHaveBeenCalledWith(expect.objectContaining({applicationId:88,form:{remark:'工程原草稿'}}));expect(getResearchMoldApplicationContext).not.toHaveBeenCalled();expect(startResearchMoldApplication).not.toHaveBeenCalled();
+ });
+ it('shows six original OA attachments in the existing materials area without adopting or copying them',async()=>{
+  const d=current(2),files=Array.from({length:6},(_,i)=>({attachmentId:612+i,category:'attachment',fileName:`原审批结构图${i+1}.png`,fileSize:8,contentType:'image/png',downloadStatus:'downloaded'}));d.applications=[{applicationId:92381,approvalNo:'202610281759000301110',status:'submitted',businessStatus:'awaiting_approval',canArchiveFiles:false,files}];
+  vi.mocked(downloadMoldFile).mockResolvedValue(new Blob(['image'],{type:'image/png'}));vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:original-oa');vi.spyOn(URL,'revokeObjectURL').mockImplementation(()=>{});await launch(d);
+  const panel=wrapper.getComponent(ResearchMaterialsPanel),group=panel.get('[aria-label="原LEMOS审批附件 202610281759000301110"]');expect(group.text()).toContain('6 份');expect(group.findAllComponents(MoldApplicationFile)).toHaveLength(6);expect(group.findAll('.file-picture')).toHaveLength(6);expect(group.findAll('input[type=checkbox]')).toHaveLength(0);expect(group.text()).not.toContain('上传新版');expect(group.text()).not.toContain('删除草稿');expect(group.text()).not.toContain('归档原审批附件');expect(panel.props('materials')).toEqual(d.materials);expect(panel.props('selected')).not.toContain('file:612');
+  expect(group.findAllComponents(MoldApplicationFile).map((c:VueWrapper<any>)=>[c.props('applicationId'),c.props('file').attachmentId])).toEqual(files.map(file=>[92381,file.attachmentId]));expect(startResearchMoldApplication).not.toHaveBeenCalled();expect(uploadProjectAttachment).not.toHaveBeenCalled();expect(researchAction).not.toHaveBeenCalled();
+ });
+ it('does not present unsubmitted PLM draft files as original OA attachments',async()=>{
+  const d=current(2);d.applications=[null,'','  '].map((approvalNo,i)=>({applicationId:88+i,approvalNo,status:'draft',canEditDraft:true,canArchiveFiles:false,files:[{attachmentId:300+i,fileName:'本地草稿图.png',contentType:'image/png',downloadStatus:'downloaded'}]}));await launch(d);expect(wrapper.find('.original-application-files').exists()).toBe(false);expect(wrapper.findComponent(MoldApplicationFile).exists()).toBe(false);expect(downloadMoldFile).not.toHaveBeenCalled();expect(archiveMoldFiles).not.toHaveBeenCalled();
+ });
+ it('archives only original application files without reloading project data or changing unsaved input and adopted references',async()=>{
+  const d=current(2),pending={attachmentId:612,category:'attachment',fileName:'原审批结构图.png',fileSize:8,contentType:'application/octet-stream',downloadStatus:'download_failed',archiveError:'下载超时，请重试'};d.applications=[{applicationId:92381,approvalNo:'202610281759000301110',status:'submitted',businessStatus:'awaiting_approval',canArchiveFiles:true,files:[pending]}];await launch(d);
+  const notes=wrapper.get('textarea[placeholder="说明本次产品图的结构、功能及版本改动"]');await notes.setValue('未保存的产品结构要求');await wrapper.get('.material-row input[type=checkbox]').setValue(true);const selected=[...wrapper.getComponent(ResearchMaterialsPanel).props('selected')];expect(selected).toContain('file:11');const archived={...pending,contentType:'application/pdf',downloadStatus:'downloaded',archiveError:null};vi.mocked(archiveMoldFiles).mockResolvedValue({applicationId:92381,files:[archived],canArchiveFiles:false,status:'completed',approvalNo:'must-not-replace-original-status'} as any);
+  await button('重试归档原附件').trigger('click');await flushPromises();expect(archiveMoldFiles).toHaveBeenCalledExactlyOnceWith(92381);expect(getProductResearchDetail).toHaveBeenCalledOnce();expect(wrapper.getComponent(MoldApplicationFile).props('file').attachmentId).toBe(612);expect(wrapper.getComponent(MoldApplicationFile).text()).toContain('已归档');expect(wrapper.find('[aria-label="原LEMOS审批附件 202610281759000301110"]').exists()).toBe(true);expect((notes.element as HTMLTextAreaElement).value).toBe('未保存的产品结构要求');expect(wrapper.getComponent(ResearchMaterialsPanel).props('selected')).toEqual(selected);expect(useCollaborationWorkspace().revision).toBe(1);expect(saveResearchDesignDraft).not.toHaveBeenCalled();expect(researchAction).not.toHaveBeenCalled();expect(startResearchMoldApplication).not.toHaveBeenCalled();expect(uploadProjectAttachment).not.toHaveBeenCalled();
+ });
+ it('keeps an archive permission failure visible and does not infer OA access from project materials',async()=>{
+  const d=current(2);d.applications=[{applicationId:92381,approvalNo:'original-oa',canArchiveFiles:true,files:[{attachmentId:612,fileName:'原审批图.png',downloadStatus:'pending_authorization'}]}];await launch(d);vi.mocked(archiveMoldFiles).mockRejectedValue(new Error('当前账号无原审批附件归档权限'));await button('归档原审批附件').trigger('click');await flushPromises();expect(wrapper.text()).toContain('当前账号无原审批附件归档权限');expect(useCollaborationWorkspace().revision).toBe(0);expect(saveResearchDesignDraft).not.toHaveBeenCalled();expect(researchAction).not.toHaveBeenCalled();
+  wrapper.unmount();await launch(current(2));expect(wrapper.findComponent(MoldApplicationFile).exists()).toBe(false);expect(wrapper.find('.original-application-files').exists()).toBe(false);expect(downloadMoldFile).not.toHaveBeenCalled();
  });
  it('opens unique original application progress without creating or opening another draft',async()=>{
-  vi.mocked(getResearchMoldApplicationContext).mockResolvedValue({...researchContext(),existingApplication:{applicationId:88,status:'submitted',canEditDraft:false}} as any);vi.mocked(getMoldApplication).mockResolvedValue({applicationId:88,status:'submitted',canEditDraft:false} as any);const router=await launch(current(2));await button('发起LEMOS开模申请').trigger('click');await flushPromises();
-  expect(router.currentRoute.value.path).toBe('/mold-applications');expect(router.currentRoute.value.query.applicationId).toBe('88');expect(moldEditorOpen).not.toHaveBeenCalled();expect(moldEditorOpenResearch).not.toHaveBeenCalled();expect(startResearchMoldApplication).not.toHaveBeenCalled();
+  vi.mocked(getResearchMoldApplicationContext).mockResolvedValue({...researchContext(),existingApplication:{applicationId:88,status:'submitted',canEditDraft:false}} as any);vi.mocked(getMoldApplication).mockResolvedValue({applicationId:88,productLineId:42,status:'submitted',canEditDraft:false,form:{},files:[],activities:[]} as any);const router=await launch(current(2));await button('发起LEMOS开模申请').trigger('click');await flushPromises();
+  expect(router.currentRoute.value.path).toBe('/product-research');expect(router.currentRoute.value.query.productId).toBe('42');expect(wrapper.getComponent(MoldApplicationDetailDrawer).text()).toContain('申请 #88');expect(moldEditorOpen).not.toHaveBeenCalled();expect(moldEditorOpenResearch).not.toHaveBeenCalled();expect(startResearchMoldApplication).not.toHaveBeenCalled();
  });
  it('rechecks full-detail permission before continuing a unique original draft',async()=>{
-  vi.mocked(getResearchMoldApplicationContext).mockResolvedValue({...researchContext(),existingApplication:{applicationId:88,status:'draft',canEditDraft:true}} as any);vi.mocked(getMoldApplication).mockResolvedValue({applicationId:88,status:'draft',canEditDraft:false,files:[]} as any);const router=await launch(current(2));await button('发起LEMOS开模申请').trigger('click');await flushPromises();expect(getMoldApplication).toHaveBeenCalledWith(88);expect(moldEditorOpen).not.toHaveBeenCalled();expect(moldEditorOpenResearch).not.toHaveBeenCalled();expect(router.currentRoute.value.path).toBe('/mold-applications');
+  vi.mocked(getResearchMoldApplicationContext).mockResolvedValue({...researchContext(),existingApplication:{applicationId:88,status:'draft',canEditDraft:true}} as any);vi.mocked(getMoldApplication).mockResolvedValue({applicationId:88,productLineId:42,status:'draft',canEditDraft:false,form:{},files:[],activities:[]} as any);const router=await launch(current(2));await button('发起LEMOS开模申请').trigger('click');await flushPromises();expect(getMoldApplication).toHaveBeenCalledWith(88);expect(moldEditorOpen).not.toHaveBeenCalled();expect(moldEditorOpenResearch).not.toHaveBeenCalled();expect(router.currentRoute.value.path).toBe('/product-research');expect(wrapper.getComponent(MoldApplicationDetailDrawer).text()).toContain('申请 #88');
  });
  it('ignores full application detail arriving after a login change',async()=>{
   let finish:((row:any)=>void)|undefined;vi.mocked(getResearchMoldApplicationContext).mockResolvedValue({...researchContext(),existingApplication:{applicationId:88}} as any);vi.mocked(getMoldApplication).mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));await launch(current(2));await button('发起LEMOS开模申请').trigger('click');await flushPromises();expect(finish).toBeDefined();useUserStore().token='replacement-login';finish!({applicationId:88,status:'draft',canEditDraft:true,files:[{attachmentId:201,fileName:'其他身份图片.png'}]});await flushPromises();expect(moldEditorOpen).not.toHaveBeenCalled();expect(moldEditorOpenResearch).not.toHaveBeenCalled();
  });
  it('keeps another applicant draft read-only and routes to progress',async()=>{
-  const d=current(2);d.applications=[{applicationId:88,status:'draft',canEditDraft:false,phoneModelId:1}];const router=await launch(d);const entry=wrapper.get('[aria-label="LEMOS开模申请"]');expect(entry.findAll('button').map(b=>b.text())).toEqual(['查看审批进度']);await button('查看审批进度',entry).trigger('click');await flushPromises();expect(router.currentRoute.value.path).toBe('/mold-applications');expect(moldEditorOpen).not.toHaveBeenCalled();expect(startResearchMoldApplication).not.toHaveBeenCalled();
+  const d=current(2);d.applications=[{applicationId:88,status:'draft',canEditDraft:false,phoneModelId:1}];const router=await launch(d);const entry=wrapper.get('[aria-label="LEMOS开模申请"]');expect(entry.findAll('button').map(b=>b.text())).toEqual(['选择其他型号','查看审批进度']);await button('查看审批进度',entry).trigger('click');await flushPromises();expect(router.currentRoute.value.path).toBe('/product-research');expect(wrapper.getComponent(MoldApplicationDetailDrawer).text()).toContain('申请 #88');expect(moldEditorOpen).not.toHaveBeenCalled();expect(startResearchMoldApplication).not.toHaveBeenCalled();
  });
  it('ignores a readonly source response after login changes and blocks repeat clicks while loading',async()=>{
   let finish:((row:any)=>void)|undefined;vi.mocked(getResearchMoldApplicationContext).mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));await launch(current(1));await button('发起LEMOS开模申请').trigger('click');await button('发起LEMOS开模申请').trigger('click');expect(getResearchMoldApplicationContext).toHaveBeenCalledOnce();useUserStore().token='new-login';finish!(researchContext());await flushPromises();expect(moldEditorOpenResearch).not.toHaveBeenCalled();expect(startResearchMoldApplication).not.toHaveBeenCalled();
@@ -789,4 +887,27 @@ describe('mold execution opens with the physical set overview',()=>{
   const d=current(6);d.rounds=[{...record().rounds[0],roundId:81,status:'draft',result:'pending',details:{samplePurpose:'mold_trial'}}];await launch(d);await wrapper.get('.toolbar .el-radio-button input[value="sample"]').setValue();await flushPromises();await fields('本次改动').get('textarea').setValue('保留尚未保存的试模改动');vi.mocked(saveDevelopmentRound).mockRejectedValueOnce(Error('保存失败，继续编辑'));
   await wrapper.get('.toolbar .el-radio-button input[value="mold"]').setValue();await flushPromises();expect(wrapper.find('.sample-form').exists()).toBe(true);expect((fields('本次改动').get('textarea').element as HTMLTextAreaElement).value).toBe('保留尚未保存的试模改动');expect(saveDevelopmentRound).toHaveBeenCalledWith(42,81,expect.objectContaining({changes:'保留尚未保存的试模改动',confirm:false}));expect(wrapper.text()).toContain('保存失败，继续编辑');
  });
+});
+
+describe('explicit 3D product drawing materials',()=>{
+ const material3d=(id:number,category='drawing',fileExt='step')=>({type:'file',id,name:`三维资料${id}.${fileExt}`,versionNo:'D3',status:'draft',category,attachment:{attachmentId:id,fileExt,fileCategory:category,originalFileName:`三维资料${id}.${fileExt}`,versionNo:'D3'}} as any);
+ it('locates the specific 3D material uploader from the nonblocking drawing reminder',async()=>{
+  vi.mocked(checkResearchStage).mockResolvedValue({version:2,ready:true,checks:[{code:'PRODUCT_3D_DRAWING',title:'3D产品图',target:'drawings',complete:false,blocking:false,message:'3D图可后补'}]});await launch(current(2));await wrapper.getComponent(StageReadinessChecklist).vm.checkNow();await flushPromises();const entry=wrapper.get('[aria-label="3D产品图资料"]'),scroll=vi.fn(),focus=vi.fn();Object.defineProperty(entry.element,'scrollIntoView',{value:scroll,configurable:true});Object.defineProperty(entry.get('[data-readiness-focus="product3d-upload"]').element,'focus',{value:focus,configurable:true});await wrapper.get('button[aria-label="补充3D产品图"]').trigger('click');await flushPromises();expect(scroll).toHaveBeenCalled();expect(focus).toHaveBeenCalled();expect(uploadProjectAttachment).not.toHaveBeenCalled();expect(confirmTimelineNode).not.toHaveBeenCalled();
+ });
+ it.each([['source','上传3D源文件','drawing','.step'],['render','上传3D效果图','render_3d','.png']])('uses the original upload and adopted-ID pipeline for explicit %s documents',async(kind,label,category,extension)=>{
+  const d=current(2);await launch(d);const notes=wrapper.get('textarea[placeholder="说明本次产品图的结构、功能及版本改动"]');await notes.setValue('保留尚未保存的图纸说明');await button(label!).trigger('click');await flushPromises();const dialog=wrapper.get(`.test-dialog[data-title="${label}"]`),uploader=dialog.getComponent(ElUpload);expect(uploader.props('accept')).toContain(extension);if(kind==='source'){for(const ext of ['.png','.pdf','.x_t','.x_b','.3mf'])expect(String(uploader.props('accept')).split(',')).not.toContain(ext);}else expect(String(uploader.props('accept')).split(',')).toEqual(['.png','.jpg','.jpeg','.webp','.pdf']);const file=new File(['3d'],`明确用途${extension}`);Object.assign(file,{uid:96});uploader.vm.$emit('update:fileList',[{uid:96,name:file.name,raw:file}]);await flushPromises();vi.mocked(uploadProjectAttachment).mockResolvedValueOnce({attachmentId:96} as any);vi.mocked(getProductResearchDetail).mockResolvedValue({...d,materials:[...d.materials,material3d(96,category,extension!.slice(1))]});await button('保存版本',dialog).trigger('click');await flushPromises();expect(uploadProjectAttachment).toHaveBeenCalledWith(42,file,{fileCategory:category,versionNo:'V1',remark:''});expect(wrapper.getComponent(Product3dMaterials).props('selected')).toContain('file:96');expect(wrapper.getComponent(Product3dMaterials).text()).toContain('本次待保存采用');expect(wrapper.getComponent(Product3dMaterials).props('savedReferences')).toEqual([]);expect((notes.element as HTMLTextAreaElement).value).toBe('保留尚未保存的图纸说明');expect(researchAction).not.toHaveBeenCalled();await button('保存草稿').trigger('click');await flushPromises();expect(researchAction).toHaveBeenCalledWith(42,'launch_draft',2,expect.objectContaining({stage:2,references:[{type:'file',id:96}]}));expect(d.workflow.stage2Basis).toBeUndefined();
+ });
+ it('cancels the dedicated uploader and rejects ordinary PNG files in its source route without classifying or adopting them',async()=>{
+  await launch(current(2));await button('上传3D源文件').trigger('click');await flushPromises();await button('关闭',wrapper.get('.test-dialog[data-title="上传3D源文件"]')).trigger('click');expect(uploadProjectAttachment).not.toHaveBeenCalled();await button('上传3D源文件').trigger('click');await flushPromises();const dialog=wrapper.get('.test-dialog[data-title="上传3D源文件"]'),file=new File(['png'],'普通图片.png');Object.assign(file,{uid:97});dialog.getComponent(ElUpload).vm.$emit('update:fileList',[{uid:97,name:file.name,raw:file}]);await button('保存版本',dialog).trigger('click');await flushPromises();expect(uploadProjectAttachment).not.toHaveBeenCalled();expect(wrapper.getComponent(Product3dMaterials).props('selected')).toEqual([]);expect(dialog.get('[role=alert]').text()).toContain('普通图片.png');expect(confirmTimelineNode).not.toHaveBeenCalled();
+ });
+ it('inherits a render file family and category when uploading a replacement version, preserving the original adoption snapshot',async()=>{
+  const d=current(2),render=material3d(22,'render_3d','pdf');d.materials=[render];d.workflow.stageDrafts={2:{references:[{type:'file',id:22}]}};await launch(d);wrapper.getComponent(ResearchMaterialsPanel).vm.$emit('upload',render);await flushPromises();const dialog=wrapper.get('.test-dialog[data-title="上传新版本"]');expect(dialog.getComponent(ElUpload).props('accept')).toBe('.png,.jpg,.jpeg,.webp,.pdf');const file=new File(['pdf'],'新效果图.pdf');Object.assign(file,{uid:98});dialog.getComponent(ElUpload).vm.$emit('update:fileList',[{uid:98,name:file.name,raw:file}]);await dialog.get('input[placeholder="如 D1、V2"]').setValue('D4');await dialog.get('textarea').setValue('调整外观渲染');vi.mocked(uploadAttachmentVersion).mockResolvedValueOnce({attachmentId:98} as any);await button('保存版本',dialog).trigger('click');await flushPromises();expect(uploadAttachmentVersion).toHaveBeenCalledWith(22,file,'D4','调整外观渲染');expect(uploadProjectAttachment).not.toHaveBeenCalled();expect(d.workflow.stageDrafts[2].references).toEqual([{type:'file',id:22}]);
+ });
+ it('keeps 3D upload and adoption disabled in a readonly historical stage and a received prototype immutable',async()=>{
+  const d=current(3);d.materials=[material3d(21),material3d(22,'render_3d','png')];d.rounds=[{...record().rounds[0],roundId:81,status:'confirmed',result:'pending',details:{samplePurpose:'prototype_3d',phoneModelIds:[1]},references:[d.materials[0]]}];await launch(d);expect(wrapper.getComponent(Product3dMaterials).props('selectable')).toBe(false);expect(wrapper.getComponent(Product3dMaterials).props('savedReferences')).toEqual([d.materials[0]]);wrapper.unmount();await launch(d,2);expect(wrapper.getComponent(Product3dMaterials).props('uploadable')).toBe(false);expect(wrapper.getComponent(Product3dMaterials).props('selectable')).toBe(false);expect(wrapper.find('[data-readiness-focus="product3d-upload"]').exists()).toBe(false);expect(uploadProjectAttachment).not.toHaveBeenCalled();expect(saveDevelopmentRound).not.toHaveBeenCalled();
+ });
+});
+
+it('retries only failed explicitly designated renders while retaining pending adopted IDs and unsaved project input',async()=>{
+ const d=current(2),image=new File(['png'],'工程师效果图.png'),pdf=new File(['pdf'],'工程师效果图.pdf');await launch(d);const notes=wrapper.get('textarea[placeholder="说明本次产品图的结构、功能及版本改动"]');await notes.setValue('重试期间保留');await button('上传3D效果图').trigger('click');await flushPromises();const dialog=wrapper.get('.test-dialog[data-title="上传3D效果图"]');Object.assign(image,{uid:101});Object.assign(pdf,{uid:102});dialog.getComponent(ElUpload).vm.$emit('update:fileList',[{uid:101,name:image.name,raw:image},{uid:102,name:pdf.name,raw:pdf}]);vi.mocked(uploadProjectAttachment).mockResolvedValueOnce({attachmentId:101} as any).mockRejectedValueOnce(Error('效果图网络失败')).mockResolvedValueOnce({attachmentId:102} as any);await button('保存版本',dialog).trigger('click');await flushPromises();expect(dialog.get('[role=alert]').text()).toContain('效果图网络失败');expect(wrapper.getComponent(Product3dMaterials).props('selected')).toEqual(['file:101']);await button('继续上传',dialog).trigger('click');await flushPromises();expect(vi.mocked(uploadProjectAttachment).mock.calls.map(call=>[call[1].name,call[2].fileCategory])).toEqual([[image.name,'render_3d'],[pdf.name,'render_3d'],[pdf.name,'render_3d']]);expect(wrapper.getComponent(Product3dMaterials).props('selected')).toEqual(['file:101','file:102']);expect((notes.element as HTMLTextAreaElement).value).toBe('重试期间保留');expect(researchAction).not.toHaveBeenCalled();expect(confirmTimelineNode).not.toHaveBeenCalled();
 });

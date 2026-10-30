@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, ref } from 'vue'
 import { useResizeObserver } from '@vueuse/core'
 import type { ScheduleTask } from '@/api/modules/schedule'
@@ -16,22 +18,22 @@ function select(row: ScheduleTask) { emit('select', row) }
 
 <template>
   <div ref="container" class="mold-task-list">
-    <div v-if="narrow" class="task-records" v-loading="loading" aria-label="待办列表">
+    <div v-if="narrow" class="task-records" v-loading="loading" :aria-label='uiText("待办列表")'>
       <article v-for="task in tasks" :key="key(task)" :data-task-id="key(task)" class="task-record" :class="{'selected-task':key(task)===selected}">
         <header><button class="task-link" @click="emit('select',task)">{{task.assetNumber}} · {{task.title}}</button><el-tag size="small" :type="task.overdue?'danger':'info'">{{status(task)}}</el-tag></header>
         <p>{{task.styleName}} · {{task.compatibleModels}}</p>
-        <div class="record-meta"><span>{{groupNames[task.group as FieldGroup]||task.group}}</span><span :class="{'overdue-date':task.overdue}">{{task.dueDate||'无独立期限'}}</span><el-button size="small" link @click="emit('select',task)">处理</el-button></div>
+        <div class="record-meta"><span>{{groupNames[task.group as FieldGroup]||task.group}}</span><span :class="{'overdue-date':task.overdue}">{{task.dueDate||uiText('无独立期限')}}</span><el-button size="small" link @click="emit('select',task)">{{ uiText("处理") }}</el-button></div>
       </article>
-      <p v-if="!tasks.length&&!loading" class="empty-tasks">暂无符合条件的待办</p>
+      <p v-if="!tasks.length&&!loading" class="empty-tasks">{{ uiText("暂无符合条件的待办") }}</p>
     </div>
-    <el-table v-else class="compact-table" :data="tasks" :height="height" :row-key="key" border v-loading="loading" empty-text="暂无符合条件的待办" :row-class-name="rowClass" @row-click="select">
-      <el-table-column label="实物编号" width="124" fixed="left"><template #default="{row}"><button class="task-link" :title="row.assetNumber" @click.stop="emit('select', row)">{{ row.assetNumber }}</button></template></el-table-column>
-      <el-table-column prop="styleName" label="款式" width="88" />
-      <el-table-column prop="compatibleModels" label="兼容型号" min-width="180" />
-      <el-table-column prop="title" label="待完成事项" min-width="178" />
-      <el-table-column label="职责" width="84"><template #default="{row}">{{ groupNames[row.group as FieldGroup] || row.group }}</template></el-table-column>
-      <el-table-column label="期限" width="110"><template #default="{row}"><span :class="{'overdue-date':row.overdue}">{{ row.dueDate || '无独立期限' }}</span></template></el-table-column>
-      <el-table-column label="状态" width="92" fixed="right"><template #default="{row}"><el-tag :type="row.overdue?'danger':'info'">{{ status(row) }}</el-tag></template></el-table-column>
+    <el-table v-else class="compact-table" :data="tasks" :height="height" :row-key="key" border v-loading="loading" :empty-text='uiText("暂无符合条件的待办")' :row-class-name="rowClass" @row-click="select">
+      <el-table-column :label='uiText("实物编号")' width="124" fixed="left"><template #default="{row}"><button class="task-link" :title="row.assetNumber" @click.stop="emit('select', row)">{{ row.assetNumber }}</button></template></el-table-column>
+      <el-table-column prop="styleName" :label='uiText("款式")' width="88" />
+      <el-table-column prop="compatibleModels" :label='uiText("兼容型号")' min-width="180" />
+      <el-table-column prop="title" :label='uiText("待完成事项")' min-width="178" />
+      <el-table-column :label='uiText("职责")' width="84"><template #default="{row}">{{ groupNames[row.group as FieldGroup] || row.group }}</template></el-table-column>
+      <el-table-column :label='uiText("期限")' width="110"><template #default="{row}"><span :class="{'overdue-date':row.overdue}">{{ row.dueDate || uiText('无独立期限') }}</span></template></el-table-column>
+      <el-table-column :label='uiText("状态")' width="92" fixed="right"><template #default="{row}"><el-tag :type="row.overdue?'danger':'info'">{{ status(row) }}</el-tag></template></el-table-column>
     </el-table>
     <el-pagination :current-page="page" :page-size="size" :page-sizes="[20,50,100]" :total="total" :layout="narrow?'total,prev,pager,next':'total,sizes,prev,pager,next'" :pager-count="narrow?5:7" size="small" @update:current-page="emit('page',$event)" @update:page-size="emit('size',$event)" />
   </div>

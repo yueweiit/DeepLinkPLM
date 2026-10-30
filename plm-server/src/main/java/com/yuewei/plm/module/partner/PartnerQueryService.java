@@ -11,7 +11,7 @@ public class PartnerQueryService {
  public Map<String,Object> page(String kind,Map<String,String> query){
   store.access.requireDomesticView();store.access.requirePermission("partner:view");require(Set.of("product","sale","sample").contains(kind)||PartnerOperationsAccess.KINDS.contains(kind),"列表类型无效");
   List<String> where=new ArrayList<>(List.of("r.kind=?","r.deleted_flag=0",store.access.visibleSqlClause("partner","r.record_id")));List<Object> args=new ArrayList<>(List.of(kind));
-  String keyword=text(query.get("keyword"));if(!keyword.isEmpty()){where.add("(r.name ilike ? or r.code ilike ? or coalesce(r.data->>'summary','') ilike ? or r.external_id ilike ? or coalesce(r.data->>'specName','') ilike ? or coalesce(r.data->>'displayLabel','') ilike ?)");for(int i=0;i<6;i++)args.add("%"+keyword+"%");}
+  String keyword=text(query.get("keyword"));if(!keyword.isEmpty()){String current=kind.equals("sample")?" or "+new PartnerCatalogStyles(store).currentNameSearch("r.data->>'catalogStyleId'"):"";where.add("(r.name ilike ? or r.code ilike ? or coalesce(r.data->>'summary','') ilike ? or r.external_id ilike ? or coalesce(r.data->>'specName','') ilike ? or coalesce(r.data->>'displayLabel','') ilike ?"+current+")");for(int i=0;i<(kind.equals("sample")?7:6);i++)args.add("%"+keyword+"%");}
   String status=text(query.get("status"));if(!status.isEmpty()&&!status.equals("all")){where.add("r.status=?");args.add(status);}
   if(number(query.get("parentId"))>0){store.access.requirePartner(number(query.get("parentId")));where.add("r.parent_record_id=?");args.add(number(query.get("parentId")));}
   relations(where,args,query);if(kind.equals("sample"))SampleDomains.filter(where,args,query,"r");
@@ -19,7 +19,7 @@ public class PartnerQueryService {
   var states=store.jdbc.queryForList("select status,count(*) as count from plm_partner_record r where "+predicate+" group by status order by status",args.toArray());List<Object> pageArgs=new ArrayList<>(args);pageArgs.add(size);pageArgs.add((page-1)*size);
   var rows=store.jdbc.queryForList("select r.record_id as id,r.code,r.kind,r.name,r.status,r.version,r.data::text,(select f.attachment_id from plm_partner_file f join plm_attachment a on a.attachment_id=f.attachment_id where f.record_id=r.record_id and f.purpose='photo' and a.deleted_flag=0 order by f.attachment_id desc limit 1) as \"photoId\",r.updated_at as \"updatedAt\" from plm_partner_record r where "+predicate+" order by r.updated_at desc,r.record_id desc limit ? offset ?",pageArgs.toArray());
   for(var row:rows){var data=decode(store.json,row.remove("data"));data.putAll(row);row.clear();row.putAll(data);}
-  if(kind.equals("sample"))SampleDomains.enrich(store,rows,"id");
+  if(kind.equals("sample")){SampleDomains.enrich(store,rows,"id");new PartnerCatalogStyles(store).projectCurrent(rows);}
   return Map.of("content",rows,"page",page,"size",size,"totalElements",count,"totalPages",(count+size-1)/size,"statistics",states);
  }
  public Map<String,Object> options(){

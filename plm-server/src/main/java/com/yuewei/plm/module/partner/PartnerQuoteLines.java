@@ -29,10 +29,10 @@ public class PartnerQuoteLines {
   var batch=new ArrayList<Map<String,Object>>(100);store.jdbc.query(connection->{PreparedStatement ps=connection.prepareStatement("select line_id::text,row_version,sort_order,data::text from plm_partner_quote_line where record_id=? order by sort_order,line_id");ps.setFetchSize(100);ps.setLong(1,id);return ps;},rs->{var row=new LinkedHashMap<String,Object>();row.put("id",rs.getString(1));row.put("row_version",rs.getLong(2));row.put("sort_order",rs.getLong(3));row.put("data",rs.getString(4));batch.add(new PartnerCatalogStyles(store).enrich("quote",id,decodeLine(row)));if(batch.size()==100){sink.accept(new ArrayList<>(batch));batch.clear();}});if(!batch.isEmpty())sink.accept(batch);
  }
  Map<String,Object> canonicalRow(long id,Map<String,Object> header,Map<String,Object> previous,Map<String,Object> input,PartnerCatalogPhoneResolver.ResolutionScope scope){
-  var changes=new LinkedHashMap<>(input);String supplier=required(header.get("supplierCode"),"报价供应商"),version=quoteVersion(header);
+  previous=PartnerCatalogStyles.currentData(previous);var changes=new LinkedHashMap<>(input);String supplier=required(header.get("supplierCode"),"报价供应商"),version=quoteVersion(header);
   require(!changes.containsKey("supplierCode")||supplier.equals(text(changes.get("supplierCode"))),"报价行不能跨供应商");require(text(changes.get("quoteId")).isEmpty()||Long.toString(id).equals(text(changes.get("quoteId"))),"报价行来源不能指向另一报价");require(text(changes.get("quoteVersion")).isEmpty()||version.equals(text(changes.get("quoteVersion"))),"报价行来源版本不一致");
   long style=number(changes.remove("catalogStyleId"));changes.remove("catalogStyleCode");changes.remove("catalogStyleLabel");
-  changes.put("supplierCode",supplier);changes.put("quoteId",Long.toString(id));changes.put("quoteVersion",version);var result=scope==null?selections.canonicalRow(id,previous,changes):selections.canonicalRow(id,previous,changes,scope);if(style>0)result.put("catalogStyleId",style);return result;
+  changes.put("supplierCode",supplier);changes.put("quoteId",Long.toString(id));changes.put("quoteVersion",version);var result=scope==null?selections.canonicalRow(id,previous,changes):selections.canonicalRow(id,previous,changes,scope);result.remove("catalogCurrent");if(style>0)result.put("catalogStyleId",style);return result;
  }
  private void put(long id,Map<String,Object> data,Map<String,Object> previous,String request){
   String rid=required(data.get("rowId"),"报价行标识");var saved=new LinkedHashMap<>(data);long style=number(saved.remove("catalogStyleId"));saved.remove("catalogStyleCode");saved.remove("catalogStyleLabel");saved.remove("rowVersion");saved.remove("sortOrder");saved.remove("sampleBatches");long version=previous.isEmpty()?1:number(previous.get("rowVersion"))+1;
@@ -40,6 +40,7 @@ public class PartnerQuoteLines {
   else store.jdbc.update("update plm_partner_quote_line set data=?::jsonb,row_version=?,updated_at=now(),updated_by=? where record_id=? and line_id=?::uuid",encode(store.json,saved),version,store.access.actor().username(),id,rid);
   store.jdbc.update("insert into plm_partner_quote_line_revision(line_id,record_id,row_version,request_id,data,created_by) values(?::uuid,?,?,?,?::jsonb,?)",rid,id,version,request,encode(store.json,Map.of("before",previous,"after",saved)),store.access.actor().username());
   new PartnerCatalogStyles(store).ensure("quote",id,data,style,"国内工程确认供应商目录款式；显式复用或新分配CP",request);
+  if(!previous.isEmpty())selections.refreshCatalogDrafts("quote",id,rid,saved,saved.keySet(),request);
  }
  /** One transaction publishes an import; it never allocates Product, specification or sample identities. */
  @Transactional public Map<String,Object> applyImportedRows(long id,long baseVersion,String requestId,Iterable<Map<String,Object>> incoming){return publishRows(id,baseVersion,requestId,incoming,false);}

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import {t as uiText} from '@/locales'
+
 import { computed, nextTick, ref } from 'vue'
 import { ElSelect } from 'element-plus'
 import type { PhoneBrand } from '@/types/molds'
@@ -10,10 +12,10 @@ async function open(){if(props.disabled)return;editing.value=true;await nextTick
 function choose(value:number|null){emit('update:modelValue',value || null);editing.value=false}
 </script>
 <template>
-  <button v-if="!editing" type="button" class="brand-trigger" :aria-label="label || '品牌'" aria-haspopup="listbox" :disabled="disabled" @click="open"><span>{{name}}</span><span aria-hidden="true">⌄</span></button>
-  <el-select v-else ref="select" :model-value="modelValue" :aria-label="label || '品牌'" :placeholder="placeholder || '选择已有品牌'" :disabled="disabled" clearable filterable :allow-create="false" class="phone-brand-select" @update:model-value="choose" @visible-change="!$event && (editing=false)">
-    <el-option v-if="modelValue && !brands.some(b=>b.brandId===modelValue)" :value="modelValue" :label="`历史品牌 #${modelValue}（不可用）`" disabled />
-    <el-option v-for="b in brands" :key="b.brandId" :value="b.brandId" :label="`${b.name}${b.status!=='enabled'?'（已停用，历史引用）':''}`" :disabled="b.status!=='enabled'" />
+  <button v-if="!editing" type="button" class="brand-trigger" :aria-label="label || uiText('品牌')" aria-haspopup="listbox" :disabled="disabled" @click="open"><span>{{name}}</span><span aria-hidden="true">⌄</span></button>
+  <el-select v-else ref="select" :model-value="modelValue" :aria-label="label || uiText('品牌')" :placeholder="placeholder || uiText('选择已有品牌')" :disabled="disabled" clearable filterable :allow-create="false" class="phone-brand-select" @update:model-value="choose" @visible-change="!$event && (editing=false)">
+    <el-option v-if="modelValue && !brands.some(b=>b.brandId===modelValue)" :value="modelValue" :label="uiText('历史品牌 #{value0}（不可用）',{value0:(modelValue)})" disabled />
+    <el-option v-for="b in brands" :key="b.brandId" :value="b.brandId" :label="uiText('{value0}{value1}',{value0:(b.name),value1:(b.status!=='enabled'?'（已停用，历史引用）':'')})" :disabled="b.status!=='enabled'" />
   </el-select>
 </template>
 <style scoped>.phone-brand-select,.brand-trigger{width:100%;min-width:0}.brand-trigger{display:flex;justify-content:space-between;align-items:center;gap:6px;border:1px solid #dcdfe6;border-radius:4px;padding:5px 8px;background:white;color:inherit;font:inherit;text-align:left;cursor:pointer}.brand-trigger span:first-child{white-space:normal;overflow-wrap:anywhere}.brand-trigger:focus-visible{outline:2px solid #4d82ed}</style>

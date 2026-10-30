@@ -7,6 +7,26 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class LaunchReviewWorkflowTest {
+    @Test void explicit3dRenderIsAProductDesignBasisButNotAT0ManufacturingDrawing(){
+        var render=Map.<String,Object>of("type","file","id",31L,"familyId",31L,"category","render_3d","fileExt","pdf","versionNo","V1");
+        var row=new HashMap<String,Object>(Map.of("checklist",Map.of("structure",true,"assembly",true,"appearance",true),"materialBasis","PC背板与TPU包边","references",List.of(render)));
+        assertThat(LaunchReviewWorkflow.passingReviewChecks("design",row,true)).allMatch(DevelopmentRules.ReadinessCheck::complete);
+        assertThatThrownBy(()->DevelopmentRules.requireChecks(LaunchReviewWorkflow.passingReviewChecks("t0",row,true))).hasMessageContaining("T0评审请采用具体图纸");
+        row.put("references",List.of(Map.of("type","file","id",32L,"category","other","fileExt","pdf")));
+        assertThatThrownBy(()->DevelopmentRules.requireChecks(LaunchReviewWorkflow.passingReviewChecks("design",row,true))).hasMessageContaining("工程师指定的3D效果图");
+    }
+    @Test void adoptedRenderChangesUseTheOriginalVersionReviewWithoutReplacingFormalDrawingGaps(){
+        var service=mock(ProductDevelopmentService.class,CALLS_REAL_METHODS);
+        var original=Map.<String,Object>of("type","file","id",31L,"familyId",31L,"category","render_3d","fileExt","png","versionNo","V1");
+        var revised=Map.<String,Object>of("type","file","id",32L,"familyId",31L,"category","render_3d","fileExt","png","versionNo","V2");
+        service.sameTechnical(List.of(original),List.of(original));service.validateReleaseVersions(List.of(original),List.of(original),Map.of());
+        assertThatThrownBy(()->service.sameTechnical(List.of(original),List.of(revised))).hasMessageContaining("补充对应验证");
+        assertThatThrownBy(()->service.validateReleaseVersions(List.of(original),List.of(revised),Map.of())).hasMessageContaining("补充对应验证");
+        service.validateReleaseVersions(List.of(original),List.of(revised),Map.of("documentationOnly",true,"documentationReason","效果图标注更正，采用结构未改变"));
+        var flow=mock(LaunchDevelopmentWorkflow.class,CALLS_REAL_METHODS);
+        var gap=flow.releaseGaps(Map.of("plan",Map.of("method","own_mold")),List.of(original));
+        assertThat(gap).extracting("code").contains("RELEASE_DRAWING","RELEASE_BOM","RELEASE_PROCESS");
+    }
     @Test void designEvidenceChecklistUsesThePassingReviewRulesWithoutRequiringProductionData(){
         var row=new HashMap<String,Object>();row.put("checklist",Map.of("structure",true,"assembly",true,"manufacturability",true));
         var missing=LaunchReviewWorkflow.passingReviewChecks("design",row,true).stream().filter(c->!c.complete()).toList();

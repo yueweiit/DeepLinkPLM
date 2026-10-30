@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import type { DevelopmentMaterial } from "@/api/modules/productResearch";
 defineOptions({ name: "ResearchSnapshot" });
 defineProps<{ value: unknown; depth?: number }>();
@@ -184,7 +186,7 @@ function fields(v: object) {
       ><div class="material">
         <strong>{{ value.name }} · {{ value.versionNo }}</strong
         ><el-button link type="primary" @click="$emit('view', value)"
-          >查看当时版本</el-button
+          >{{ uiText("查看当时版本") }}</el-button
         >
       </div>
       <ResearchSnapshot
@@ -200,19 +202,19 @@ function fields(v: object) {
           @view="$emit('view', $event)"
         />
       </div>
-      <span v-if="!value.length" class="muted">无</span></template
+      <span v-if="!value.length" class="muted">{{ uiText("无") }}</span></template
     ><template v-else-if="value && typeof value === 'object'"
       ><div v-for="[k, v] in fields(value)" :key="k" class="field">
-        <span class="label">{{ label(k) }}</span
+        <span class="label">{{ uiText(label(k)) }}</span
         ><div v-if="k === 'supplierAssignments' && Array.isArray(v)" class="supplier-list">
           <div v-for="(assignment, i) in v" :key="i" class="supplier-assignment">
-            <strong>{{ assignment.mode === 'internal' ? assignment.internalName || '内部承担方待补' : assignment.supplierName || '供应商' }}<template v-if="assignment.supplierCode"> · {{ assignment.supplierCode }}</template></strong>
-            <span>{{ scalar(assignment.role) }} · {{ assignment.scope || '范围待补' }}</span>
-            <span class="muted">采用依据：{{ assignment.basis || '待补' }}</span>
+            <strong>{{ assignment.mode === 'internal' ? assignment.internalName || uiText('内部承担方待补') : assignment.supplierName || uiText('供应商') }}<template v-if="assignment.supplierCode"> · {{ assignment.supplierCode }}</template></strong>
+            <span>{{ scalar(assignment.role) }} · {{ assignment.scope || uiText('范围待补') }}</span>
+            <span class="muted">{{ uiText("采用依据：") }}{{ assignment.basis || uiText('待补') }}</span>
           </div>
-          <span v-if="!v.length" class="muted">无</span>
+          <span v-if="!v.length" class="muted">{{ uiText("无") }}</span>
         </div><el-collapse v-else-if="v && typeof v === 'object' && (depth || 0) > 0"
-          ><el-collapse-item title="展开查看"
+          ><el-collapse-item :title='uiText("展开查看")'
             ><ResearchSnapshot
               :value="v"
               :depth="(depth || 0) + 1"

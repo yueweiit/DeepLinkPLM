@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed } from 'vue'
 import type { ProductionDocumentPreviewFile } from '@/types/foundation'
 
@@ -88,18 +90,18 @@ function handleDownload() {
 
         <!-- Office 文件提示 -->
         <div v-else-if="isOffice" class="preview-placeholder">
-          <el-empty description="Office 文件暂不支持在线预览，请下载后查看。">
+          <el-empty :description='uiText("Office 文件暂不支持在线预览，请下载后查看。")'>
             <template v-if="file?.downloadUrl">
-              <el-button type="primary" @click="handleDownload">下载查看</el-button>
+              <el-button type="primary" @click="handleDownload">{{ uiText("下载查看") }}</el-button>
             </template>
           </el-empty>
         </div>
 
         <!-- 无预览地址 -->
         <div v-else class="preview-placeholder">
-          <el-empty :description="file ? '当前演示环境仅保留预览入口，后续可对接 MinIO / S3 真实文件流。' : '请选择文件进行预览。'">
+          <el-empty :description='file ? uiText("当前演示环境仅保留预览入口，后续可对接 MinIO / S3 真实文件流。") : uiText("请选择文件进行预览。")'>
             <template v-if="file?.downloadUrl">
-              <el-button type="primary" @click="handleDownload">下载资料</el-button>
+              <el-button type="primary" @click="handleDownload">{{ uiText("下载资料") }}</el-button>
             </template>
           </el-empty>
         </div>
@@ -108,8 +110,8 @@ function handleDownload() {
 
     <template #footer>
       <div class="preview-footer">
-        <el-button @click="emit('update:modelValue', false)">关闭</el-button>
-        <el-button v-if="file?.downloadUrl" type="primary" @click="handleDownload">下载资料</el-button>
+        <el-button @click="emit('update:modelValue', false)">{{ uiText("关闭") }}</el-button>
+        <el-button v-if="file?.downloadUrl" type="primary" @click="handleDownload">{{ uiText("下载资料") }}</el-button>
       </div>
     </template>
   </el-dialog>

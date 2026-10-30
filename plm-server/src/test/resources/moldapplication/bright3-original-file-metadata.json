@@ -1,0 +1,9 @@
+{
+  "form_component_values": [
+    {
+      "id": "DDAttachment-JKI4M3HZ",
+      "component_type": "DDAttachment",
+      "value": "[{\"spaceId\": \"900000000000\", \"fileName\": \"engineering-image-1.png\", \"fileSize\": 68, \"fileType\": \"png\", \"fileId\": \"910000000001\"}, {\"spaceId\": \"900000000000\", \"fileName\": \"engineering-image-2.png\", \"fileSize\": 68, \"fileType\": \"png\", \"fileId\": \"910000000002\"}, {\"spaceId\": \"900000000000\", \"fileName\": \"engineering-image-3.png\", \"fileSize\": 68, \"fileType\": \"png\", \"fileId\": \"910000000003\"}, {\"spaceId\": \"900000000000\", \"fileName\": \"engineering-image-4.png\", \"fileSize\": 68, \"fileType\": \"png\", \"fileId\": \"910000000004\"}, {\"spaceId\": \"900000000000\", \"fileName\": \"engineering-image-5.png\", \"fileSize\": 68, \"fileType\": \"png\", \"fileId\": \"910000000005\"}, {\"spaceId\": \"900000000000\", \"fileName\": \"engineering-image-6.png\", \"fileSize\": 68, \"fileType\": \"png\", \"fileId\": \"910000000006\"}]"
+    }
+  ]
+}

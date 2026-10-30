@@ -1,4 +1,6 @@
 ﻿<script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -250,45 +252,45 @@ onMounted(async () => {
 <template>
   <PageContainer :title="lifecycleTitleMap[currentLifecycle.key].title" :description="lifecycleTitleMap[currentLifecycle.key].description">
     <template #actions>
-      <el-button @click="router.push(toArchivedSkuRoute())">归档 SKU</el-button>
-      <el-button type="primary" @click="router.push(toInProgressProjectRoute())">新项目</el-button>
+      <el-button @click="router.push(toArchivedSkuRoute())">{{ uiText("归档 SKU") }}</el-button>
+      <el-button type="primary" @click="router.push(toInProgressProjectRoute())">{{ uiText("新项目") }}</el-button>
     </template>
 
     <section class="metric-grid product-summary-grid">
       <div class="metric-card product-summary-card">
-        <p class="metric-card__label">当前队列</p>
+        <p class="metric-card__label">{{ uiText("当前队列") }}</p>
         <p class="metric-card__value">{{ stageStats.total }}</p>
-        <span class="metric-card__trend">当前阶段筛选结果</span>
+        <span class="metric-card__trend">{{ uiText("当前阶段筛选结果") }}</span>
       </div>
       <button class="metric-card summary-button product-summary-card" type="button" @click="setProductType('product_line')">
-        <p class="metric-card__label">新产品线</p>
+        <p class="metric-card__label">{{ uiText("新产品线") }}</p>
         <p class="metric-card__value">{{ stageStats.productLines }}</p>
-        <span class="metric-card__trend">完整 22 步研发流程</span>
+        <span class="metric-card__trend">{{ uiText("完整 22 步研发流程") }}</span>
       </button>
       <button class="metric-card summary-button product-summary-card" type="button" @click="setProductType('model_variant')">
-        <p class="metric-card__label">新型号线</p>
+        <p class="metric-card__label">{{ uiText("新型号线") }}</p>
         <p class="metric-card__value">{{ stageStats.modelVariants }}</p>
-        <span class="metric-card__trend">基于父产品的 16 步差异流程</span>
+        <span class="metric-card__trend">{{ uiText("基于父产品的 16 步差异流程") }}</span>
       </button>
       <div class="metric-card product-summary-card">
-        <p class="metric-card__label">待冻结资料</p>
+        <p class="metric-card__label">{{ uiText("待冻结资料") }}</p>
         <p class="metric-card__value">{{ stageStats.pendingFreeze }}</p>
-        <span class="metric-card__trend">图纸 / SOP / SIP / 质量资料缺口</span>
+        <span class="metric-card__trend">{{ uiText("图纸 / SOP / SIP / 质量资料缺口") }}</span>
       </div>
       <div class="metric-card product-summary-card">
-        <p class="metric-card__label">平均总成本</p>
+        <p class="metric-card__label">{{ uiText("平均总成本") }}</p>
         <p class="metric-card__value metric-card__value--small">{{ formatAmount(stageStats.avgCost) }}</p>
-        <span class="metric-card__trend">按当前队列口径展示</span>
+        <span class="metric-card__trend">{{ uiText("按当前队列口径展示") }}</span>
       </div>
     </section>
 
     <section class="page-panel lifecycle-panel">
       <div class="toolbar-row">
         <div>
-          <h3 class="section-title">阶段入口</h3>
+          <h3 class="section-title">{{ uiText("阶段入口") }}</h3>
           <p class="page-panel-desc">{{ currentLifecycle.hint }}</p>
         </div>
-        <el-tag type="info" effect="light">后端数据</el-tag>
+        <el-tag type="info" effect="light">{{ uiText("后端数据") }}</el-tag>
       </div>
 
       <div class="lifecycle-grid">
@@ -300,7 +302,7 @@ onMounted(async () => {
           type="button"
           @click="setLifecycle(item.key)"
         >
-          <span class="lifecycle-button__label">{{ item.label }}</span>
+          <span class="lifecycle-button__label">{{ uiText(String((item.label) ?? '')) }}</span>
           <strong class="lifecycle-button__value">{{ lifecycleCounters[item.key] }}</strong>
           <span class="subtle-text">{{ item.hint }}</span>
         </button>
@@ -318,8 +320,8 @@ onMounted(async () => {
       <article class="page-panel highlight-panel">
         <div class="toolbar-row">
           <div>
-            <h3 class="section-title">当前重点对象</h3>
-            <p class="page-panel-desc">优先推进开发中、接近关口或资料缺口明显的产品。</p>
+            <h3 class="section-title">{{ uiText("当前重点对象") }}</h3>
+            <p class="page-panel-desc">{{ uiText("优先推进开发中、接近关口或资料缺口明显的产品。") }}</p>
           </div>
         </div>
         <div class="page-stack">
@@ -338,12 +340,12 @@ onMounted(async () => {
               <StatusTag :status="item.status" object-type="product" />
             </div>
             <div class="detail-row">
-              <span>{{ getFlowLabel(item) }}</span>
-              <span>第 {{ item.currentStepNo || '--' }} 步</span>
+              <span>{{ uiText(String((getFlowLabel(item)) ?? '')) }}</span>
+              <span>{{ uiText("第 ") }}{{ item.currentStepNo || '--' }}{{ uiText(" 步") }}</span>
             </div>
             <div class="detail-row">
               <span class="subtle-text">{{ item.currentStage }}</span>
-              <span class="subtle-text">{{ getMoldActionLabel(item) }}</span>
+              <span class="subtle-text">{{ uiText(String((getMoldActionLabel(item)) ?? '')) }}</span>
             </div>
             <el-progress :percentage="Math.round(item.completionRate * 100)" :stroke-width="8" />
             <div class="detail-row">
@@ -365,14 +367,14 @@ onMounted(async () => {
         />
         <div class="toolbar-row">
           <div>
-            <h3 class="section-title">产品队列表</h3>
-            <p class="page-panel-desc">列表聚焦流程推进，详情页承接时间轴、BOM、质量、文件、版本与日志。</p>
+            <h3 class="section-title">{{ uiText("产品队列表") }}</h3>
+            <p class="page-panel-desc">{{ uiText("列表聚焦流程推进，详情页承接时间轴、BOM、质量、文件、版本与日志。") }}</p>
           </div>
         </div>
         <FixedTableViewport v-slot="{ tableHeight }" :refresh-key="table.pagedRows.value">
         <el-table :data="table.pagedRows.value" :height="tableHeight" border stripe>
-          <el-table-column prop="productCode" label="产品编码" min-width="180" />
-          <el-table-column label="产品信息" min-width="250">
+          <el-table-column prop="productCode" :label='uiText("产品编码")' min-width="180" />
+          <el-table-column :label='uiText("产品信息")' min-width="250">
             <template #default="{ row }">
               <div class="cell-stack">
                 <strong>{{ row.productName }}</strong>
@@ -380,53 +382,53 @@ onMounted(async () => {
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="流程类型" width="150">
+          <el-table-column :label='uiText("流程类型")' width="150">
             <template #default="{ row }">
               <div class="cell-stack compact-stack">
                 <el-tag :type="row.productType === 'product_line' ? 'primary' : 'success'" effect="light">
-                  {{ getFlowLabel(row) }}
+                  {{ uiText(String((getFlowLabel(row)) ?? '')) }}
                 </el-tag>
                 <span class="subtle-text">{{ getFlowHint(row) }}</span>
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="阶段" width="140">
+          <el-table-column :label='uiText("阶段")' width="140">
             <template #default="{ row }">
-              <el-tag effect="light">{{ lifecycleOptions.find((item) => item.key === getLifecycle(row))?.label || '全部产品' }}</el-tag>
+              <el-tag effect="light">{{ lifecycleOptions.find((item) => item.key === getLifecycle(row))?.label || uiText('全部产品') }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="当前节点" min-width="190">
+          <el-table-column :label='uiText("当前节点")' min-width="190">
             <template #default="{ row }">
               <div class="cell-stack">
-                <strong>第 {{ row.currentStepNo || '--' }} 步</strong>
+                <strong>{{ uiText("第 ") }}{{ row.currentStepNo || '--' }}{{ uiText(" 步") }}</strong>
                 <span class="subtle-text">{{ row.currentStage }}</span>
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="模具策略" width="130">
+          <el-table-column :label='uiText("模具策略")' width="130">
             <template #default="{ row }">
-              <span class="subtle-text">{{ getMoldActionLabel(row) }}</span>
+              <span class="subtle-text">{{ uiText(String((getMoldActionLabel(row)) ?? '')) }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="activeBomVersion" label="BOM 主版本" width="130" />
-          <el-table-column label="总成本" width="140">
+          <el-table-column prop="activeBomVersion" :label='uiText("BOM 主版本")' width="130" />
+          <el-table-column :label='uiText("总成本")' width="140">
             <template #default="{ row }">{{ formatAmount(row.totalCost || row.estimatedCost, row.estimatedCostCurrency) }}</template>
           </el-table-column>
-          <el-table-column label="资料完整率" min-width="180">
+          <el-table-column :label='uiText("资料完整率")' min-width="180">
             <template #default="{ row }">
               <el-progress :percentage="Math.round(row.completionRate * 100)" :stroke-width="8" />
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="120">
+          <el-table-column :label='uiText("状态")' width="120">
             <template #default="{ row }">
               <StatusTag :status="row.status" object-type="product" />
             </template>
           </el-table-column>
-          <el-table-column prop="ownerUserName" label="负责人" width="110" />
-          <el-table-column label="操作" width="160" fixed="right">
+          <el-table-column prop="ownerUserName" :label='uiText("负责人")' width="110" />
+          <el-table-column :label='uiText("操作")' width="160" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" @click="openProduct(row.productId)">详情</el-button>
-              <el-button link @click="router.push(toArchivedProductRoute(row.productId))">查看归档</el-button>
+              <el-button link type="primary" @click="openProduct(row.productId)">{{ uiText("详情") }}</el-button>
+              <el-button link @click="router.push(toArchivedProductRoute(row.productId))">{{ uiText("查看归档") }}</el-button>
             </template>
           </el-table-column>
         </el-table>

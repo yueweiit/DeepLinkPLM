@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { ElMessage } from 'element-plus'
 import { computed, ref, watch } from 'vue'
 
@@ -128,7 +130,7 @@ async function load() {
     confirmation.value = current
     initializeSelections(current)
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '投产方案加载失败')
+    ElMessage.error(error instanceof Error ? error.message : uiText('投产方案加载失败'))
   } finally {
     loading.value = false
   }
@@ -227,11 +229,11 @@ async function confirm() {
         })
       })
       if (hasEmptyRouteGroup || !payloadRoutes.length || payloadRoutes.some((route) => !route.operationProcessIds.length || !route.applicableColors.length)) {
-        ElMessage.warning('请先为每条工序选择使用 BOM，并至少选择一个适用颜色')
+        ElMessage.warning(uiText('请先为每条工序选择使用 BOM，并至少选择一个适用颜色'))
         return
       }
       await confirmProductionRoutes(props.projectId, { routes: payloadRoutes, remark: '确认工序、使用 BOM 与适用颜色' })
-      ElMessage.success('工序、使用 BOM 与适用颜色已确认')
+      ElMessage.success(uiText('工序、使用 BOM 与适用颜色已确认'))
     } else {
       const colors = colorOptions.value.filter((value) => selectedColors.value.includes(value.colorKey)).map((value) => ({
         codeItemId: value.codeItemId,
@@ -241,17 +243,17 @@ async function confirm() {
         productBomRouteId: value.route.productBomRouteId!
       }))
       if (!colors.length) {
-        ElMessage.warning('请至少选择一个批量投产颜色')
+        ElMessage.warning(uiText('请至少选择一个批量投产颜色'))
         return
       }
       const result = await confirmProductionColors(props.projectId, { colors })
-      ElMessage.success(result.createdSkuCount ? `已创建 ${result.createdSkuCount} 个 SKU` : '正式投产颜色已确认')
+      ElMessage.success(result.createdSkuCount ? uiText('已创建 {value0} 个 SKU',{value0:(result.createdSkuCount)}) : uiText('正式投产颜色已确认'))
     }
     workspace.changed()
     emit('confirmed')
     emit('update:modelValue', false)
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '投产方案确认失败')
+    ElMessage.error(error instanceof Error ? error.message : uiText('投产方案确认失败'))
   } finally {
     loading.value = false
   }
@@ -261,22 +263,22 @@ watch(() => props.modelValue, (value) => { if (value) void load() }, { immediate
 </script>
 
 <template>
-  <el-dialog :model-value="modelValue" :title="mode === 'operations' ? '敲定工序：确认使用 BOM 与工序名称' : '确认批量投产颜色'" width="860px" destroy-on-close @close="emit('update:modelValue', false)">
+  <el-dialog :model-value="modelValue" :title="mode === 'operations' ? uiText('敲定工序：确认使用 BOM 与工序名称') : uiText('确认批量投产颜色')" width="860px" destroy-on-close @close="emit('update:modelValue', false)">
     <div v-loading="loading" class="production-confirmation">
       <template v-if="mode === 'operations'">
         <article v-for="group in routeGroups" :key="group.process.processId" class="route-card">
           <header>
             <strong>{{ group.process.processName }}</strong>
-            <span>{{ group.candidates.length }} 份候选 BOM</span>
+            <span>{{ group.candidates.length }}{{ uiText(" 份候选 BOM") }}</span>
           </header>
           <section>
-            <p class="section-title">使用 BOM</p>
+            <p class="section-title">{{ uiText("使用 BOM") }}</p>
             <el-checkbox-group v-model="selectedRouteIds[group.process.processId]" class="candidate-list" @change="syncApplicableColors(group.process.processId)">
               <div v-for="route in group.candidates" :key="route.productBomRouteId" class="candidate-row">
                 <el-checkbox :value="route.productBomRouteId" class="candidate-checkbox">
                   <span class="candidate-content">
-                    <strong class="candidate-name">候选 BOM {{ route.versionNo }}</strong>
-                    <span class="candidate-meta">{{ route.items.length }} 项物料</span>
+                    <strong class="candidate-name">{{ uiText("候选 BOM ") }}{{ route.versionNo }}</strong>
+                    <span class="candidate-meta">{{ route.items.length }}{{ uiText(" 项物料") }}</span>
                     <span class="candidate-meta">{{ route.costSnapshot?.currencyCode || 'CNY' }} {{ route.costSnapshot?.totalCost ?? '--' }}</span>
                   </span>
                 </el-checkbox>
@@ -284,7 +286,7 @@ watch(() => props.modelValue, (value) => { if (value) void load() }, { immediate
             </el-checkbox-group>
           </section>
           <section>
-            <p class="section-title">投产工序</p>
+            <p class="section-title">{{ uiText("投产工序") }}</p>
             <el-checkbox-group v-model="selectedOperationIds[group.process.processId]" class="operation-list">
               <div v-for="operation in group.process.operations" :key="operation.processId" class="operation-row">
                 <el-checkbox :value="operation.processId" class="operation-checkbox">
@@ -295,10 +297,10 @@ watch(() => props.modelValue, (value) => { if (value) void load() }, { immediate
                 </el-checkbox>
               </div>
             </el-checkbox-group>
-            <div v-if="!group.process.operations.length" class="subtle-text">当前工艺路线暂无有效子工序</div>
+            <div v-if="!group.process.operations.length" class="subtle-text">{{ uiText("当前工艺路线暂无有效子工序") }}</div>
           </section>
           <section>
-            <p class="section-title">适用颜色</p>
+            <p class="section-title">{{ uiText("适用颜色") }}</p>
             <div v-if="selectedRoutes(group.process.processId).length" class="applicable-route-list">
               <div v-for="route in selectedRoutes(group.process.processId)" :key="route.productBomRouteId" class="applicable-route-colors">
                 <strong>BOM {{ route.versionNo }}</strong>
@@ -316,16 +318,16 @@ watch(() => props.modelValue, (value) => { if (value) void load() }, { immediate
                     {{ color.codeValue }} · {{ color.codeName }}
                   </el-checkbox>
                 </el-checkbox-group>
-                <el-empty v-else description="当前使用 BOM 尚未维护适用颜色" />
+                <el-empty v-else :description='uiText("当前使用 BOM 尚未维护适用颜色")' />
               </div>
             </div>
-            <el-empty v-else description="请至少选择一份使用 BOM" />
+            <el-empty v-else :description='uiText("请至少选择一份使用 BOM")' />
           </section>
         </article>
-        <el-empty v-if="!routeGroups.length" description="当前项目还没有可敲定的候选 BOM 路线" />
+        <el-empty v-if="!routeGroups.length" :description='uiText("当前项目还没有可敲定的候选 BOM 路线")' />
       </template>
       <template v-else>
-        <el-alert title="只展示已在“敲定工序”中确认使用 BOM 与适用颜色的路线颜色。" type="info" show-icon :closable="false" />
+        <el-alert :title='uiText("只展示已在“敲定工序”中确认使用 BOM 与适用颜色的路线颜色。")' type="info" show-icon :closable="false" />
         <el-checkbox-group v-model="selectedColors" class="color-list">
           <el-checkbox
             v-for="item in colorOptions"
@@ -342,13 +344,13 @@ watch(() => props.modelValue, (value) => { if (value) void load() }, { immediate
             </span>
           </el-checkbox>
         </el-checkbox-group>
-        <el-empty v-if="!colorOptions.length" description="请先在敲定工序中确认使用 BOM 与适用颜色" />
-        <div class="selection-count">已选择 {{ selectedColors.length }} 个颜色</div>
+        <el-empty v-if="!colorOptions.length" :description='uiText("请先在敲定工序中确认使用 BOM 与适用颜色")' />
+        <div class="selection-count">{{ uiText("已选择 ") }}{{ selectedColors.length }}{{ uiText(" 个颜色") }}</div>
       </template>
     </div>
     <template #footer>
-      <el-button @click="emit('update:modelValue', false)">取消</el-button>
-      <el-button :data-test="mode === 'colors' ? 'confirm-production-colors' : 'confirm-production-operations'" type="primary" :loading="loading" @click="confirm">{{ mode === 'colors' ? '确认批量投产并创建 SKU' : '确认使用 BOM 与适用颜色' }}</el-button>
+      <el-button @click="emit('update:modelValue', false)">{{ uiText("取消") }}</el-button>
+      <el-button :data-test="mode === 'colors' ? 'confirm-production-colors' : 'confirm-production-operations'" type="primary" :loading="loading" @click="confirm">{{ mode === 'colors' ? uiText('确认批量投产并创建 SKU') : uiText('确认使用 BOM 与适用颜色') }}</el-button>
     </template>
   </el-dialog>
 </template>

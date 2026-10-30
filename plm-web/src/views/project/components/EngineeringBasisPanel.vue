@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { computed } from 'vue';
 import { materialKey, type DevelopmentMaterial, type EngineeringSummary, type ResearchSupplierOption, type SupplierAssignment } from '@/api/modules/productResearch';
 
@@ -44,35 +46,35 @@ function canReplace(assignment:SupplierAssignment){return props.canChangeSupplie
 </script>
 
 <template>
-  <section class="engineering-basis" aria-label="供应商与工程方案" data-readiness-target="engineering">
-    <header class="section-heading"><div><h3>供应商与工程方案</h3><el-tag size="small" :type="current?'success':'warning'">{{current?'当前方案已确认':summary?.confirmed?'方案已变化，待重新确认':'尚未集中确认'}}</el-tag><span v-if="summary?.basis?.confirmedAt" class="muted">{{summary.basis.confirmedBy}} · {{summary.basis.confirmedAt}}</span></div><el-button v-if="canManageSupplier" link :disabled="busy" @click="emit('suppliers')">维护供应商资料 ↗</el-button></header>
-    <div class="supplier-heading"><strong>产品特定编码：{{productSpecificCode||'待分配'}}</strong><el-button v-if="canMaintainProductIdentity" link :disabled="busy" @click="emit('identity')">维护产品编码 ↗</el-button></div>
-    <div class="supplier-heading"><strong>供应商分工</strong><el-button v-if="assignmentsEditable" :disabled="busy" link type="primary" @click="add">添加供方</el-button><span class="muted"></span></div>
-    <p v-if="suppliersRestricted" role="status">供应商分工包含当前无权查看的资料，原关系保留；请有权人员办理供方变更。</p>
-    <p v-if="!assignments.length" class="empty-assignment">尚未登记供应商分工或内部制作安排，可先保存草稿。</p>
-    <article v-for="(assignment,index) in assignments" :key="index" class="supplier-assignment" :aria-label="`供方分工 ${index+1}`">
+  <section class="engineering-basis" :aria-label='uiText("供应商与工程方案")' data-readiness-target="engineering">
+    <header class="section-heading"><div><h3>{{ uiText("供应商与工程方案") }}</h3><el-tag size="small" :type="current?'success':'warning'">{{current?uiText('当前方案已确认'):summary?.confirmed?uiText('方案已变化，待重新确认'):uiText('尚未集中确认')}}</el-tag><span v-if="summary?.basis?.confirmedAt" class="muted">{{summary.basis.confirmedBy}} · {{summary.basis.confirmedAt}}</span></div><el-button v-if="canManageSupplier" link :disabled="busy" @click="emit('suppliers')">{{ uiText("维护供应商资料 ↗") }}</el-button></header>
+    <div class="supplier-heading"><strong>{{ uiText("产品特定编码：") }}{{productSpecificCode||uiText('待分配')}}</strong><el-button v-if="canMaintainProductIdentity" link :disabled="busy" @click="emit('identity')">{{ uiText("维护产品编码 ↗") }}</el-button></div>
+    <div class="supplier-heading"><strong>{{ uiText("供应商分工") }}</strong><el-button v-if="assignmentsEditable" :disabled="busy" link type="primary" @click="add">{{ uiText("添加供方") }}</el-button><span class="muted"></span></div>
+    <p v-if="suppliersRestricted" role="status">{{ uiText("供应商分工包含当前无权查看的资料，原关系保留；请有权人员办理供方变更。") }}</p>
+    <p v-if="!assignments.length" class="empty-assignment">{{ uiText("尚未登记供应商分工或内部制作安排，可先保存草稿。") }}</p>
+    <article v-for="(assignment,index) in assignments" :key="index" class="supplier-assignment" :aria-label="uiText('供方分工 {value0}',{value0:(index+1)})">
       <template v-if="assignmentsEditable">
         <el-form label-position="top" :disabled="busy" class="assignment-fields">
-          <el-form-item label="承担方式"><el-select :model-value="assignment.mode" :aria-label="`分工${index+1}承担方式`" @update:model-value="update(index,{mode:$event,supplierCode:undefined,internalName:undefined})"><el-option label="外部供应商" value="supplier" :disabled="!canSelectSupplier"/><el-option label="内部制作" value="internal"/></el-select></el-form-item>
-          <el-form-item v-if="assignment.mode==='supplier'" label="供应商"><el-select :model-value="assignment.supplierCode" filterable clearable :disabled="!canSelectSupplier" :aria-label="`分工${index+1}供应商`" placeholder="选择已有供应商" @update:model-value="update(index,{supplierCode:$event})"><el-option v-for="supplier in suppliers" :key="supplier.supplierCode" :label="`${supplier.supplierName} · ${supplier.supplierCode}`" :value="supplier.supplierCode"/></el-select></el-form-item>
-          <el-form-item v-else label="内部承担部门／人员"><el-input :model-value="assignment.internalName" :aria-label="`分工${index+1}内部承担方`" placeholder="如工程部／模具车间" @update:model-value="update(index,{internalName:$event})"/></el-form-item>
-          <el-form-item label="承担职责"><el-select :model-value="assignment.role" :aria-label="`分工${index+1}职责`" @update:model-value="update(index,{role:$event})"><el-option v-for="role in roles" :key="role.value" :label="role.label" :value="role.value"/></el-select></el-form-item>
-          <el-form-item label="供货／制作范围"><el-input :model-value="assignment.scope" :aria-label="`分工${index+1}范围`" placeholder="如 PC 背板、TPU 包边、组装" @update:model-value="update(index,{scope:$event})"/></el-form-item>
-          <el-form-item label="采用依据" class="assignment-basis"><el-input :model-value="assignment.basis" :aria-label="`分工${index+1}依据`" type="textarea" :autosize="{minRows:2}" placeholder="报价、样品验证或内部制作依据" @update:model-value="update(index,{basis:$event})"/></el-form-item>
-        </el-form><el-button link type="danger" :disabled="busy" :aria-label="`删除分工${index+1}`" @click="remove(index)">删除</el-button>
+          <el-form-item :label='uiText("承担方式")'><el-select :model-value="assignment.mode" :aria-label="uiText('分工{value0}承担方式',{value0:(index+1)})" @update:model-value="update(index,{mode:$event,supplierCode:undefined,internalName:undefined})"><el-option :label='uiText("外部供应商")' value="supplier" :disabled="!canSelectSupplier"/><el-option :label='uiText("内部制作")' value="internal"/></el-select></el-form-item>
+          <el-form-item v-if="assignment.mode==='supplier'" :label='uiText("供应商")'><el-select :model-value="assignment.supplierCode" filterable clearable :disabled="!canSelectSupplier" :aria-label="uiText('分工{value0}供应商',{value0:(index+1)})" :placeholder='uiText("选择已有供应商")' @update:model-value="update(index,{supplierCode:$event})"><el-option v-for="supplier in suppliers" :key="supplier.supplierCode" :label="`${supplier.supplierName} · ${supplier.supplierCode}`" :value="supplier.supplierCode"/></el-select></el-form-item>
+          <el-form-item v-else :label='uiText("内部承担部门／人员")'><el-input :model-value="assignment.internalName" :aria-label="uiText('分工{value0}内部承担方',{value0:(index+1)})" :placeholder='uiText("如工程部／模具车间")' @update:model-value="update(index,{internalName:$event})"/></el-form-item>
+          <el-form-item :label='uiText("承担职责")'><el-select :model-value="assignment.role" :aria-label="uiText('分工{value0}职责',{value0:(index+1)})" @update:model-value="update(index,{role:$event})"><el-option v-for="role in roles" :key="role.value" :label="role.label" :value="role.value"/></el-select></el-form-item>
+          <el-form-item :label='uiText("供货／制作范围")'><el-input :model-value="assignment.scope" :aria-label="uiText('分工{value0}范围',{value0:(index+1)})" :placeholder='uiText("如 PC 背板、TPU 包边、组装")' @update:model-value="update(index,{scope:$event})"/></el-form-item>
+          <el-form-item :label='uiText("采用依据")' class="assignment-basis"><el-input :model-value="assignment.basis" :aria-label="uiText('分工{value0}依据',{value0:(index+1)})" type="textarea" :autosize="{minRows:2}" :placeholder='uiText("报价、样品验证或内部制作依据")' @update:model-value="update(index,{basis:$event})"/></el-form-item>
+        </el-form><el-button link type="danger" :disabled="busy" :aria-label="uiText('删除分工{value0}',{value0:(index+1)})" @click="remove(index)">{{ uiText("删除") }}</el-button>
       </template>
-      <template v-else><strong>{{assignment.mode==='internal'?assignment.internalName||'内部承担方待补':suppliers.find(s=>s.supplierCode===assignment.supplierCode)?.supplierName||assignment.supplierCode||'供应商待补'}}</strong><span>{{roleName(assignment.role)}} · {{assignment.scope||'范围待补'}}</span><p>{{assignment.basis||'采用依据待补'}}</p></template>
-      <el-button v-if="canReplace(assignment)" link type="primary" :disabled="busy" @click="emit('changeSupplier',assignment)">更换供应商</el-button>
+      <template v-else><strong>{{assignment.mode==='internal'?assignment.internalName||uiText('内部承担方待补'):suppliers.find(s=>s.supplierCode===assignment.supplierCode)?.supplierName||assignment.supplierCode||uiText('供应商待补')}}</strong><span>{{roleName(assignment.role)}} · {{assignment.scope||uiText('范围待补')}}</span><p>{{assignment.basis||uiText('采用依据待补')}}</p></template>
+      <el-button v-if="canReplace(assignment)" link type="primary" :disabled="busy" @click="emit('changeSupplier',assignment)">{{ uiText("更换供应商") }}</el-button>
     </article>
-    <el-form v-if="assignmentsEditable&&supplierChanged" label-position="top"><el-form-item label="供应商更换原因" required><el-input :model-value="reason" :disabled="busy" type="textarea" :autosize="{minRows:2}" aria-label="供应商更换原因" placeholder="如原供方无法满足结构、工艺或交付要求，说明本次调整原因" @update:model-value="emit('update:reason',$event)"/></el-form-item></el-form>
+    <el-form v-if="assignmentsEditable&&supplierChanged" label-position="top"><el-form-item :label='uiText("供应商更换原因")' required><el-input :model-value="reason" :disabled="busy" type="textarea" :autosize="{minRows:2}" :aria-label='uiText("供应商更换原因")' :placeholder='uiText("如原供方无法满足结构、工艺或交付要求，说明本次调整原因")' @update:model-value="emit('update:reason',$event)"/></el-form-item></el-form>
     <el-form class="engineering-versions" label-position="top">
-      <el-form-item v-for="kind in kinds" :key="kind" :label="kind==='bom'?'采用 BOM 版本':'采用工艺路线版本'" :data-readiness-target="`engineering-${kind}`">
-        <el-select :model-value="selected.find(key=>key.startsWith(`${kind}:`))||''" clearable :disabled="!editable||busy" :aria-label="kind==='bom'?'集中采用BOM版本':'集中采用工艺版本'" placeholder="选择当前产品的具体版本" @update:model-value="select(kind,$event)"><el-option v-for="material in materials.filter(m=>m.type===kind)" :key="materialKey(material)" :value="materialKey(material)" :label="`${material.name} · ${material.versionNo||'版本待补'} · ${statusName(material.status)}`"/></el-select>
-        <el-button link :disabled="busy" @click="emit('engineering',kind)">{{editable?'维护／确认':'查看'}}{{kind==='bom'?' BOM':'工艺路线'}}</el-button>
+      <el-form-item v-for="kind in kinds" :key="kind" :label="kind==='bom'?uiText('采用 BOM 版本'):uiText('采用工艺路线版本')" :data-readiness-target="`engineering-${kind}`">
+        <el-select :model-value="selected.find(key=>key.startsWith(`${kind}:`))||''" clearable :disabled="!editable||busy" :aria-label="kind==='bom'?uiText('集中采用BOM版本'):uiText('集中采用工艺版本')" :placeholder='uiText("选择当前产品的具体版本")' @update:model-value="select(kind,$event)"><el-option v-for="material in materials.filter(m=>m.type===kind)" :key="materialKey(material)" :value="materialKey(material)" :label="uiText('{value0} · {value1} · {value2}',{value0:(material.name),value1:(material.versionNo||'版本待补'),value2:(statusName(material.status))})"/></el-select>
+        <el-button link :disabled="busy" @click="emit('engineering',kind)">{{editable?uiText('维护／确认'):uiText('查看')}}{{kind==='bom'?' BOM':uiText('工艺路线')}}</el-button>
       </el-form-item>
     </el-form>
-    <div v-if="gaps.length" class="engineering-gaps" role="status"><strong>保存资料后的待补事项</strong><div v-for="gap in gaps" :key="gap.code"><span>{{gap.message}}</span><el-button link :disabled="busy" @click="emit('locate',gap.target)">去补齐</el-button></div></div>
-    <el-form v-if="canConfirm" class="engineering-confirm" label-position="top"><el-form-item v-if="!supplierChanged" :label="summary?.confirmed?'工程方案变更原因':'工程方案确认说明'"><el-input :model-value="reason" :disabled="busy" :aria-label="summary?.confirmed?'工程方案变更原因':'工程方案确认说明'" :placeholder="summary?.confirmed?'方案变化后请说明本次变更原因':'确认说明（首次可不填）'" @update:model-value="emit('update:reason',$event)"/></el-form-item><el-button type="primary" :disabled="busy" @click="emit('confirm',!current)">保存并确认工程方案</el-button></el-form>
+    <div v-if="gaps.length" class="engineering-gaps" role="status"><strong>{{ uiText("保存资料后的待补事项") }}</strong><div v-for="gap in gaps" :key="gap.code"><span>{{gap.message}}</span><el-button link :disabled="busy" @click="emit('locate',gap.target)">{{ uiText("去补齐") }}</el-button></div></div>
+    <el-form v-if="canConfirm" class="engineering-confirm" label-position="top"><el-form-item v-if="!supplierChanged" :label="summary?.confirmed?uiText('工程方案变更原因'):uiText('工程方案确认说明')"><el-input :model-value="reason" :disabled="busy" :aria-label="summary?.confirmed?uiText('工程方案变更原因'):uiText('工程方案确认说明')" :placeholder="summary?.confirmed?uiText('方案变化后请说明本次变更原因'):uiText('确认说明（首次可不填）')" @update:model-value="emit('update:reason',$event)"/></el-form-item><el-button type="primary" :disabled="busy" @click="emit('confirm',!current)">{{ uiText("保存并确认工程方案") }}</el-button></el-form>
   </section>
 </template>
 

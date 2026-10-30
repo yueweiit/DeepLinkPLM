@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as uiText } from '@/locales'
+
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { getReferenceOptions, referenceKey, REFERENCE_TYPE_LABELS, type ReferenceOption } from '@/api/modules/attachment'
@@ -30,12 +32,12 @@ onBeforeUnmount(() => { recommendationGeneration++ })
 </script>
 <template>
   <div class="reference-picker">
-    <div class="reference-field"><span>关联产品、型号、SKU 或模具</span><ReferenceObjectSelect :model-value="modelValue" :disabled="disabled" aria-label="选择文件关联对象" @update:model-value="emit('update:modelValue', $event)" /></div>
+    <div class="reference-field"><span>{{ uiText("关联产品、型号、SKU 或模具") }}</span><ReferenceObjectSelect :model-value="modelValue" :disabled="disabled" :aria-label='uiText("选择文件关联对象")' @update:model-value="emit('update:modelValue', $event)" /></div>
     <div class="selected-references" v-if="modelValue.length">
-      <div v-for="r in modelValue" :key="referenceKey(r)" class="selected-reference"><div><span class="kind">{{ REFERENCE_TYPE_LABELS[r.type] }}</span> {{ r.name }} · {{ r.code }}<small>{{ r.subtitle }}</small></div><el-select popper-class="document-reference-options" v-if="r.type === 'mold_set'" :model-value="r.partType" :disabled="disabled" aria-label="实物部件范围" @update:model-value="(scope: 'ALL'|'PC'|'TPU') => part(r, scope)"><el-option label="整套" value="ALL"/><el-option label="PC" value="PC"/><el-option label="TPU" value="TPU"/></el-select><el-button link :disabled="disabled" @click="remove(referenceKey(r))" :aria-label="`移除${r.name}`">移除</el-button></div>
+      <div v-for="r in modelValue" :key="referenceKey(r)" class="selected-reference"><div><span class="kind">{{ REFERENCE_TYPE_LABELS[r.type] }}</span> {{ r.name }} · {{ r.code }}<small>{{ r.subtitle }}</small></div><el-select popper-class="document-reference-options" v-if="r.type === 'mold_set'" :model-value="r.partType" :disabled="disabled" :aria-label='uiText("实物部件范围")' @update:model-value="(scope: 'ALL'|'PC'|'TPU') => part(r, scope)"><el-option :label='uiText("整套")' value="ALL"/><el-option label="PC" value="PC"/><el-option label="TPU" value="TPU"/></el-select><el-button link :disabled="disabled" @click="remove(referenceKey(r))" :aria-label="uiText('移除{value0}',{value0:(r.name)})">{{ uiText("移除") }}</el-button></div>
     </div>
-    <details v-if="recommended.length" class="recommendations"><summary>可关联的相关对象（{{ recommended.length }}）</summary><el-checkbox-group v-model="chosenRecommendations"><el-checkbox v-for="r in recommended" :key="referenceKey(r)" :value="referenceKey(r)">{{ REFERENCE_TYPE_LABELS[r.type] }} · {{ r.name }} · {{ r.code }}</el-checkbox></el-checkbox-group><el-button size="small" :disabled="disabled||!chosenRecommendations.length" @click="addRecommendations">添加选中的推荐对象</el-button></details>
-    <p class="reference-hint">至少选择一个对象；一份文件可关联多个产品、SKU 或模具。实物套号可指定整套、PC 或 TPU。</p>
+    <details v-if="recommended.length" class="recommendations"><summary>{{ uiText("可关联的相关对象（") }}{{ recommended.length }}）</summary><el-checkbox-group v-model="chosenRecommendations"><el-checkbox v-for="r in recommended" :key="referenceKey(r)" :value="referenceKey(r)">{{ REFERENCE_TYPE_LABELS[r.type] }} · {{ r.name }} · {{ r.code }}</el-checkbox></el-checkbox-group><el-button size="small" :disabled="disabled||!chosenRecommendations.length" @click="addRecommendations">{{ uiText("添加选中的推荐对象") }}</el-button></details>
+    <p class="reference-hint">{{ uiText("至少选择一个对象；一份文件可关联多个产品、SKU 或模具。实物套号可指定整套、PC 或 TPU。") }}</p>
   </div>
 </template>
 <style scoped>
