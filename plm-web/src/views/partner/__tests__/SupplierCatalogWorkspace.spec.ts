@@ -56,6 +56,27 @@ async function chooseFirstRowModel(index = 0) {
 }
 
 describe('supplier-first product catalog', () => {
+  it('persists explicitly confirmed phones even when they equal the source-text projection',async()=>{
+    const original=row({modelText:'iPhone 11',rowVersion:8,recordVersion:12});api.catalogStyle.mockResolvedValue(original);api.updateCatalogStyle.mockResolvedValue({changed:true})
+    await start('/partner-products?supplierCode=TEST-SUP&sourceKind=selection&recordId=17&rowId=stable-row');await click('编辑产品资料')
+    wrapper.get('.common-fields').getComponent({name:'PhoneModelMultiSelect'}).vm.$emit('confirm',[201]);await flushPromises();expect(api.updateCatalogStyle).not.toHaveBeenCalled()
+    await click('保存产品资料');expect(api.updateCatalogStyle).toHaveBeenCalledExactlyOnceWith('TEST-SUP',original,{changes:{phoneModelIds:[201]},rowVersion:8,recordVersion:12,requestId:expect.any(String)});expect(original.phoneModelIds).toEqual([201]);expect(api.addCatalogSelection).not.toHaveBeenCalled()
+  })
+  it('does not persist resolved phones when the picker is cancelled or only viewed',async()=>{
+    await start('/partner-products?supplierCode=TEST-SUP&sourceKind=selection&recordId=17&rowId=stable-row');await click('编辑产品资料')
+    wrapper.get('.common-fields').getComponent({name:'PhoneModelMultiSelect'}).vm.$emit('cancel');await flushPromises();await click('保存产品资料');expect(api.updateCatalogStyle).not.toHaveBeenCalled();expect(api.addCatalogSelection).not.toHaveBeenCalled()
+  })
+  it('discards an explicit same-model confirmation on outer cancel without writing',async()=>{
+    vi.spyOn(ElMessageBox,'confirm').mockResolvedValue('confirm' as never)
+    await start('/partner-products?supplierCode=TEST-SUP&sourceKind=selection&recordId=17&rowId=stable-row');await click('编辑产品资料')
+    wrapper.get('.common-fields').getComponent({name:'PhoneModelMultiSelect'}).vm.$emit('confirm',[201]);await flushPromises();await click('取消');expect(api.updateCatalogStyle).not.toHaveBeenCalled();expect(wrapper.find('.selection-row-editor').exists()).toBe(false)
+  })
+  it('retains explicit same-model intent after a failed save and retries the same narrow command',async()=>{
+    api.updateCatalogStyle.mockRejectedValueOnce(new Error('暂时无法保存')).mockResolvedValueOnce({changed:true})
+    await start('/partner-products?supplierCode=TEST-SUP&sourceKind=selection&recordId=17&rowId=stable-row');await click('编辑产品资料')
+    wrapper.get('.common-fields').getComponent({name:'PhoneModelMultiSelect'}).vm.$emit('confirm',[201]);await flushPromises();await click('保存产品资料');expect(wrapper.find('.selection-row-editor').exists()).toBe(true)
+    await click('保存产品资料');expect(api.updateCatalogStyle).toHaveBeenCalledTimes(2);expect(api.updateCatalogStyle.mock.calls[0][2]).toEqual(api.updateCatalogStyle.mock.calls[1][2]);expect(api.updateCatalogStyle.mock.calls[1][2].changes).toEqual({phoneModelIds:[201]});expect(api.addCatalogSelection).not.toHaveBeenCalled()
+  })
   it('edits current catalog fields through the shared real editor, submits only changes and current versions, and retains the page',async()=>{
     const original=row({name:'凡影大孔手机壳'}),current={...original,rowVersion:5,recordVersion:6},corrected={...original,name:'凡影精孔手机壳'}
     api.catalogStyles.mockResolvedValueOnce(page([original],{supplier})).mockResolvedValueOnce(page([corrected],{supplier}));api.catalogStyle.mockResolvedValue(current);api.updateCatalogStyle.mockResolvedValue({name:corrected.name,changed:true})

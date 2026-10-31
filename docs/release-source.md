@@ -15,3 +15,15 @@ Backend JAR: `ecd6e87d25719c6546334aeb247fd50b41f75b68a5756f1059781bf7ab83d595`.
 Frontend index: `a3a081c71fbae8b4b40ac694d7a7ca3aa8fbef1a2f1c07861cf0a06ffc15299b`.
 
 Existing accounts, permissions, configuration, business data, source files and links are retained. No new backup, migration, business import or production test fixture is created. Runtime configuration, credentials, source spreadsheets/images and private operational evidence are excluded from this public repository. Program recovery uses existing parent images and keeps all database/files; returning to the former memory session provider may require normal login.
+
+## Explicit confirmation of a resolved phone model — 2026-10-31
+
+Release `20261031-model-confirm-7ac53cc0bd7f-r1` updates the frontend only. A catalog row can display a dynamically resolved model while its stored explicit association is empty. Completing the existing model picker must count as an explicit edit even if the visible ID matches the computed initial value. The editor forwards the picker's existing confirm event and includes that field in the same incremental changes object used by save and unsaved-change guards. Viewing, picker cancellation and photo/price-only edits do not trigger adoption. Existing version, permission, transaction and audit checks are unchanged.
+
+Two Vue files change (+5/-5 lines); two existing test files add 28 lines and five distinct regression cases. Three assertions first failed against the old behavior. Final verification passed 186 frontend cases, type checking, the complete Vite build and a normal local Spring/Vue UI save-and-reload, with cancellation verified not to write. No backend build was needed. The production backend process and Redis were not restarted, and the existing normal authenticated session survived the frontend refresh.
+
+Source manifest: `ed366cdd8fdbbf1c685c619cb9e08421980ab53a13db319f8244420265f5ffab` (1374 inputs).
+Unchanged backend JAR: `ecd6e87d25719c6546334aeb247fd50b41f75b68a5756f1059781bf7ab83d595`.
+Frontend index: `7ac53cc0bd7f346fc2b640d8a4e5cb5426df0fd2d5853e37a9bf684d610f32bd`.
+
+No schema, dependency, credentials, business import, backup or production test fixture is added. Existing static assets are retained for already-open pages. No duplicate write path or replacement picker is introduced. Only exact candidate source is published; unrelated shared-worktree edits are excluded. Private operational evidence, supplier documents and images are not part of this repository.
