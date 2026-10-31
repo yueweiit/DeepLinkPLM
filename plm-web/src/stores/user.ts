@@ -48,16 +48,12 @@ export const useUserStore = defineStore('user', () => {
     }
 
     const restoringToken = token.value
-    try {
-      const session = await getProfileByToken(restoringToken)
-      if (token.value !== restoringToken) return
-      profile.value = session.profile
-      permissions.value = session.permissions
-      setLanguage(normalizeLanguage(session.profile.preferredLanguage))
-    } catch (error) {
-      clearSession(restoringToken)
-      throw error
-    }
+    // Real 401s invalidate through the shared request handler; connection failures retain this session.
+    const session = await getProfileByToken(restoringToken)
+    if (token.value !== restoringToken) return
+    profile.value = session.profile
+    permissions.value = session.permissions
+    setLanguage(normalizeLanguage(session.profile.preferredLanguage))
   }
 
   async function logout() {

@@ -6,7 +6,7 @@ import PartnerPhoto from '../PartnerPhoto.vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CatalogStyle } from '@/types/partnerCatalog'
 
-const api = vi.hoisted(() => ({ catalogSuppliers: vi.fn(), catalogStyles: vi.fn(), catalogStyle: vi.fn(),updateCatalogStyle:vi.fn(),addCatalogSelection: vi.fn(), previewCatalogSelection:vi.fn(), selectionPage: vi.fn() }))
+const api = vi.hoisted(() => ({ catalogSuppliers: vi.fn(), catalogStyles: vi.fn(), catalogSourceFiles: vi.fn(), catalogStyle: vi.fn(),updateCatalogStyle:vi.fn(),addCatalogSelection: vi.fn(), previewCatalogSelection:vi.fn(), selectionPage: vi.fn() }))
 vi.mock('@/api/modules/partnerCatalog', () => api)
 vi.mock('@/api/modules/partnerSelections', () => ({ selectionPage: api.selectionPage }))
 vi.mock('@/api/modules/partner', () => ({ newRequestId: () => crypto.randomUUID() }))
@@ -31,6 +31,7 @@ beforeEach(() => {
   api.catalogSuppliers.mockResolvedValue(page([supplier]))
   api.catalogStyles.mockResolvedValue(page([row()], { supplier, totalElements: 62 }))
   api.catalogStyle.mockResolvedValue(row())
+  api.catalogSourceFiles.mockResolvedValue(page([]))
   api.selectionPage.mockResolvedValue(page([{ id: 77, code: 'SL-77', name: '已有真实选品', version: 8, canWrite: true }]))
   api.addCatalogSelection.mockResolvedValue({ selection: { id: 77, code: 'SL-77', name: '已有真实选品', version: 9 }, addedCount: 1, reusedCount: 0, rowIds: ['new-row'], replayed: false })
   api.previewCatalogSelection.mockResolvedValue({canAdd:true,previewToken:'signed-real-pairs',items:[],addedCount:1,reusedCount:0,newPhoneCount:1,messages:[]})
@@ -44,6 +45,8 @@ async function start(path = '/partner-products', entry = false) {
   return router
 }
 async function click(text: string) { const button = wrapper.findAll('button').find(button => button.text() === text); expect(button, text).toBeDefined(); await button!.trigger('click'); await flushPromises() }
+async function openEditorLibrary(){const library=wrapper.get('.selection-row-editor .other-materials');(library.element as HTMLDetailsElement).open=true;await library.trigger('toggle');await flushPromises()}
+const sourceFile=(id:number,name=`同源图片${id}.png`)=>({id,name,version:'V1',type:'image/png',size:20})
 
 async function chooseCatalogStyle(index=0){if(wrapper.find('.detail-scroll').exists())await click('返回款式列表');wrapper.findAll('.catalog-style-check')[index].getComponent(ElCheckbox).vm.$emit('change',true);await flushPromises();await click('选择样品')}
 async function chooseFirstRowModel(index = 0) {
@@ -63,6 +66,51 @@ describe('supplier-first product catalog', () => {
     await wrapper.get('.catalog-style-name button').trigger('click');await flushPromises();expect(wrapper.findAll('button').some(button=>button.text()==='编辑产品资料')).toBe(true)
   })
   it('closes an unchanged editor without writing or refreshing the original detail',async()=>{await start('/partner-products?supplierCode=TEST-SUP&sourceKind=selection&recordId=17&rowId=stable-row');await click('编辑产品资料');await click('取消');expect(api.updateCatalogStyle).not.toHaveBeenCalled();expect(wrapper.get('.detail-heading h2').text()).toBe('磁吸支架款');expect(api.catalogStyles).not.toHaveBeenCalled()})
+  it.each(['selection','quote'] as const)('loads only the exact %s source after the existing material library is explicitly opened',async sourceKind=>{
+    api.catalogStyle.mockResolvedValue(row({sourceKind}));api.catalogSourceFiles.mockResolvedValue(page([sourceFile(502)]))
+    await start(`/partner-products?supplierCode=TEST-SUP&sourceKind=${sourceKind}&recordId=17&rowId=stable-row`);await click('编辑产品资料');expect(api.catalogSourceFiles).not.toHaveBeenCalled()
+    await openEditorLibrary();expect(api.catalogSourceFiles).toHaveBeenCalledExactlyOnceWith(17,{supplierCode:'TEST-SUP',page:1,size:100});expect(wrapper.get('.source-library-controls').text()).toContain('同一来源的图片与附件');expect(wrapper.get('.library-grid').text()).toContain('同源图片502.png')
+    const library=wrapper.get('.other-materials');(library.element as HTMLDetailsElement).open=false;await library.trigger('toggle');await openEditorLibrary();expect(api.catalogSourceFiles).toHaveBeenCalledTimes(1);expect(api.updateCatalogStyle).not.toHaveBeenCalled()
+  })
+  it('previews and adopts an existing sibling photo through the shared library but discards changes on explicit cancel',async()=>{
+    const original=row();api.catalogStyle.mockResolvedValue(original);api.catalogSourceFiles.mockResolvedValue(page([sourceFile(502)]));vi.spyOn(ElMessageBox,'confirm').mockResolvedValue('confirm' as never)
+    await start('/partner-products?supplierCode=TEST-SUP&sourceKind=selection&recordId=17&rowId=stable-row');await click('编辑产品资料');await openEditorLibrary()
+    const photo=wrapper.get('.library-grid').getComponent(PartnerPhoto);expect(photo.props('id')).toBe(502);expect(photo.props('previewable')).toBe(true)
+    wrapper.get('.library-grid').getComponent(ElCheckbox).vm.$emit('change',true);await flushPromises();expect(wrapper.get('.adopted-evidence>.evidence-grid').text()).toContain('同源图片502.png');expect(original.refs).toEqual([{id:501,type:'file'}])
+    await click('取消');expect(wrapper.find('.selection-row-editor').exists()).toBe(false);expect(api.updateCatalogStyle).not.toHaveBeenCalled();expect(wrapper.get('.test-files').text()).toContain('本款原图.png')
+  })
+  it('replaces just the current adoption with an existing sibling file using fresh versions without resending phones or quotes',async()=>{
+    const original=row({rowVersion:9,recordVersion:12});api.catalogStyle.mockResolvedValue(original);api.catalogSourceFiles.mockResolvedValue(page([sourceFile(502)]));api.updateCatalogStyle.mockResolvedValue({changed:true})
+    await start('/partner-products?supplierCode=TEST-SUP&sourceKind=selection&recordId=17&rowId=stable-row');await click('编辑产品资料');await openEditorLibrary()
+    wrapper.get('.adopted-evidence>.evidence-grid').getComponent(ElCheckbox).vm.$emit('change',false);wrapper.get('.library-grid').findAll('.evidence-file').find(item=>item.text().includes('同源图片502.png'))!.getComponent(ElCheckbox).vm.$emit('change',true);await flushPromises();await click('保存产品资料')
+    expect(api.updateCatalogStyle).toHaveBeenCalledExactlyOnceWith('TEST-SUP',original,{changes:{refs:[{id:502,type:'file',name:'同源图片502.png',version:'V1'}]},rowVersion:9,recordVersion:12,requestId:expect.any(String)});expect(original.unitPrice).toBe('12.50');expect(original.phoneModelIds).toEqual([201]);expect(original.refs).toEqual([{id:501,type:'file'}]);expect(api.addCatalogSelection).not.toHaveBeenCalled()
+  })
+  it('retains unsaved fields and adopted photos when a later source-library page fails, then retries only that page',async()=>{
+    api.catalogSourceFiles.mockResolvedValueOnce(page([sourceFile(502)],{totalElements:2})).mockRejectedValueOnce(new Error('本来源资料暂不可读')).mockResolvedValueOnce(page([sourceFile(503)],{page:2,totalElements:2}))
+    await start('/partner-products?supplierCode=TEST-SUP&sourceKind=selection&recordId=17&rowId=stable-row');await click('编辑产品资料');await openEditorLibrary()
+    wrapper.get('.library-grid').getComponent(ElCheckbox).vm.$emit('change',true);const field=wrapper.findAll('.el-form-item').find(item=>item.find('.el-form-item__label').text()==='款式名称 *')!.get('textarea');await field.setValue('本次尚未保存名称');await click('加载更多（已加载 1 / 2）')
+    expect(wrapper.get('.source-library-controls [role="alert"]').text()).toContain('本来源资料暂不可读');expect((field.element as HTMLTextAreaElement).value).toBe('本次尚未保存名称');expect(wrapper.get('.adopted-evidence>.evidence-grid').text()).toContain('同源图片502.png');expect(api.catalogStyle).toHaveBeenCalledTimes(2)
+    await click('重试');expect(api.catalogSourceFiles.mock.calls.map(call=>call[1].page)).toEqual([1,2,2]);expect(wrapper.get('.library-grid').text()).toContain('同源图片503.png');expect(wrapper.get('.adopted-evidence>.evidence-grid').text()).not.toContain('同源图片503.png');expect((field.element as HTMLTextAreaElement).value).toBe('本次尚未保存名称');expect(api.updateCatalogStyle).not.toHaveBeenCalled()
+  })
+  it('loads beyond the first hundred source files explicitly without rendering the whole library or choosing unseen photos',async()=>{
+    const first=Array.from({length:100},(_,index)=>sourceFile(1000+index)),last=sourceFile(2100,'末页同源图.png')
+    api.catalogSourceFiles.mockResolvedValueOnce(page(first,{totalElements:101,size:100})).mockResolvedValueOnce(page([last],{page:2,totalElements:101,size:100}))
+    await start('/partner-products?supplierCode=TEST-SUP&sourceKind=selection&recordId=17&rowId=stable-row');await click('编辑产品资料');await openEditorLibrary();expect(wrapper.findAll('.library-grid .evidence-file')).toHaveLength(6);expect(wrapper.get('.source-library-controls').text()).toContain('已加载 100 / 101 份资料')
+    await click('加载更多（已加载 100 / 101）');expect(api.catalogSourceFiles.mock.calls).toEqual([1,2].map(page=>[17,{supplierCode:'TEST-SUP',page,size:100}]));expect(wrapper.get('.source-library-controls').text()).toContain('已加载 101 / 101 份资料');await wrapper.get('.material-library input').setValue('末页同源图');expect(wrapper.findAll('.library-grid .evidence-file')).toHaveLength(1);expect(wrapper.get('.library-grid').text()).toContain('末页同源图.png');expect(wrapper.get('.adopted-evidence>.evidence-grid').text()).not.toContain('末页同源图.png');expect(api.updateCatalogStyle).not.toHaveBeenCalled()
+  })
+  it('keeps a source-owned original selectable after no current row adopts it and completes two refs-only swaps',async()=>{
+    const originals=[sourceFile(501,'原图A.png'),sourceFile(502,'原图B.png')]
+    const records=[row({rowId:'first-row',recordVersion:8,refs:[{id:501,type:'file'}],fileDetails:[originals[0]]}),row({rowId:'second-row',name:'第二款',rowVersion:5,recordVersion:8,refs:[{id:502,type:'file'}],fileDetails:[originals[1]]})]
+    api.catalogStyle.mockImplementation(async(_supplier,identity)=>records.find(record=>record.rowId===identity.rowId))
+    api.catalogSourceFiles.mockResolvedValue(page(originals))
+    api.updateCatalogStyle.mockImplementation(async(_supplier,identity,input)=>{const record=records.find(record=>record.rowId===identity.rowId)!;record.refs=input.changes.refs;record.fileDetails=originals.filter(file=>record.refs.some(ref=>ref.id===file.id));record.rowVersion++;records.forEach(item=>item.recordVersion++);return {changed:true}})
+    const router=await start('/partner-products?supplierCode=TEST-SUP&sourceKind=selection&recordId=17&rowId=first-row')
+    const replace=async(name:string)=>{await click('编辑产品资料');await openEditorLibrary();wrapper.get('.adopted-evidence>.evidence-grid').getComponent(ElCheckbox).vm.$emit('change',false);await flushPromises();wrapper.get('.library-grid').findAll('.evidence-file').find(item=>item.text().includes(name))!.getComponent(ElCheckbox).vm.$emit('change',true);await flushPromises();await click('保存产品资料')}
+    await replace('原图B.png');expect(records.every(record=>record.refs[0].id===502)).toBe(true)
+    await router.push('/partner-products?supplierCode=TEST-SUP&sourceKind=selection&recordId=17&rowId=second-row');await flushPromises();await replace('原图A.png')
+    expect(records.map(record=>record.refs.map(ref=>ref.id))).toEqual([[502],[501]]);expect(api.catalogSourceFiles.mock.calls).toEqual([[17,{supplierCode:'TEST-SUP',page:1,size:100}],[17,{supplierCode:'TEST-SUP',page:1,size:100}]])
+    expect(api.updateCatalogStyle.mock.calls.map(call=>call[2])).toEqual([{changes:{refs:[{id:502,type:'file',name:'原图B.png',version:'V1'}]},rowVersion:3,recordVersion:8,requestId:expect.any(String)},{changes:{refs:[{id:501,type:'file',name:'原图A.png',version:'V1'}]},rowVersion:5,recordVersion:9,requestId:expect.any(String)}]);expect(api.catalogStyles).not.toHaveBeenCalled();expect(records.map(record=>record.phoneModelIds)).toEqual([[201],[201]]);expect(records.map(record=>record.unitPrice)).toEqual(['12.50','12.50']);expect(api.addCatalogSelection).not.toHaveBeenCalled()
+  })
   it('retains edits on cancel, navigation and page reload until explicitly discarded or saved',async()=>{vi.spyOn(ElMessageBox,'confirm').mockRejectedValue('cancel');const router=await start('/partner-products?supplierCode=TEST-SUP');await click('编辑');await wrapper.get('.selection-row-editor textarea').setValue('待保存名称');const leaving=new Event('beforeunload',{cancelable:true});window.dispatchEvent(leaving);expect(leaving.defaultPrevented).toBe(true);await router.push('/partner-selections');expect(router.currentRoute.value.path).toBe('/partner-products');await click('取消');expect(wrapper.find('.selection-row-editor').exists()).toBe(true);expect(api.updateCatalogStyle).not.toHaveBeenCalled()})
   it('removes and restores the same identity with explicit deleted queries and fresh versions, without cancelling selections',async()=>{
     vi.spyOn(ElMessageBox,'confirm').mockResolvedValue('confirm' as never);api.updateCatalogStyle.mockResolvedValue({changed:true})

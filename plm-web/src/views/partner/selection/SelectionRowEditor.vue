@@ -12,7 +12,8 @@ import type {SelectionRow,SelectionRangeSnapshot} from '@/types/partnerSelection
 import {changeSelectionSupplier,developmentLabels,pairCoverage,selectionRowFiles} from '@/utils/partnerSelections'
 import {resolveSupplierRanges,supplierColors,supplierRanges,type SupplierColor,type SupplierRange} from '@/api/modules/supplierRanges'
 import {partnerError} from '@/utils/partnerError'
-const props=defineProps<{row:SelectionRow;files:PartnerFile[];libraryFiles?:PartnerFile[];suppliers:{code:string;name:string;shortCode?:string}[];canWrite:boolean;canReadCost:boolean;fixedSupplier?:boolean;context?:'selection'|'catalog'}>()
+const props=defineProps<{row:SelectionRow;files:PartnerFile[];libraryFiles?:PartnerFile[];libraryLoading?:boolean;suppliers:{code:string;name:string;shortCode?:string}[];canWrite:boolean;canReadCost:boolean;fixedSupplier?:boolean;context?:'selection'|'catalog'}>()
+const emit=defineEmits<{'library-open':[]}>()
 const modelRanges=ref<SupplierRange[]>([]),colorRanges=ref<SupplierRange[]>([]),colors=ref<SupplierColor[]>([]),scopeOpen=ref(false),error=ref(''),scopeResult=ref(''),pairPhones=ref<number[]>([]),pairColor=ref<number>(),pairState=ref<'available'|'unavailable'|'unverified'>('unverified'),pairEvidence=ref('')
 const libraryOpen=ref(false),libraryKeyword=ref(''),libraryPage=ref(1),librarySize=6
 const colorOpen=ref(false)
@@ -24,6 +25,7 @@ const sampleQuantity=computed<number|undefined>({get(){const value:unknown=props
 const hasPhoneScopeEvidence=computed(()=>Boolean(props.row.modelText?.trim()||props.row.phoneModelIds.length||props.row.availablePhoneModelIds.length||props.row.unavailablePhoneModelIds.length||props.row.rangeRefs.some(ref=>ref.type==='model')||props.row.rangeSnapshots?.some(snapshot=>snapshot.type==='model')||props.row.pairings.length||props.row.selectedPairs.length||props.row.sourcePhoneModelIds?.length))
 function setPhoneScopeDeclaration(checked:boolean){if(props.context!=='catalog'||!props.canWrite||checked&&hasPhoneScopeEvidence.value)return;props.row.phoneScopeDeclaration=checked?'not_provided':''}
 watch(()=>props.row.rowId,()=>{libraryOpen.value=false;libraryKeyword.value='';libraryPage.value=1})
+function toggleLibrary(event:Event){libraryOpen.value=(event.target as HTMLDetailsElement).open;if(libraryOpen.value)emit('library-open')}
 watch(libraryKeyword,()=>{libraryPage.value=1})
 watch(()=>libraryMatches.value.length,total=>{libraryPage.value=Math.min(libraryPage.value,Math.max(1,Math.ceil(total/librarySize)))})
 const coverage=computed(()=>pairCoverage(props.row)),fields=[{key:'name',label:'款式名称 *'},{key:'series',label:'系列'},{key:'supplierItemCode',label:'供方款号'},{key:'material',label:'材质／配置'},{key:'specification',label:'规格原文'},{key:'thickness',label:'厚度'},{key:'features',label:'工艺／功能与特点'},{key:'leadTimeNote',label:'参考生产周期'},{key:'color',label:'供应商颜色原文'},{key:'modelText',label:'型号原文'},{key:'moq',label:'起订条件原文'},{key:'packaging',label:'包装原文'},{key:'sourcePosition',label:'来源文件／工作表／行号'},{key:'sameStyleKey',label:'工程确认的同款分组'},{key:'developmentEvidence',label:'开发先后核对依据'}] as const
@@ -59,13 +61,13 @@ const colorName=(id:number)=>props.row.pairings.find(pair=>pair.colorId===id&&pa
      <div class="evidence-info"><span>{{item.file?.name||item.ref.name||uiText('已关联资料 #')+item.ref.id}} · {{item.file?.version||item.ref.version||uiText('版本待加载')}}</span><small v-if="!item.file">{{ uiText("资料信息待加载，关联已保留") }}</small><el-checkbox v-if="canWrite" :model-value="true" @change="adopt(item.ref.id,Boolean($event))">{{ uiText("本行采用") }}</el-checkbox></div>
     </article>
    </div>
-   <details v-if="canWrite" class="other-materials" @toggle="libraryOpen=($event.target as HTMLDetailsElement).open">
+   <details v-if="canWrite" class="other-materials" @toggle="toggleLibrary">
     <summary>{{ uiText("从资料库选择其他资料") }}</summary>
     <div v-if="libraryOpen" class="material-library">
-     <p>{{ uiText("仅当前选品最近可访问的 ") }}{{fileMetadata.length}}{{ uiText(" 份资料，并非全部资料库；选择不会改变其他行的关联。") }}</p>
+     <slot name="library-controls"><p>{{ uiText("仅当前选品最近可访问的 ") }}{{fileMetadata.length}}{{ uiText(" 份资料，并非全部资料库；选择不会改变其他行的关联。") }}</p></slot>
      <el-input v-model="libraryKeyword" clearable :aria-label='uiText("搜索其他资料")' :placeholder='uiText("搜索资料名称或版本")'/>
      <div class="evidence-grid library-grid"><article v-for="file in visibleLibrary" :key="file.id" class="evidence-file"><PartnerPhoto v-if="file.type?.startsWith('image/')" :id="file.id" :allow-retry="true" previewable/><div class="evidence-info"><span>{{file.name}} · {{file.version}}</span><el-checkbox :model-value="false" @change="adopt(file.id,Boolean($event))">{{ uiText("采用到本行") }}</el-checkbox></div></article></div>
-     <p v-if="!libraryMatches.length">{{ uiText("没有其他符合条件的资料。") }}</p>
+     <p v-if="!libraryMatches.length&&!libraryLoading">{{ uiText("没有其他符合条件的资料。") }}</p>
      <el-pagination v-if="libraryMatches.length>librarySize" v-model:current-page="libraryPage" :page-size="librarySize" :total="libraryMatches.length" :pager-count="5" layout="total,prev,pager,next"/>
     </div>
    </details>

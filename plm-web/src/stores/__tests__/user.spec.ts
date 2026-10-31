@@ -16,6 +16,27 @@ let pinia:Pinia
 beforeEach(() => { vi.clearAllMocks();localStorage.clear();pinia=createPinia();setActivePinia(pinia);auth.loginByPassword.mockResolvedValue(session('old'));auth.logout.mockResolvedValue(undefined) })
 afterEach(() => { disposePinia(pinia);localStorage.clear();window.location.hash='';setLanguage('zh-CN') })
 describe('one real Pinia session invalidation', () => {
+  it.each([502,503,'network'])('retains the same session and unsaved work on temporary profile failure %s, then retries restoration',async status=>{
+    const user=useUserStore();await user.login({username:'test',password:'test-only'})
+    const collaboration=useCollaborationWorkspace(),finance=useFinanceWorkspace().forEntity('budget')
+    collaboration.drafts.set({itemId:1,notes:null} as CollaborationRow,'notes','unsaved-original')
+    editFinanceCell(finance.drafts,1,{budgetId:1,currencyCode:'CNY',moldCost:null},'moldCost','0')
+    const failure=status==='network'?new Error('Network Error'):{response:{status}}
+    auth.getProfileByToken.mockRejectedValueOnce(failure)
+    await expect(user.restore()).rejects.toBe(failure)
+    expect(user.token).toBe('old');expect(localStorage.getItem('plm_token')).toBe('old')
+    expect(user.profile?.userName).toBe('old');expect(user.permissions).toEqual(['finance:write'])
+    expect(collaboration.drafts.rows.size).toBe(1);expect(finance.drafts.size).toBe(1)
+    auth.getProfileByToken.mockResolvedValue({...session('old'),profile:{...session('old').profile,userName:'恢复后的同一账号'}})
+    await user.restore();expect(user.profile?.userName).toBe('恢复后的同一账号')
+    expect(user.token).toBe('old');expect(collaboration.drafts.rows.size).toBe(1);expect(finance.drafts.size).toBe(1)
+  })
+  it('still invalidates a real current-session typed 401 during profile restoration',async()=>{
+    const user=useUserStore();await user.login({username:'test',password:'test-only'})
+    auth.getProfileByToken.mockImplementation(async()=>unwrapResponse(expired('old')))
+    await expect(user.restore()).rejects.toThrow('会话失效')
+    expect(user.token).toBe('');expect(user.profile).toBeNull();expect(localStorage.getItem('plm_token')).toBeNull()
+  })
   it('uses each account default and saves a language switch without clearing its business drafts',async()=>{
     setLanguage('es');const user=useUserStore();await user.login({username:'test',password:'test-only'})
     expect(currentLanguage.value).toBe('zh-CN')

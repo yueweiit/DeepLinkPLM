@@ -4,6 +4,11 @@ import dynamic from './es-dynamic.json'
 export default {
   ...ui,
   ...dynamic,
+  '同一来源的图片与附件；选择不会改变其他行的关联。': 'Imágenes y archivos de la misma fuente. Elegirlos no cambia los vínculos de otras filas.',
+  '已加载 {value0} / {value1} 份资料': '{value0} / {value1} archivos cargados',
+  '恢复连接': 'Restablecer conexión',
+  '暂时无法连接系统，登录资料已保留。请稍后重试。': 'No se puede conectar al sistema por el momento. Se conservó la sesión. Vuelva a intentarlo más tarde.',
+  '重试恢复': 'Reintentar conexión',
   '分配手机编码': 'Asignar código de modelo',
   '编码所属品牌': 'Marca del modelo',
   '型号来源': 'Origen del modelo',

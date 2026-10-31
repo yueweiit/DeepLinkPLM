@@ -38,6 +38,9 @@ public class PartnerCatalogController {
     @GetMapping("/sources/{id}")
     public ResponseVO<?> source(@PathVariable long id,HttpServletRequest request){return ok(catalog.sourceDetail(id),request);}
 
+    @GetMapping("/sources/{id}/files")
+    public ResponseVO<?> sourceFiles(@PathVariable long id,@RequestParam Map<String,String> query,HttpServletRequest request){return ok(catalog.sourceFiles(id,query),request);}
+
     @PostMapping("/sources/{id}/purpose-preview")
     public ResponseVO<?> purposePreview(@PathVariable long id,@RequestBody Map<String,Object> input,HttpServletRequest request){return ok(catalog.purposePreview(id,input),request);}
 

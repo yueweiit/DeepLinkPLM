@@ -32,6 +32,12 @@ const routes: RouteRecordRaw[] = [
     } satisfies RouteMetaConfig
   },
   {
+    path: '/session-recovery',
+    name: 'SessionRecovery',
+    component: () => import('@/views/error/SessionRecoveryView.vue'),
+    meta: { title: '恢复连接' } satisfies RouteMetaConfig
+  },
+  {
     path: '/',
     component: Layout,
     redirect: '/dashboard',
@@ -415,12 +421,16 @@ export function defaultHome(userStore: ReturnType<typeof useUserStore>) {
 router.beforeEach(async (to) => {
   const userStore = useUserStore()
 
+  if (to.path === '/session-recovery') {
+    return userStore.token ? true : { path: '/login', query: { redirect: typeof to.query.redirect === 'string' ? to.query.redirect : '/' } }
+  }
+
   if (!restored && userStore.token) {
-    restored = true
     try {
       await userStore.restore()
+      restored = true
     } catch {
-      return { path: '/login', query: { redirect: to.fullPath } }
+      return { path: userStore.token ? '/session-recovery' : '/login', query: { redirect: to.fullPath } }
     }
   }
 

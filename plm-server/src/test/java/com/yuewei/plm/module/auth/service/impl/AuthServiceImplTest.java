@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.yuewei.plm.common.constant.ErrorCodeConstants;
 import com.yuewei.plm.common.exception.BusinessException;
+import com.yuewei.plm.module.auth.service.TokenSessionService;
 import com.yuewei.plm.module.auth.dto.LoginDTO;
 import com.yuewei.plm.module.auth.vo.LoginVO;
 import com.yuewei.plm.module.operationlog.service.OperationLogService;
@@ -24,7 +25,9 @@ class AuthServiceImplTest {
     @Test
     void loginWithCorrectPasswordReturnsTokenAndCurrentUser() {
         SysUserRepository userRepository = mock(SysUserRepository.class);
-        InMemoryTokenSessionService tokenSessionService = new InMemoryTokenSessionService();
+        TokenSessionService tokenSessionService = mock(TokenSessionService.class);
+        when(tokenSessionService.createSession(any())).thenReturn("unit-test-session");
+        when(tokenSessionService.getExpiresInSeconds()).thenReturn(28800L);
         OperationLogService operationLogService = mock(OperationLogService.class);
         BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
         AuthServiceImpl authService = new AuthServiceImpl(userRepository, tokenSessionService, operationLogService, passwordEncoder);
@@ -46,7 +49,7 @@ class AuthServiceImplTest {
     @Test
     void loginWithWrongPasswordThrowsUnifiedAuthError() {
         SysUserRepository userRepository = mock(SysUserRepository.class);
-        InMemoryTokenSessionService tokenSessionService = new InMemoryTokenSessionService();
+        TokenSessionService tokenSessionService = mock(TokenSessionService.class);
         OperationLogService operationLogService = mock(OperationLogService.class);
         BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
         AuthServiceImpl authService = new AuthServiceImpl(userRepository, tokenSessionService, operationLogService, passwordEncoder);

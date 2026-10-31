@@ -259,6 +259,43 @@ class PartnerCatalogServiceTest {
             catalog=new PartnerCatalogService(store,permissions,suppliers,selections,materials,phones,operations);
         }
 
+        @Test void sourceLibraryRetainsUnadoptedOriginalsDuringTwoPhotoSwapsAndKeepsFrozenSelectionHistory(){
+            renameFixture();when(scopedAccess.visibleSqlClause("file","a.attachment_id")).thenReturn("true");
+            jdbc.update("update plm_partner_record set data='{\"catalogSource\":true}' where record_id=20");
+            jdbc.execute("insert into plm_attachment values(89,0,'原图B.png','V1','image/png',200);insert into plm_partner_file(record_id,attachment_id) values(20,89)");
+            String first=jdbc.queryForObject("select row_id::text from plm_partner_selection_row where record_id=20",String.class),second=selection(20,"SELECTION",false);
+            jdbc.update("update plm_partner_selection_row set data=?::jsonb where row_id=?::uuid",encode(store.json,values("supplierCode","SELECTION","name","QA原款A","unitPrice","3.80","phoneModelIds",List.of(1218L),"refs",List.of(Map.of("id",88L)))),first);
+            jdbc.update("update plm_partner_selection_row set data=?::jsonb where row_id=?::uuid",encode(store.json,values("supplierCode","SELECTION","name","QA原款B","unitPrice","4.50","phoneModelIds",List.of(1218L),"refs",List.of(Map.of("id",89L)))),second);
+            jdbc.update("insert into plm_partner_record(record_id,kind,code,name,version,supplier_code,data) values(21,'selection','SL-21','Frozen',1,'SELECTION','{\"purpose\":\"my_selection\"}')");
+            String frozen=selection(21,"SELECTION",false);jdbc.update("update plm_partner_selection_row set data=?::jsonb where row_id=?::uuid",encode(store.json,Map.of("name","冻结样品依据","refs",List.of(Map.of("id",88L)),"catalogSourceSnapshot",Map.of("sourceKind","selection","recordId",20L,"rowId",first))),frozen);
+            String history=jdbc.queryForObject("select data::text from plm_partner_selection_row where row_id=?::uuid",String.class,frozen);var originalFiles=jdbc.queryForList("select * from plm_partner_file order by record_id,attachment_id");
+            catalog.updateStyle("selection",20,first,"SELECTION",values("rowVersion",1,"recordVersion",1,"requestId","swap-first","changes",Map.of("refs",List.of(Map.of("id",89L)))));
+            assertEquals(List.of(88L,89L),maps(catalog.sourceFiles(20,Map.of("supplierCode","SELECTION")).get("content")).stream().map(file->number(file.get("id"))).toList());
+            catalog.updateStyle("selection",20,second,"SELECTION",values("rowVersion",1,"recordVersion",2,"requestId","swap-second","changes",Map.of("refs",List.of(Map.of("id",88L)))));
+            for(var entry:List.of(Map.entry(first,89L),Map.entry(second,88L))){var data=decode(store.json,jdbc.queryForObject("select data::text from plm_partner_selection_row where row_id=?::uuid",String.class,entry.getKey()));assertEquals(entry.getValue(),number(maps(map(data.get("catalogCurrent")).get("refs")).get(0).get("id")));assertEquals(List.of(1218L),PartnerSelectionService.scopeIds(data.get("phoneModelIds")));assertEquals(entry.getKey().equals(first)?"3.80":"4.50",data.get("unitPrice"));}
+            assertEquals(history,jdbc.queryForObject("select data::text from plm_partner_selection_row where row_id=?::uuid",String.class,frozen));assertEquals(originalFiles,jdbc.queryForList("select * from plm_partner_file order by record_id,attachment_id"));assertEquals(2L,catalog.sourceFiles(20,Map.of("supplierCode","SELECTION")).get("totalElements"));assertEquals(2L,jdbc.queryForObject("select count(*) from plm_partner_event where action='catalog_style_update'",Long.class));assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_catalog_style",Long.class));
+        }
+
+        @Test void sourceLibraryAppliesRecordSupplierFileAndCostVisibilityBeforeCounting(){
+            renameFixture();when(scopedAccess.visibleSqlClause("file","a.attachment_id")).thenReturn("a.attachment_id<>93");
+            jdbc.execute("""
+                insert into plm_attachment values(90,1,'已删除.png','V1','image/png',1),(91,0,'报价.xlsx','V1','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',2),(92,0,'财务.png','V1','image/png',3),(93,0,'无文件权限.png','V1','image/png',4),(94,0,'导入原件.png','V1','image/png',5),(95,0,'未采用说明.pdf','V1','application/pdf',6),(96,0,'其他来源.png','V1','image/png',7);
+                insert into plm_partner_file values(20,90,'photo'),(20,91,'cooperation_cost'),(20,92,'financial'),(20,93,'photo'),(20,94,'photo'),(20,95,'material'),(10,96,'photo');
+                insert into plm_partner_file_job(job_id,record_id,source_attachment_id,kind,status) values(1,20,94,'import','committed');
+                """);
+            when(permissions.costs()).thenReturn(false);var visible=catalog.sourceFiles(20,Map.of("supplierCode","SELECTION"));assertEquals(2L,visible.get("totalElements"));assertEquals(List.of(88L,95L),maps(visible.get("content")).stream().map(file->number(file.get("id"))).toList());
+            when(permissions.costs()).thenReturn(true);assertEquals(List.of(88L,91L,92L,94L,95L),maps(catalog.sourceFiles(20,Map.of("supplierCode","SELECTION")).get("content")).stream().map(file->number(file.get("id"))).toList());
+            assertThrows(BusinessException.class,()->catalog.sourceFiles(20,Map.of("supplierCode","QUOTE")));assertThrows(BusinessException.class,()->catalog.sourceFiles(50,Map.of("supplierCode","HIDDEN_RECORD")));
+            doThrow(new BusinessException(40103,"无文件读取权限")).when(scopedAccess).requirePermission("file:read");assertThrows(BusinessException.class,()->catalog.sourceFiles(20,Map.of("supplierCode","SELECTION")));
+        }
+
+        @Test void sourceLibraryPaginatesAllOwnedFilesWithoutTruncatingAtOneHundred(){
+            renameFixture();when(scopedAccess.visibleSqlClause("file","a.attachment_id")).thenReturn("true");
+            jdbc.execute("insert into plm_attachment select n,0,'原图-'||n||'.png','V1','image/png',1 from generate_series(100,200) n;insert into plm_partner_file select 20,n,'photo' from generate_series(100,200) n");
+            var first=catalog.sourceFiles(20,Map.of("supplierCode","SELECTION","size","100"));var second=catalog.sourceFiles(20,Map.of("supplierCode","SELECTION","size","100","page","2"));
+            assertEquals(102L,first.get("totalElements"));assertEquals(100,maps(first.get("content")).size());assertEquals(List.of(199L,200L),maps(second.get("content")).stream().map(file->number(file.get("id"))).toList());assertEquals(2L,first.get("totalPages"));assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_event where action='file_add'",Long.class));
+        }
+
         @Test void stylePickerPrefersCurrentDirectoryNameOverANewerFrozenSelectionWithoutWritingHistory(){
             renameFixture();jdbc.execute("alter table plm_partner_catalog_style_source add column created_at timestamptz default now()");
             String original=jdbc.queryForObject("select row_id::text from plm_partner_selection_row where record_id=20",String.class);

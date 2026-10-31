@@ -16,6 +16,8 @@ import static com.yuewei.plm.module.partner.PartnerValues.*;
 @RequiredArgsConstructor
 public class PartnerCatalogService {
     private static final Set<String> MODEL_SHEET_COMMAND_FIELDS = Set.of("supplierCode", "sourceKind", "recordId", "rowId", "rowVersion", "recordVersion", "entries", "modelSheetRefs", "requestId", "previewToken", "sha256");
+    private static final String RESTRICTED_FILE = "exists(select 1 from plm_partner_file x where x.attachment_id=a.attachment_id and x.purpose in ('cooperation_cost','financial'))"
+        + " or exists(select 1 from plm_partner_file_job j where j.kind='import' and j.source_attachment_id=a.attachment_id)";
     private static final List<String> SUMMARY_FIELDS = List.of("name", "series", "supplierItemCode",
         "modelText", "color", "material", "specification", "moq", "packaging", "styleKey", "configKey",
         "quoteVersion", "sourcePosition", "sourceSheet", "sourceVersion", "productId", "productCode",
@@ -109,10 +111,7 @@ public class PartnerCatalogService {
 
     @Transactional(readOnly=true)
     public Map<String,Object> sourceDetail(long id) {
-        view();var kinds=store.jdbc.queryForList("select kind from plm_partner_record r where r.record_id=? and r.deleted_flag=0 and ("+store.access.visibleSqlClause("partner","r.record_id")+")",id);
-        require(kinds.size()==1,"供应商来源不存在或未获授权");String kind=text(kinds.get(0).get("kind"));
-        require(Set.of("selection","supplier_quote").contains(kind),"这不是供应商目录资料");
-        var header=sourceSupplier(store.load(id,kind,false));profiles.requireSupplier(required(header.get("supplierCode"),"供应商"));var result=sourceHeader(header);
+        var header=readableSource(id);var result=sourceHeader(header);String kind=text(header.get("kind"));
         String table=kind.equals("selection")?"plm_partner_selection_row":"plm_partner_quote_line";
         result.put("rowCount",store.jdbc.queryForObject("select count(*) from "+table+" where record_id=?",Long.class,id));
         result.put("files",List.of());
@@ -123,6 +122,28 @@ public class PartnerCatalogService {
                 +"and a.deleted_flag=0 and (f.purpose='cooperation_cost' or coalesce(a.content_type,'') not like 'image/%') and ("
                 +store.access.visibleSqlClause("file","a.attachment_id")+") order by a.attachment_id desc",id));
         }return result;
+    }
+
+    @Transactional(readOnly=true)
+    public Map<String,Object> sourceFiles(long id,Map<String,String> query) {
+        var header=readableSource(id);
+        require(required(query.get("supplierCode"),"供应商").equals(text(header.get("supplierCode"))),"来源资料不属于当前供应商");
+        store.access.requirePermission("file:read");
+        long page=page(query),size=size(query);
+        String where="f.record_id=? and a.deleted_flag=0 and "+store.access.visibleSqlClause("file","a.attachment_id")
+            +(permissions.costs()?"":" and not ("+RESTRICTED_FILE+")");
+        String from=" from plm_partner_file f join plm_attachment a on a.attachment_id=f.attachment_id where "+where;
+        long total=store.jdbc.queryForObject("select count(*)"+from,Long.class,id);
+        var files=store.jdbc.queryForList("select a.attachment_id as id,a.file_name as name,a.version_no as version,a.content_type as type,a.file_size as size"
+            +from+" order by a.attachment_id limit ? offset ?",id,size,offset(page,size));
+        return pageResult(files,total,page,size);
+    }
+
+    private Map<String,Object> readableSource(long id) {
+        view();var kinds=store.jdbc.queryForList("select kind from plm_partner_record r where r.record_id=? and r.deleted_flag=0 and ("+store.access.visibleSqlClause("partner","r.record_id")+")",id);
+        require(kinds.size()==1,"供应商来源不存在或未获授权");String kind=text(kinds.get(0).get("kind"));
+        require(Set.of("selection","supplier_quote").contains(kind),"这不是供应商目录资料");
+        var header=sourceSupplier(store.load(id,kind,false));profiles.requireSupplier(required(header.get("supplierCode"),"供应商"));return header;
     }
 
     private Map<String,Object> sourceHeader(Map<String,Object> value) {
@@ -615,12 +636,10 @@ public class PartnerCatalogService {
             var args = new ArrayList<Object>();
             var clauses = new ArrayList<String>();
             for (var key : batch) { clauses.add("(f.record_id=? and f.attachment_id=?)"); args.add(key.recordId); args.add(key.fileId); }
-            String restricted = "exists(select 1 from plm_partner_file x where x.attachment_id=a.attachment_id and x.purpose in ('cooperation_cost','financial'))"
-                + " or exists(select 1 from plm_partner_file_job j where j.kind='import' and j.source_attachment_id=a.attachment_id)";
             String sql = "select f.record_id,a.attachment_id as id,a.file_name as name,a.version_no as version,a.content_type as type,a.file_size as size,("
-                + restricted + ") as restricted from plm_partner_file f join plm_attachment a on a.attachment_id=f.attachment_id where a.deleted_flag=0 and ("
+                + RESTRICTED_FILE + ") as restricted from plm_partner_file f join plm_attachment a on a.attachment_id=f.attachment_id where a.deleted_flag=0 and ("
                 + String.join(" or ", clauses) + ") and " + store.access.visibleSqlClause("file", "a.attachment_id")
-                + (permissions.costs() ? "" : " and not (" + restricted + ")");
+                + (permissions.costs() ? "" : " and not (" + RESTRICTED_FILE + ")");
             for (var file : store.jdbc.queryForList(sql, args.toArray())) {
                 long record = number(file.remove("record_id"));
                 result.put(new FileKey(record, number(file.get("id"))), file);

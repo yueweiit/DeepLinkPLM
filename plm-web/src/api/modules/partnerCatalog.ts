@@ -2,6 +2,7 @@ import request, { unwrapResponse } from '../request'
 import type { CatalogAddition, CatalogAdditionPreview, CatalogAdditionResult, CatalogCodeOption, CatalogIdentity, CatalogIdentityChoice, CatalogIdentityPreview, CatalogModelSheetInput, CatalogModelSheetPreview, CatalogModelSheetResult, CatalogPage, CatalogPurposePreview, CatalogSource, CatalogStyle, CatalogSupplier } from '@/types/partnerCatalog'
 import type {SelectionRow} from '@/types/partnerSelections'
 import type { AttachmentVO } from './attachment'
+import type { PartnerFile } from '@/types/partner'
 
 const root = '/partner-catalog'
 export const catalogSuppliers = async (params: { q?: string; page: number; size: number; deleted?: string }) =>
@@ -30,6 +31,9 @@ export const createCatalogSource = async (data: { name: string; supplierCode: st
 
 export const catalogSourceDetail = async (id: number) =>
   unwrapResponse<CatalogSource>(await request.get(`${root}/sources/${id}`))
+
+export const catalogSourceFiles = async (id:number,params:{supplierCode:string;page:number;size:number}) =>
+  unwrapResponse<CatalogPage<PartnerFile>>(await request.get(`${root}/sources/${id}/files`,{params}))
 
 export const previewCatalogSourcePurpose = async (id: number, data: { version: number; purpose: 'catalog_source'; reason: string }) =>
   unwrapResponse<CatalogPurposePreview>(await request.post(`${root}/sources/${id}/purpose-preview`, data))
