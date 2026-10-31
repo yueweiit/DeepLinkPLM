@@ -4,7 +4,7 @@ import type { CompatiblePhone } from './molds'
 export type DevelopmentStatus = 'unknown' | 'claimed' | 'preferred' | 'alternative' | 'disputed'
 export interface SelectionReference { id:number; type:string; name?:string; version?:string }
 export interface SupplierRangeReference { type:'model'|'color'; reference:string; version?:number }
-export interface SelectionRangeSnapshot {id:number;name?:string;code?:string;version:number;currentVersion:number;versionChanged?:boolean;memberChanges?:{added:unknown[];removed:unknown[]};[key:string]:unknown}
+export interface SelectionRangeSnapshot {id:number;name?:string;code?:string;type?:'model'|'color';members?:{id:number;[key:string]:unknown}[];version:number;currentVersion:number;versionChanged?:boolean;memberChanges?:{added:unknown[];removed:unknown[]};[key:string]:unknown}
 export interface SupplyPair { supplierCode?:string; styleKey?:string; configKey?:string; quoteVersion?:string; phoneModelId:number; colorId:number; state:'available'|'unavailable'|'unverified'; evidence?:string; colorSnapshot?:{id:number;name:string;supplierColorCode?:string} }
 export interface SelectionSampleBatch { id:number; code:string; label?:string; displayLabel?:string; receivedAt?:string; date?:string; qty?:number }
 export interface SupplierQuoteFields { unitPrice?:string|number|null;currency?:string;currencySource?:'explicit'|'business_default'|'historical_unknown';priceUnit?:string;moqQuantity?:string|number|null;moqUnit?:string;moqScope?:string;moqNote?:string }

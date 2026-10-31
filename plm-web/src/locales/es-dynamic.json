@@ -1989,5 +1989,7 @@
   "本地文件待上传完成": "Archivo local pendiente de carga",
   "原审批附件待归档": "Archivo original pendiente de archivar",
   "原审批附件归档失败": "No se pudo archivar el archivo original",
-  "文件读取失败，请重试": "No se pudo leer el archivo. Inténtelo de nuevo."
+  "文件读取失败，请重试": "No se pudo leer el archivo. Inténtelo de nuevo.",
+  "采用此型号范围": "Usar los modelos de este rango",
+  "已采用范围中的 {value0} 个型号，保存后生效。": "Se han añadido {value0} modelos del rango; guarda para aplicar los cambios."
 }

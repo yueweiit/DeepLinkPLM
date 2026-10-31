@@ -4,6 +4,11 @@ import dynamic from './es-dynamic.json'
 export default {
   ...ui,
   ...dynamic,
+  '仅选款式，型号后补': 'Elegir solo el estilo y definir los modelos después',
+  '型号后补': 'Modelos por definir',
+  '原选品型号要求': 'Requisito original de modelos',
+  '原选品型号要求（选填）': 'Requisito original de modelos (opcional)',
+  '先保存款式与原文，不自动选择供应商全部型号。': 'Guardar el estilo y el texto original sin elegir automáticamente todos los modelos del proveedor.',
   '同一来源的图片与附件；选择不会改变其他行的关联。': 'Imágenes y archivos de la misma fuente. Elegirlos no cambia los vínculos de otras filas.',
   '已加载 {value0} / {value1} 份资料': '{value0} / {value1} archivos cargados',
   '恢复连接': 'Restablecer conexión',

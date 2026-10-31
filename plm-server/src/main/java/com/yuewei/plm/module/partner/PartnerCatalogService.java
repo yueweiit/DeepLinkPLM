@@ -43,7 +43,28 @@ public class PartnerCatalogService {
     }
 
     /** The row supplier is explicit. A blank row in a mixed selection never inherits another supplier. */
-    private String sourceSql(Map<String,String> query){var styles=new PartnerCatalogStyles(store);return "true".equals(query.get("deleted"))?"select * from ("+styles.sourceSql(true)+") removed where coalesce(removed.data->>'discarded','false')='true'":styles.sourceSql(false);}
+    private String sourceSql(Map<String,String> query){
+        var styles=new PartnerCatalogStyles(store);
+        if("true".equals(query.get("deleted")))return "select * from ("+styles.sourceSql(true)+") removed where coalesce(removed.data->>'discarded','false')='true'";
+        String raw=styles.sourceSql(false);
+        if(!text(query.get("sourceRecordId")).isEmpty()||!text(query.get("sourceKind")).isEmpty())return raw;
+        // A later quote/photo carrier is not another product. Rank only already-visible sources;
+        // source maintenance and exact deep links continue to expose every original row.
+        return """
+            select ranked.* from (
+              select c.*,row_number() over(partition by c.supplier_code,
+                case when link.style_id is null then c.source_kind||':'||c.record_id::text||':'||c.row_id else 'CP:'||link.style_id::text end,
+                jsonb_build_array(coalesce(btrim(c.data->>'color'),''),coalesce(btrim(c.data->>'material'),''),
+                  coalesce(btrim(c.data->>'specification'),''),coalesce(btrim(c.data->>'thickness'),''),
+                  coalesce(btrim(c.data->>'features'),''),coalesce(btrim(c.data->>'supplierItemCode'),''),
+                  case when coalesce(btrim(c.data->>'styleKey'),'') in ('',c.row_id,coalesce(btrim(c.data->>'supplierItemCode'),'')) then '' else btrim(c.data->>'styleKey') end,
+                  coalesce(nullif(btrim(c.data->>'configKey'),'default'),''))
+                order by c.record_id,c.sort_order,c.source_kind,c.row_id) as catalog_source_rank
+              from (%s) c left join plm_partner_catalog_style_source link
+                on link.source_kind=c.source_kind and link.record_id=c.record_id and link.row_id::text=c.row_id
+            ) ranked where catalog_source_rank=1
+            """.formatted(raw);
+    }
 
     @Transactional(readOnly = true)
     public Map<String, Object> suppliers(Map<String, String> query) {
@@ -720,7 +741,7 @@ public class PartnerCatalogService {
     }
 
     private record Choice(Map<String,Object> source,List<Long> chosen,List<Long> added,List<Long> reused,
-                          List<Map<String,Object>> pairs,List<Map<String,Object>> existing,Map<String,Object> mergeTarget,Long sampleQty,Map<String,Object> quantityTarget) {}
+                          List<Map<String,Object>> pairs,List<Map<String,Object>> existing,Map<String,Object> mergeTarget,Long sampleQty,Map<String,Object> quantityTarget,boolean styleOnly,String selectionModelText) {}
     private record AdditionPlan(Map<String,Object> preview,List<Choice> choices,Map<String,Object> target) {}
 
     private List<Map<String,Object>> additionItems(Map<String,Object> input) {
@@ -730,7 +751,11 @@ public class PartnerCatalogService {
             String kind=text(item.get("sourceKind")),row=text(item.get("rowId"));long record=number(item.get("recordId"));
             require(Set.of("quote","selection").contains(kind)&&record>0&&PartnerSelectionService.validRowId(row),"目录来源身份无效");
             row=UUID.fromString(row).toString();require(seen.add(kind+":"+record+":"+row),"本次选择含重复款式");
-            var value=new LinkedHashMap<>(item);value.put("rowId",row);if(value.containsKey("sampleQty")){if(text(value.get("sampleQty")).isEmpty())value.remove("sampleQty");else value.put("sampleQty",qty(value.get("sampleQty"),true));}result.add(value);
+            var value=new LinkedHashMap<>(item);value.put("rowId",row);
+            String intent=text(item.get("selectionIntent"));require(intent.isEmpty()||intent.equals("style"),"选品方式无效");
+            if(intent.equals("style")){require(PartnerSelectionService.scopeIds(item.get("phoneModelIds")).isEmpty()&&maps(item.get("selectedPairs")).isEmpty(),"仅选款式时请保留型号和颜色待定，明确型号请使用型号选品");String modelText=text(item.get("selectionModelText"));require(modelText.length()<=12000,"原选品型号要求过长");value.put("selectionModelText",modelText);}
+            else require(text(item.get("selectionModelText")).isEmpty(),"原选品型号要求仅用于型号后补的款式选品");
+            if(value.containsKey("sampleQty")){if(text(value.get("sampleQty")).isEmpty())value.remove("sampleQty");else value.put("sampleQty",qty(value.get("sampleQty"),true));}result.add(value);
         }return result;
     }
 
@@ -766,25 +791,27 @@ public class PartnerCatalogService {
                 require(!(kind.equals("selection")&&record==target),"供应商来源不能作为目标选品，请另建我方选品清单");
                 var sourceRow=source(kind,record,rowId,supplier);
                 String phoneScopeMode=PartnerCatalogPhoneResolver.supplierScopeMode(sourceRow);
-                require(!"unresolved".equals(phoneScopeMode),"本款型号资料尚未提取或关联，请先核对原件中的型号表；不能把字段空白当作供应商未提供");
+                boolean styleOnly="style".equals(text(item.get("selectionIntent")));
+                require(styleOnly||!"unresolved".equals(phoneScopeMode),"本款型号资料尚未提取或关联，请先核对原件中的型号表；不能把字段空白当作供应商未提供");
                 boolean unspecified="unspecified".equals(phoneScopeMode);
                 var chosen=PartnerSelectionService.scopeIds(item.get("phoneModelIds"));
-                require(!chosen.isEmpty(),"请选择本次所需的系列或具体型号");
+                require(styleOnly||!chosen.isEmpty(),"请选择本次所需的系列或具体型号");
                 var row=scope.resolve(sourceRow);
-                if(unspecified){
+                if(unspecified&&!styleOnly){
                     var proposed=new LinkedHashMap<String,Object>(sourceRow);proposed.put("phoneModelIds",chosen);
                     row=scope.resolve(proposed);
                     row.put("phoneScopeMode","unspecified");
                 }
-                view.put("name",text(row.get("name")));view.put("phoneScopeMode",unspecified?"unspecified":"supplier");
+                if(styleOnly)row.put("phoneScopeMode",phoneScopeMode);
+                view.put("name",text(row.get("name")));view.put("phoneScopeMode",styleOnly?phoneScopeMode:unspecified?"unspecified":"supplier");
                 // Preview never allocates a CP; bind the current identity to the token so a
                 // concurrent explicit association requires a fresh preview before saving.
                 view.put("catalogStyleId",number(row.get("catalogStyleId")));
                 view.put("catalogStyleCode",text(row.get("catalogStyleCode")));
                 require(item.containsKey("recordVersion")&&number(item.get("recordVersion"))==number(row.get("recordVersion"))
                     &&number(item.get("rowVersion"))==number(row.get("rowVersion")),"目录来源版本已变化，请刷新后重新预览");
-                require(!chosen.isEmpty()&&PartnerSelectionService.scopeIds(row.get("phoneModelIds")).containsAll(chosen),"请明确选择来源可供型号的非空子集");
-                var pairs=selections.validateCatalogChoice(row,chosen,maps(item.get("selectedPairs")));if(pairs==null)pairs=List.of();
+                require(styleOnly||!chosen.isEmpty()&&PartnerSelectionService.scopeIds(row.get("phoneModelIds")).containsAll(chosen),"请明确选择来源可供型号的非空子集");
+                var pairs=styleOnly?List.<Map<String,Object>>of():selections.validateCatalogChoice(row,chosen,maps(item.get("selectedPairs")));if(pairs==null)pairs=List.of();
                 var existing=new ArrayList<Map<String,Object>>();
                 if(target>0)for(var found:store.jdbc.queryForList("select row_id::text,row_version,data::text,confirmed from plm_partner_selection_row where record_id=? "
                     + "and data->'catalogSourceSnapshot'->>'sourceKind'=? and data->'catalogSourceSnapshot'->>'recordId'=? and data->'catalogSourceSnapshot'->>'rowId'=? order by row_id",target,kind,Long.toString(record),rowId)){
@@ -794,7 +821,7 @@ public class PartnerCatalogService {
                 for(var saved:existing){var snapshot=map(saved.get("catalogSourceSnapshot"));
                     require(number(snapshot.get("rowVersion"))==number(row.get("rowVersion"))&&number(snapshot.get("recordVersion"))==number(row.get("recordVersion")),"目标选品已采用该款另一来源版本，请先核对版本差异或另建选品");
                     var shared=PartnerSelectionService.scopeIds(saved.get("phoneModelIds")).stream().filter(chosen::contains).toList();
-                    if(!shared.isEmpty()){
+                    if(styleOnly||!shared.isEmpty()){
                         require(!Boolean.TRUE.equals(saved.get("discarded"))&&!Boolean.FALSE.equals(saved.get("selected")),"已有选品中的型号已取消或排除，请在原选品明确处理，不能静默恢复");
                         for(var pair:pairs)if(shared.contains(number(pair.get("phoneModelId"))))require(maps(saved.get("selectedPairs")).stream().anyMatch(p->number(p.get("phoneModelId"))==number(pair.get("phoneModelId"))&&number(p.get("colorId"))==number(pair.get("colorId"))),"该型号已在选品，新增颜色请在已有选品核对，不能静默忽略");
                         oldChosen.addAll(shared);
@@ -803,18 +830,19 @@ public class PartnerCatalogService {
                 }
                 var newIds=chosen.stream().filter(id->!oldChosen.contains(id)).toList();
                 // An unspecified supplier scope is not a claim of full supply. A later new
-                // model gets its own draft row with the same CP, not a widened old snapshot.
-                Map<String,Object> merge=newIds.isEmpty()||unspecified?Map.of():existing.stream().filter(this::mergeable).findFirst().orElse(Map.of());
-                Long planned=item.containsKey("sampleQty")?number(item.get("sampleQty")):null;var active=existing.stream().filter(saved->!Boolean.TRUE.equals(saved.get("discarded"))&&!Boolean.FALSE.equals(saved.get("selected"))).filter(saved->PartnerSelectionService.scopeIds(saved.get("phoneModelIds")).stream().anyMatch(chosen::contains)||(!merge.isEmpty()&&text(saved.get("rowId")).equals(text(merge.get("rowId"))))).toList();var quantities=active.stream().filter(saved->number(saved.get("sampleQty"))>0).toList();
+                // model gets its own draft row, except an unchanged style-only draft awaiting its first model.
+                Map<String,Object> merge=newIds.isEmpty()?Map.of():existing.stream().filter(this::mergeable).filter(saved->!unspecified||("style".equals(text(map(saved.get("catalogSourceSnapshot")).get("selectionIntent")))&&PartnerSelectionService.scopeIds(saved.get("phoneModelIds")).isEmpty())).findFirst().orElse(Map.of());
+                Long planned=item.containsKey("sampleQty")?number(item.get("sampleQty")):null;var active=existing.stream().filter(saved->!Boolean.TRUE.equals(saved.get("discarded"))&&!Boolean.FALSE.equals(saved.get("selected"))).filter(saved->styleOnly||PartnerSelectionService.scopeIds(saved.get("phoneModelIds")).stream().anyMatch(chosen::contains)||(!merge.isEmpty()&&text(saved.get("rowId")).equals(text(merge.get("rowId"))))).toList();var quantities=active.stream().filter(saved->number(saved.get("sampleQty"))>0).toList();
                 require(planned==null||newIds.isEmpty()||!merge.isEmpty()||active.isEmpty(),"本次同时含已有独立选样和新增型号，请分开选择并填写各次拟拿样合计，不能自动分配数量");
                 require(planned==null||quantities.size()<=1,"该款已有多行分别填写拟拿样数量，请在原选样清单明确调整，不能把本款合计数量重复填给每行");Map<String,Object> quantityTarget=!quantities.isEmpty()?quantities.get(0):active.stream().findFirst().orElse(Map.of());
-                boolean quantityChanged=planned!=null&&!quantityTarget.isEmpty()&&planned!=number(quantityTarget.get("sampleQty"));if(quantityChanged)require(!PartnerSelectionService.confirmed(quantityTarget),"该款选样依据已保留，请先修改选样再调整拟拿样数量；已有实收记录可另增选样");
+                if(styleOnly&&planned!=null&&!quantityTarget.isEmpty()&&!text(quantityTarget.get("sampleQty")).isEmpty())require(planned==number(quantityTarget.get("sampleQty")),"该款已有明确拟拿样数量，请在原选品中调整，不覆盖已有选择");
+                boolean quantityChanged=planned!=null&&!quantityTarget.isEmpty()&&(text(quantityTarget.get("sampleQty")).isEmpty()||planned!=number(quantityTarget.get("sampleQty")));if(quantityChanged)require(!PartnerSelectionService.confirmed(quantityTarget),"该款选样依据已保留，请先修改选样再调整拟拿样数量；已有实收记录可另增选样");
                 view.put("sampleQty",planned==null?(active.isEmpty()?0L:active.stream().mapToLong(saved->number(saved.get("sampleQty"))).sum()):planned);view.put("sampleQtyChanged",quantityChanged);view.put("quantityTargetRowId",quantityTarget.getOrDefault("rowId",""));
                 view.put("phoneModelIds",chosen);view.put("addedPhoneModelIds",newIds);view.put("reusedPhoneModelIds",new ArrayList<>(oldChosen));
-                view.put("action",newIds.isEmpty()?"reused":merge.isEmpty()?"new":"merge");view.put("mergeTargetRowId",merge.getOrDefault("rowId",""));
+                view.put("action",styleOnly?(existing.isEmpty()?"new":"reused"):newIds.isEmpty()?"reused":merge.isEmpty()?"new":"merge");if(styleOnly){view.put("selectionIntent","style");view.put("selectionModelText",text(item.get("selectionModelText")));}view.put("mergeTargetRowId",merge.getOrDefault("rowId",""));
                 view.put("selectedPairs",pairs);view.put("availablePhoneModelIds",unspecified?List.of():PartnerSelectionService.scopeIds(row.get("phoneModelIds")));view.put("existingRows",oldView);
                 view.put("phones",maps(row.get("phones")).stream().filter(phone->chosen.contains(number(phone.get("phoneModelId")))).toList());
-                choices.add(new Choice(row,chosen,newIds,new ArrayList<>(oldChosen),pairs,existing,merge,planned,quantityTarget));if(!newIds.isEmpty()){if(merge.isEmpty())added++;else updated++;}else if(quantityChanged)updated++;newPhones+=newIds.size();reused+=oldChosen.size();
+                choices.add(new Choice(row,chosen,newIds,new ArrayList<>(oldChosen),pairs,existing,merge,planned,quantityTarget,styleOnly,text(item.get("selectionModelText"))));if(styleOnly&&existing.isEmpty())added++;else if(!newIds.isEmpty()){if(merge.isEmpty())added++;else updated++;}else if(quantityChanged)updated++;newPhones+=newIds.size();reused+=styleOnly&&!existing.isEmpty()?1:oldChosen.size();
             }catch(com.yuewei.plm.common.exception.BusinessException e){errors.add(e.getMessage());allMessages.add(text(view.get("name"))+"："+e.getMessage());}
             views.add(view);
         }
@@ -851,7 +879,7 @@ public class PartnerCatalogService {
         require(text(plan.preview.get("previewToken")).equals(required(input.get("previewToken"),"请先预览本次所选型号及新增内容")),"来源或目标选品已变化，请重新预览，尚未保存");
         var identities=new PartnerCatalogStyles(store);
         for(var choice:plan.choices){
-            if(choice.added.isEmpty())continue;
+            if(choice.added.isEmpty()&&!(choice.styleOnly&&choice.existing.isEmpty()))continue;
             var row=choice.source;
             identities.ensure(text(row.get("sourceKind")),number(row.get("recordId")),row,number(row.get("catalogStyleId")),
                 "系统在保存选品草稿时分配或沿用款式编号；不代表人工核对报价、供货或质检",request);
@@ -864,9 +892,9 @@ public class PartnerCatalogService {
         var commands=new ArrayList<Map<String,Object>>();var origins=new ArrayList<Map<String,Object>>();var resultRows=new LinkedHashSet<String>();
         var sourceRows=plan.choices.stream().map(Choice::source).toList();attachOriginals(sourceRows);
         for(var choice:plan.choices){var row=choice.source;String kind=text(row.get("sourceKind")),rowId=text(row.get("rowId"));long record=number(row.get("recordId"));
-            for(var old:choice.existing)if(PartnerSelectionService.scopeIds(old.get("phoneModelIds")).stream().anyMatch(choice.chosen::contains))resultRows.add(text(old.get("rowId")));
-            if(choice.sampleQty!=null&&!choice.quantityTarget.isEmpty()&&choice.sampleQty!=number(choice.quantityTarget.get("sampleQty"))){var old=choice.quantityTarget;selectionCommand(commands,text(old.get("rowId")),old.get("rowVersion"),Map.of("sampleQty",choice.sampleQty));resultRows.add(text(old.get("rowId")));}
-            if(choice.added.isEmpty())continue;
+            for(var old:choice.existing)if(choice.styleOnly||PartnerSelectionService.scopeIds(old.get("phoneModelIds")).stream().anyMatch(choice.chosen::contains))resultRows.add(text(old.get("rowId")));
+            if(choice.sampleQty!=null&&!choice.quantityTarget.isEmpty()&&(text(choice.quantityTarget.get("sampleQty")).isEmpty()||choice.sampleQty!=number(choice.quantityTarget.get("sampleQty")))){var old=choice.quantityTarget;selectionCommand(commands,text(old.get("rowId")),old.get("rowVersion"),Map.of("sampleQty",choice.sampleQty));resultRows.add(text(old.get("rowId")));}
+            if(choice.added.isEmpty()&&!(choice.styleOnly&&choice.existing.isEmpty()))continue;
             if(!choice.mergeTarget.isEmpty()){
                 var old=choice.mergeTarget;var ids=new TreeSet<>(PartnerSelectionService.scopeIds(old.get("phoneModelIds")));ids.addAll(choice.added);
                 var pairs=new ArrayList<>(maps(old.get("selectedPairs")));for(var pair:choice.pairs)if(choice.added.contains(number(pair.get("phoneModelId"))))pairs.add(pair);
@@ -880,12 +908,12 @@ public class PartnerCatalogService {
             {String targetRow=key("catalog-choice:"+target+":"+kind+":"+record+":"+rowId+":"+request);var changes=copyFields(row);
                 // A new immutable origin rebinds inherited unquoted facts after the source choice was validated.
                 if(kind.equals("selection")&&text(row.get("quoteVersion")).isEmpty())changes.put("pairings",maps(changes.get("pairings")).stream().map(pair->{var fact=new LinkedHashMap<>(pair);fact.remove("sourceContext");return fact;}).toList());
-                changes.put("phoneModelIds",choice.added);changes.put("modelText",chosenNames(row,choice.added));
+                changes.put("phoneModelIds",choice.added);changes.put("modelText",choice.styleOnly?choice.selectionModelText:chosenNames(row,choice.added));
                 if(!choice.quantityTarget.isEmpty())changes.put("sampleQty",0L);else if(choice.sampleQty!=null)changes.put("sampleQty",choice.sampleQty);
                 changes.put("selectedPairs",choice.pairs.stream().filter(p->choice.added.contains(number(p.get("phoneModelId")))).toList());
                 changes.put("refs",refs);changes.put("supplierCode",supplier);changes.put("selected",true);changes.put("discarded",false);
                 if(originalIds.size()==1)changes.put("sourceAttachmentId",originalIds.get(0));if(kind.equals("quote")){changes.put("quoteId",Long.toString(record));changes.put("quoteLineId",rowId);}
-                var snapshot=new LinkedHashMap<String,Object>();for(String field:List.of("sourceKind","recordId","rowId","rowVersion","recordVersion","sourceCode","sourceName","supplierCode","modelText","phoneModelIds","phones","phoneScopeMode","phoneScopeDeclaration","catalogStyleId","catalogStyleCode","catalogStyleLabel","supplierModelEntries"))snapshot.put(field,row.get(field));snapshot.put("modelSheetRefs",modelSheetRefs);snapshot.put("unavailablePhoneModelIds",PartnerSelectionService.scopeIds(row.get("unavailablePhoneModelIds")));snapshot.put("unavailablePairs",maps(row.get("pairings")).stream().filter(p->"unavailable".equals(text(p.get("state")))).map(p->Map.of("phoneModelId",p.get("phoneModelId"),"colorId",p.get("colorId"))).toList());snapshot.put("sourceOriginalIds",originalIds);changes.put("catalogSourceSnapshot",snapshot);
+                var snapshot=new LinkedHashMap<String,Object>();for(String field:List.of("sourceKind","recordId","rowId","rowVersion","recordVersion","sourceCode","sourceName","supplierCode","modelText","phoneModelIds","phones","phoneScopeMode","phoneScopeDeclaration","catalogStyleId","catalogStyleCode","catalogStyleLabel","supplierModelEntries"))snapshot.put(field,row.get(field));snapshot.put("modelSheetRefs",modelSheetRefs);snapshot.put("unavailablePhoneModelIds",PartnerSelectionService.scopeIds(row.get("unavailablePhoneModelIds")));snapshot.put("unavailablePairs",maps(row.get("pairings")).stream().filter(p->"unavailable".equals(text(p.get("state")))).map(p->Map.of("phoneModelId",p.get("phoneModelId"),"colorId",p.get("colorId"))).toList());snapshot.put("sourceOriginalIds",originalIds);if(choice.styleOnly){snapshot.put("selectionIntent","style");snapshot.put("selectionModelText",choice.selectionModelText);}changes.put("catalogSourceSnapshot",snapshot);
                 commands.add(Map.of("op","upsert","rowId",targetRow,"rowVersion",0,"changes",changes));resultRows.add(targetRow);
                 origins.add(Map.of("targetRowId",targetRow,"sourceKind",kind,"recordId",record,"rowId",rowId,"rowVersion",row.get("rowVersion"),"recordVersion",row.get("recordVersion"),"phoneModelIds",choice.added,"sourceOriginalIds",originalIds));
             }

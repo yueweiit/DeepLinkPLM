@@ -163,7 +163,7 @@ class PartnerCatalogServiceTest {
     /** Actual PostgreSQL behavior, with temporary tables rolled back in a dedicated loopback QA database. */
     @Nested
     @EnabledIfEnvironmentVariable(named = "PLM_CATALOG_NONEMPTY_TEST_URL",
-        matches = "jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/catalog_nonempty_filter_tests")
+        matches = "(?:jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/catalog_nonempty_filter_tests|jdbc:postgresql://127\\.0\\.0\\.1:15504/plm_source_index_qa_20261031_6b7oial9)")
     class NonemptySupplierDatabaseTests {
         private DataSourceTransactionManager transactions;
         private TransactionStatus transaction;
@@ -174,6 +174,7 @@ class PartnerCatalogServiceTest {
             var source = new DriverManagerDataSource(System.getenv("PLM_CATALOG_NONEMPTY_TEST_URL"), "postgres",
                 System.getenv("PLM_CATALOG_NONEMPTY_TEST_PASSWORD"));
             jdbc = new JdbcTemplate(source);
+            assertTrue(Set.of("catalog_nonempty_filter_tests","plm_source_index_qa_20261031_6b7oial9").contains(jdbc.queryForObject("select current_database()",String.class)),"仅可连接明确许可的本地QA数据库");
             transactions = new DataSourceTransactionManager(source);
             transaction = transactions.getTransaction(new DefaultTransactionDefinition());
             jdbc.execute("""
@@ -257,6 +258,80 @@ class PartnerCatalogServiceTest {
             when(suppliers.requireSupplier(anyString())).thenAnswer(call->Map.of("supplierCode",call.getArgument(0),"supplierName","QA供方"));
             selections=new PartnerSelectionService(store,permissions,suppliers,mock(PartnerProductService.class),materials);
             catalog=new PartnerCatalogService(store,permissions,suppliers,selections,materials,phones,operations);
+        }
+
+        private String styleAdoptionFixture(){
+            renameFixture();jdbc.execute("""
+                alter table plm_partner_event add column event_id bigserial,add column created_at timestamptz default now();
+                alter table plm_partner_selection_row alter column row_version set default 1;
+                alter table plm_partner_file add unique(record_id,attachment_id);
+                alter table plm_partner_catalog_style_source add column source_version bigint,add column source_row_version bigint,add column created_by text;
+                create temp table plm_partner_create_request(actor_id bigint,kind text,request_id text,object_id bigint);
+                insert into plm_partner_record(record_id,kind,code,name,version,supplier_code,data) values(100,'selection','SL-100','真实选品工作清单',1,'SELECTION','{"purpose":"my_selection","supplierCode":"SELECTION"}');
+                insert into plm_partner_catalog_style values(23,'CP-000023','SELECTION');
+                """);
+            for(String table:List.of("plm_partner_record","plm_partner_selection_row","plm_partner_quote_line","plm_partner_event","plm_partner_catalog_style","plm_partner_catalog_style_source","plm_partner_revision","plm_partner_selection_row_revision","plm_partner_quote_line_revision","plm_attachment","plm_partner_file","plm_partner_file_job_row","plm_partner_file_job","plm_partner_create_request"))assertEquals(true,jdbc.queryForObject("select relnamespace=pg_my_temp_schema() from pg_class where oid=to_regclass(?)",Boolean.class,table),table);
+            String sourceRow=jdbc.queryForObject("select row_id::text from plm_partner_selection_row where record_id=20 limit 1",String.class);
+            jdbc.update("update plm_partner_record set data='{\"catalogSource\":true}' where record_id=20");
+            jdbc.update("update plm_partner_selection_row set confirmed=false,data=?::jsonb where row_id=?::uuid",encode(store.json,values("name","原款式","supplierCode","SELECTION","phoneModelIds",List.of(12L),"modelText","供应商提供多个型号","unitPrice","3.80","currency","CNY","refs",List.of(Map.of("id",88L)))),sourceRow);
+            jdbc.update("insert into plm_partner_catalog_style_source(source_kind,record_id,row_id,style_id,fields) values('selection',20,?::uuid,23,'{}')",sourceRow);
+            when(scopedAccess.visibleSqlClause(eq("file"),anyString())).thenReturn("true");when(scopedAccess.actorId()).thenReturn(21L);
+            var productBoundary=mock(PartnerProductService.class);when(productBoundary.selectedPhones(anyList(),anyList())).thenAnswer(call->call.<List<Long>>getArgument(0).stream().map(id->Map.<String,Object>of("phoneModelId",id,"displayName","真实手机 "+id,"phoneModelCode","0185")).toList());
+            var rangesBoundary=mock(SupplierRangeService.class);when(rangesBoundary.normalizePairings(anyString(),anyList(),anyString(),anyString(),anyString(),anyBoolean())).thenAnswer(call->call.getArgument(1));when(rangesBoundary.normalizePairings(anyString(),anyList(),anyString(),anyString(),anyString(),anyBoolean(),anyString())).thenAnswer(call->call.getArgument(1));when(rangesBoundary.normalizeSelectedPairs(anyString(),anyList(),anyBoolean())).thenAnswer(call->call.getArgument(1));when(rangesBoundary.resolveReferences(anyString(),anyList(),anyString(),anyString(),anyBoolean())).thenReturn(List.of());
+            materials=new PartnerMaterialService(store,mock(com.yuewei.plm.module.attachment.service.DocumentService.class),mock(com.yuewei.plm.module.attachment.service.AttachmentVersionService.class),mock(PartnerFileSourceAccess.class));
+            selections=new PartnerSelectionService(store,permissions,suppliers,productBoundary,materials);org.springframework.test.util.ReflectionTestUtils.setField(selections,"ranges",rangesBoundary);org.springframework.test.util.ReflectionTestUtils.setField(selections,"phoneResolver",phones);
+            catalog=new PartnerCatalogService(store,permissions,suppliers,selections,materials,phones,operations);return sourceRow;
+        }
+
+        private Map<String,Object> styleCommand(String sourceRow,String request){return values("supplierCode","SELECTION","requestId",request,"targetSelectionId",100L,"targetVersion",1L,"items",List.of(values("sourceKind","selection","recordId",20L,"rowId",sourceRow,"rowVersion",1L,"recordVersion",1L,"selectionIntent","style","selectionModelText","首批型号尚未确定","phoneModelIds",List.of())));}
+
+        @Test void realStyleDraftAdoptionKeepsSourceCPAndFilesAndLaterModelsUseTheSameRow(){
+            String sourceRow=styleAdoptionFixture();String sourceBefore=jdbc.queryForObject("select data::text from plm_partner_selection_row where row_id=?::uuid",String.class,sourceRow);var command=styleCommand(sourceRow,"real-style-first");maps(command.get("items")).get(0).put("sampleQty",2L);
+            var first=catalog.addToSelection(previewed(command));String targetRow=text(((List<?>)first.get("rowIds")).get(0));var draft=selections.row(100L,targetRow);
+            assertEquals(List.of(),PartnerSelectionService.scopeIds(draft.get("phoneModelIds")));assertEquals("首批型号尚未确定",draft.get("modelText"));assertEquals(2L,number(draft.get("sampleQty")));assertEquals(23L,number(draft.get("catalogStyleId")));assertEquals(List.of(88L),maps(draft.get("refs")).stream().map(ref->number(ref.get("id"))).toList());assertEquals(1L,jdbc.queryForObject("select count(*) from plm_partner_file where record_id=100 and attachment_id=88",Long.class));
+            assertThrows(BusinessException.class,()->selections.validateConfirmation(draft));assertThrows(BusinessException.class,()->new PartnerCatalogStyles(store).selectedSnapshot(100L,targetRow));
+            assertEquals(true,catalog.addToSelection(command).get("replayed"));var repeated=styleCommand(sourceRow,"real-style-again");repeated.put("targetVersion",map(first.get("selection")).get("version"));var again=catalog.addToSelection(previewed(repeated));assertEquals(0L,number(again.get("addedCount")));assertEquals(List.of(targetRow),again.get("rowIds"));
+            var explicit=styleCommand(sourceRow,"real-style-to-model");explicit.put("targetVersion",map(first.get("selection")).get("version"));var item=maps(explicit.get("items")).get(0);item.remove("selectionIntent");item.remove("selectionModelText");item.put("phoneModelIds",List.of(12L));var later=catalog.addToSelection(previewed(explicit));assertEquals(List.of(targetRow),later.get("rowIds"));var saved=selections.row(100L,targetRow);assertEquals(List.of(12L),PartnerSelectionService.scopeIds(saved.get("phoneModelIds")));assertEquals(2L,number(saved.get("sampleQty")));assertEquals(1L,jdbc.queryForObject("select count(*) from plm_partner_selection_row where record_id=100",Long.class));assertEquals(sourceBefore,jdbc.queryForObject("select data::text from plm_partner_selection_row where row_id=?::uuid",String.class,sourceRow));assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_record where kind in ('product','sample')",Long.class));
+        }
+
+        @Test void realStyleAdoptionAuditFailureRollsBackRowsFileOwnershipCPAndRequestMemory(){
+            String sourceRow=styleAdoptionFixture();var command=styleCommand(sourceRow,"real-style-audit-failure");previewed(command);doThrow(new IllegalStateException("QA审计不可用")).when(renameAudit).logRequired(any(),any());
+            var savepoint=new TransactionTemplate(transactions);savepoint.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_NESTED);assertThrows(IllegalStateException.class,()->savepoint.execute(status->catalog.addToSelection(command)));
+            assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_selection_row where record_id=100",Long.class));assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_file where record_id=100",Long.class));assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_catalog_style_source where record_id=100",Long.class));assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_create_request",Long.class));assertEquals(1L,jdbc.queryForObject("select version from plm_partner_record where record_id=100",Long.class));assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_event where record_id=100",Long.class));
+        }
+
+        private String configurationCarrier(String kind,long record,long style,Map<String,Object> fields){
+            String row=UUID.randomUUID().toString();var data=new LinkedHashMap<>(fields);data.put("supplierCode","SELECTION");data.putIfAbsent("styleKey",row);data.putIfAbsent("configKey","default");
+            if(kind.equals("selection"))jdbc.update("insert into plm_partner_selection_row(record_id,row_id,row_version,sort_order,data) values(?,?::uuid,1,?,?::jsonb)",record,row,style,encode(store.json,data));
+            else jdbc.update("insert into plm_partner_quote_line(record_id,line_id,row_version,sort_order,data) values(?,?::uuid,1,?,?::jsonb)",record,row,style,encode(store.json,data));
+            jdbc.update("insert into plm_partner_catalog_style_source(source_kind,record_id,row_id,style_id,fields) values(?,?,?::uuid,?,'{}')",kind,record,row,style);return row;
+        }
+
+        @Test void sameCpConfigurationPhotoAndPriceSupplementsCountOnceUsingTheEarliestVisibleSource(){
+            renameFixture();when(scopedAccess.visibleSqlClause("file","a.attachment_id")).thenReturn("true");
+            jdbc.update("update plm_partner_record set supplier_code='SELECTION',data='{}' where record_id=90");
+            jdbc.execute("insert into plm_partner_catalog_style values(9,'CP-000009','SELECTION'),(10,'CP-000010','SELECTION');insert into plm_attachment values(89,0,'追加产品图.png','V1','image/png',200);insert into plm_partner_file(record_id,attachment_id) values(90,89)");
+            String original=jdbc.queryForObject("select row_id::text from plm_partner_selection_row where record_id=20",String.class);
+            var first=values("supplierCode","SELECTION","name","凡盾大孔手机壳","color","黑色","material","TPU+PC+肤感油","supplierItemCode","","phoneModelIds",List.of(12L),"modelText","iPhone18 Pro Max","unitPrice","3.80","currency","","moq","100","sampleQty",2,"refs",List.of(Map.of("id",88L)),"styleKey",original,"configKey","default");
+            jdbc.update("update plm_partner_selection_row set data=?::jsonb where row_id=?::uuid",encode(store.json,first),original);jdbc.update("insert into plm_partner_catalog_style_source(source_kind,record_id,row_id,style_id,fields) values('selection',20,?::uuid,9,'{}')",original);
+            var second=new LinkedHashMap<>(first);second.put("name","凡盾大孔磁吸手机壳");second.put("material","TPU+PC+Magsafe磁吸+肤感油");second.remove("styleKey");String magnetic=configurationCarrier("selection",20,10L,second);
+            var supplement=new LinkedHashMap<>(first);supplement.remove("styleKey");supplement.put("currency","CNY");supplement.put("currencySource","business_default");supplement.put("unitPrice","4.00");supplement.put("notes","原同CP补充照片与报价，不是新款");supplement.put("refs",List.of(Map.of("id",89L)));String quote=configurationCarrier("quote",90,9L,supplement);
+            var magneticSupplement=new LinkedHashMap<>(supplement);magneticSupplement.put("name","凡盾大孔磁吸手机壳");magneticSupplement.put("material","TPU+PC+Magsafe磁吸+肤感油");configurationCarrier("quote",90,10L,magneticSupplement);
+            String sourceBefore=jdbc.queryForObject("select string_agg(data::text,'|' order by row_id) from plm_partner_selection_row where record_id=20",String.class);var bindingsBefore=jdbc.queryForList("select * from plm_partner_catalog_style_source order by record_id,row_id");
+            var page1=catalog.styles(Map.of("supplierCode","SELECTION","page","1","size","1"));var page2=catalog.styles(Map.of("supplierCode","SELECTION","page","2","size","1"));assertEquals(2L,page1.get("totalElements"));assertEquals(2L,page2.get("totalElements"));assertEquals(List.of(original,magnetic),List.of(text(maps(page1.get("content")).get(0).get("rowId")),text(maps(page2.get("content")).get(0).get("rowId"))));
+            assertEquals(20L,number(maps(page1.get("content")).get(0).get("recordId")));assertEquals(2L,maps(catalog.suppliers(Map.of()).get("content")).stream().filter(row->text(row.get("supplierCode")).equals("SELECTION")).findFirst().orElseThrow().get("styleCount"));
+            assertEquals(2L,catalog.styles(Map.of("supplierCode","SELECTION","sourceKind","quote","sourceRecordId","90")).get("totalElements"));assertEquals(quote,catalog.detail("quote",90,quote,"SELECTION").get("rowId"));assertEquals(89L,number(maps(catalog.detail("quote",90,quote,"SELECTION").get("refs")).get(0).get("id")));
+            assertEquals(sourceBefore,jdbc.queryForObject("select string_agg(data::text,'|' order by row_id) from plm_partner_selection_row where record_id=20",String.class));assertEquals(bindingsBefore,jdbc.queryForList("select * from plm_partner_catalog_style_source order by record_id,row_id"));assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_event where action='catalog_style_update'",Long.class));
+        }
+
+        @Test void sharedCpKeepsTheExplicitHotColourAndBracketConfigurationsAsSeparateDirectoryEntries(){
+            renameFixture();jdbc.update("update plm_partner_record set supplier_code='SELECTION',data='{}' where record_id=90");jdbc.execute("insert into plm_partner_catalog_style values(39,'CP-000039','SELECTION'),(40,'CP-000040','SELECTION')");
+            String original=jdbc.queryForObject("select row_id::text from plm_partner_selection_row where record_id=20",String.class);var dark=values("supplierCode","SELECTION","name","超凡神翼三代","color","黑色","material","TPU+亚克力+铝合金支架+N52磁铁","phoneModelIds",List.of(12L),"styleKey",original,"configKey","default");jdbc.update("update plm_partner_selection_row set data=?::jsonb where row_id=?::uuid",encode(store.json,dark),original);jdbc.update("insert into plm_partner_catalog_style_source(source_kind,record_id,row_id,style_id,fields) values('selection',20,?::uuid,39,'{}')",original);
+            var colours=new LinkedHashMap<>(dark);colours.remove("styleKey");colours.put("color","樱花粉、牛油绿");configurationCarrier("quote",90,39L,colours);
+            var base=values("name","天彩","color","黑色","material","TPU+PC+滴油镜头框+N52磁铁","phoneModelIds",List.of(12L));configurationCarrier("selection",20,40L,base);
+            var bracket=new LinkedHashMap<>(base);bracket.put("name","天彩+R2支架");bracket.put("color","黑色、橙色");bracket.put("material","TPU+PC+滴油镜头框+铝合金支架+N52磁铁");configurationCarrier("quote",90,40L,bracket);
+            var all=catalog.styles(Map.of("supplierCode","SELECTION","size","100"));assertEquals(4L,all.get("totalElements"));assertEquals(4L,maps(catalog.suppliers(Map.of()).get("content")).stream().filter(row->text(row.get("supplierCode")).equals("SELECTION")).findFirst().orElseThrow().get("styleCount"));
+            assertEquals(2L,maps(all.get("content")).stream().filter(row->number(row.get("catalogStyleId"))==39).count());assertEquals(2L,maps(all.get("content")).stream().filter(row->number(row.get("catalogStyleId"))==40).count());
         }
 
         @Test void sourceLibraryRetainsUnadoptedOriginalsDuringTwoPhotoSwapsAndKeepsFrozenSelectionHistory(){
@@ -825,4 +900,61 @@ class PartnerCatalogServiceTest {
         verify(store, never()).remember(anyString(), anyString(), anyLong());
         verify(store, never()).event(anyLong(), anyString(), anyMap(), anyString());
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.NullSource
+    @org.junit.jupiter.params.provider.ValueSource(longs={0,2})
+    void styleSelectionPreservesBlankOrActualPlannedTotalWithoutChoosingTheSupplierRange(Long quantity){
+        sourceRow("XD");var saved=new LinkedHashMap<String,Map<String,Object>>();var version=new java.util.concurrent.atomic.AtomicLong(3);writableTarget(saved,version);
+        var command=item(9L,"XD");var choice=maps(command.get("items")).get(0);choice.put("selectionIntent","style");choice.put("selectionModelText","iPhone系列");choice.put("phoneModelIds",List.of());if(quantity!=null)choice.put("sampleQty",quantity);
+        var preview=catalog.additionPreview(command);assertEquals(true,preview.get("canAdd"));assertEquals(1L,number(preview.get("addedCount")));assertEquals(0L,number(preview.get("newPhoneCount")));command.put("previewToken",preview.get("previewToken"));
+        var result=catalog.addToSelection(command);assertEquals(1L,number(result.get("addedCount")));var stored=decode(store.json,saved.values().iterator().next().get("data"));
+        assertEquals(List.of(),stored.get("phoneModelIds"));assertEquals(List.of(),stored.get("selectedPairs"));assertEquals("iPhone系列",stored.get("modelText"));assertEquals(true,stored.get("selected"));
+        if(quantity==null)assertFalse(stored.containsKey("sampleQty"));else assertEquals(quantity.longValue(),number(stored.get("sampleQty")));
+        var origin=map(stored.get("catalogSourceSnapshot"));assertEquals("style",origin.get("selectionIntent"));assertEquals("iPhone系列",origin.get("selectionModelText"));assertEquals(List.of(12L),PartnerSelectionService.scopeIds(origin.get("phoneModelIds")));assertEquals("iPhone11",origin.get("modelText"));
+        assertFalse(stored.containsKey("sampleBatches"));assertFalse(stored.containsKey("productId"));verify(selections,never()).validateCatalogChoice(anyMap(),anyList(),anyList());verify(store,never()).create(anyString(),anyString());
+    }
+
+    @Test void explicitStyleOnlySelectionCanRetainAnUnresolvedSourceWithoutInventingItsPhones(){
+        sourceRow("XD");when(jdbc.queryForList(contains("from plm_partner_selection_row where record_id=? and row_id=?::uuid"),eq(9L),eq(rowId))).thenReturn(List.of(values("row_id",rowId,"row_version",1L,"confirmed",false,"row_data",encode(store.json,values("name","来源型号待整理","supplierCode","XD","refs",List.of())))));
+        when(phones.newScope().resolve(anyMap())).thenAnswer(call->new LinkedHashMap<>(call.<Map<String,Object>>getArgument(0)));
+        var command=item(9L,"XD");var choice=maps(command.get("items")).get(0);choice.put("selectionIntent","style");choice.put("phoneModelIds",List.of());
+        var preview=catalog.additionPreview(command);assertEquals(true,preview.get("canAdd"));assertEquals("unresolved",maps(preview.get("items")).get(0).get("phoneScopeMode"));assertEquals(0L,number(preview.get("newPhoneCount")));
+        choice.remove("selectionIntent");choice.put("phoneModelIds",List.of(12L));assertEquals(false,catalog.additionPreview(command).get("canAdd"));verifyNoInteractions(materials);
+    }
+
+    @Test void styleIntentCannotHideExplicitModelsOrPairsOrAnInvalidMode(){
+        sourceRow("XD");var command=item(9L,"XD");var choice=maps(command.get("items")).get(0);choice.put("selectionIntent","style");assertThrows(BusinessException.class,()->catalog.additionPreview(command));
+        choice.put("phoneModelIds",List.of());choice.put("selectedPairs",List.of(values("phoneModelId",12L,"colorId",3L)));assertThrows(BusinessException.class,()->catalog.additionPreview(command));choice.remove("selectedPairs");choice.put("selectionIntent","all");assertThrows(BusinessException.class,()->catalog.additionPreview(command));verifyNoInteractions(materials);
+    }
+
+    private Map<String,Object> existingStyleDraft(String id){
+        var data=values("name","原选品名称","supplierCode","XD","selected",true,"phoneModelIds",List.of(),"selectedPairs",List.of(),"modelText","原选品要求", "sampleQty",2L,"notes","已有人工备注");
+        var origin=values("sourceKind","selection","recordId",9L,"rowId",rowId,"rowVersion",1L,"recordVersion",4L,"supplierCode","XD","phoneScopeMode","supplier","phoneModelIds",List.of(12L),"selectionIntent","style");data.put("catalogSourceSnapshot",origin);origin.put("selectionBaseline",PartnerSelectionService.catalogBaseline(data));
+        return values("row_id",id,"row_version",2L,"data",encode(store.json,data),"confirmed",false);
+    }
+
+    @Test void repeatedStyleSelectionReusesTheExactRowWithoutClearingAnAlreadyChosenModelOrQuantity(){
+        sourceRow("XD");String id=UUID.randomUUID().toString();var saved=new LinkedHashMap<String,Map<String,Object>>();var previous=existingStyleDraft(id);var data=decode(store.json,previous.get("data"));data.put("phoneModelIds",List.of(12L));previous.put("data",encode(store.json,data));previous.put("confirmed",true);saved.put(id,previous);writableTarget(saved,new java.util.concurrent.atomic.AtomicLong(3));
+        var command=item(9L,"XD");var choice=maps(command.get("items")).get(0);choice.put("selectionIntent","style");choice.put("selectionModelText","不得覆盖原要求");choice.put("phoneModelIds",List.of());choice.put("sampleQty",2L);
+        var result=catalog.addToSelection(previewed(command));assertEquals(0L,number(result.get("addedCount")));assertEquals(1L,number(result.get("reusedCount")));assertEquals(List.of(id),result.get("rowIds"));assertEquals(previous,saved.get(id));verify(selections,never()).patchCatalogRows(anyLong(),anyMap());verifyNoInteractions(materials);
+        choice.put("sampleQty",0L);command.put("requestId","other-request");assertEquals(false,catalog.additionPreview(command).get("canAdd"));
+    }
+
+    @Test void repeatedStyleSelectionCannotRestoreAnExplicitlyCancelledRow(){
+        sourceRow("XD");String id=UUID.randomUUID().toString();var saved=new LinkedHashMap<String,Map<String,Object>>();var previous=existingStyleDraft(id);var data=decode(store.json,previous.get("data"));data.put("discarded",true);data.put("selected",false);previous.put("data",encode(store.json,data));saved.put(id,previous);writableTarget(saved,new java.util.concurrent.atomic.AtomicLong(3));
+        var command=item(9L,"XD");var choice=maps(command.get("items")).get(0);choice.put("selectionIntent","style");choice.put("phoneModelIds",List.of());assertEquals(false,catalog.additionPreview(command).get("canAdd"));verify(selections,never()).patchCatalogRows(anyLong(),anyMap());verifyNoInteractions(materials);
+    }
+
+    @Test void aLaterExplicitModelChoiceContinuesTheSameUnchangedStyleDraft(){
+        sourceRow("XD");String id=UUID.randomUUID().toString();var saved=new LinkedHashMap<String,Map<String,Object>>();saved.put(id,existingStyleDraft(id));writableTarget(saved,new java.util.concurrent.atomic.AtomicLong(3));
+        var command=item(9L,"XD");var preview=catalog.additionPreview(command);assertEquals(true,preview.get("canAdd"));assertEquals("merge",maps(preview.get("items")).get(0).get("action"));command.put("previewToken",preview.get("previewToken"));catalog.addToSelection(command);
+        var update=ArgumentCaptor.forClass(Map.class);verify(selections).patchCatalogRows(eq(10L),update.capture());var op=maps(update.getValue().get("operations")).get(0);assertEquals(id,op.get("rowId"));assertEquals(2L,op.get("rowVersion"));var changes=map(op.get("changes"));assertEquals(List.of(12L),changes.get("phoneModelIds"));assertFalse(changes.containsKey("sampleQty"));assertFalse(changes.containsKey("catalogSourceSnapshot"));verifyNoInteractions(materials);
+    }
+
+    @Test void anExplicitZeroCanFillAnUnplannedExistingStyleWithoutBeingLostAsAnEmptyValue(){
+        sourceRow("XD");String id=UUID.randomUUID().toString();var saved=new LinkedHashMap<String,Map<String,Object>>();var previous=existingStyleDraft(id);var data=decode(store.json,previous.get("data"));data.put("sampleQty","");previous.put("data",encode(store.json,data));saved.put(id,previous);writableTarget(saved,new java.util.concurrent.atomic.AtomicLong(3));
+        var command=item(9L,"XD");var choice=maps(command.get("items")).get(0);choice.put("selectionIntent","style");choice.put("phoneModelIds",List.of());choice.put("sampleQty",0L);var result=catalog.addToSelection(previewed(command));assertEquals(0L,number(result.get("addedCount")));assertEquals(1L,number(result.get("updatedCount")));
+        var update=ArgumentCaptor.forClass(Map.class);verify(selections).patchCatalogRows(eq(10L),update.capture());var operation=maps(update.getValue().get("operations")).get(0);assertEquals(id,operation.get("rowId"));assertEquals(Map.of("sampleQty",0L),operation.get("changes"));verifyNoInteractions(materials);
+    }
+
 }

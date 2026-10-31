@@ -105,4 +105,19 @@ class PartnerSelectionServiceTest {
   doReturn(values("id",9L,"name","来源序号新草稿","version",1L,"purpose","my_selection")).when(store).load(9L,"selection",true);doReturn(Map.of("saved",true)).when(service=spy(service)).detail(9L);doNothing().when(store).revision(eq(9L),anyMap());doNothing().when(store).save(eq(9L),anyMap());doNothing().when(store).event(eq(9L),eq("selection_import"),anyMap(),anyString());when(store.access.actor()).thenReturn(new com.yuewei.plm.common.security.CurrentUser(1L,"qa","qa",false));when(jdbc.queryForMap(contains("count(*) as \"rowCount\""),eq(9L))).thenReturn(values("rowCount",2L,"confirmedCount",0L,"finishedCount",0L));
   service.applyImportedRows(9L,1L,"sequence-new-rows",parsed);var payload=org.mockito.ArgumentCaptor.forClass(String.class);verify(jdbc,times(2)).update(startsWith("insert into plm_partner_selection_row("),anyString(),eq(9L),eq(9L),payload.capture(),eq(false),eq("qa"));assertEquals(List.of("0002","001"),payload.getAllValues().stream().map(value->text(decode(store.json,value).get("sourceSequence"))).toList());assertThrows(BusinessException.class,()->row(values("sourceSequence","1".repeat(256))));noProductWrites();
  }
+ @Test void explicitStyleOriginKeepsTheOriginalModelTextWithoutResolvingSupplyIntoSelectedPhonesOnWriteOrRead(){
+  var resolver=mock(PartnerCatalogPhoneResolver.class);ReflectionTestUtils.setField(service,"phoneResolver",resolver);
+  var original=row(values("name","仅选款式","supplierCode","S1","selected",true));original.put("catalogSourceSnapshot",values("sourceKind","selection","recordId",8L,"rowId",UUID.randomUUID().toString(),"rowVersion",1L,"recordVersion",2L,"supplierCode","S1","phoneModelIds",List.of(12L,13L),"selectionIntent","style","selectionModelText","原选品型号待定"));original.put("modelText","原选品型号待定");
+  var saved=service.canonicalRow(9,original,values("rowId",original.get("rowId"),"notes","工程可后补"));assertEquals("原选品型号待定",saved.get("modelText"));assertEquals(List.of(),saved.get("phoneModelIds"));assertEquals(false,saved.get("confirmed"));
+  boolean resolution=ReflectionTestUtils.invokeMethod(service,"needsPhoneResolution",saved);assertFalse(resolution);verifyNoInteractions(resolver);
+  assertThrows(BusinessException.class,()->service.validateConfirmation(saved));assertThrows(BusinessException.class,()->service.canonicalRow(9,original,values("rowId",original.get("rowId"),"phoneModelIds",List.of(99L))));
+  var later=service.canonicalRow(9,original,values("rowId",original.get("rowId"),"phoneModelIds",List.of(12L)));assertEquals(List.of(12L),later.get("phoneModelIds"));service.validateConfirmation(later);noProductWrites();
+ }
+
+ @Test void aStyleDraftForAnExplicitlyUnspecifiedSupplierCanLaterChooseARealPhoneButNotConfirmWhileEmpty(){
+  var original=row(values("name","仅选款式","supplierCode","S1","selected",true,"phoneScopeDeclaration","not_provided"));original.put("catalogSourceSnapshot",values("sourceKind","selection","recordId",8L,"rowId",UUID.randomUUID().toString(),"rowVersion",1L,"recordVersion",2L,"supplierCode","S1","phoneModelIds",List.of(),"phoneScopeMode","unspecified","selectionIntent","style"));
+  assertThrows(BusinessException.class,()->service.validateConfirmation(original));var later=service.canonicalRow(9,original,values("rowId",original.get("rowId"),"phoneModelIds",List.of(12L),"phoneScopeDeclaration","not_provided"));assertEquals(List.of(12L),later.get("phoneModelIds"));
+  service.validateConfirmation(later);noProductWrites();
+ }
+
 }

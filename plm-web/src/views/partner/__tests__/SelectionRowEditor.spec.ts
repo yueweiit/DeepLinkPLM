@@ -6,6 +6,7 @@ import Editor from '../selection/SelectionRowEditor.vue'
 import {newSelectionRow} from '@/utils/partnerSelections'
 import type {SelectionRow} from '@/types/partnerSelections'
 import type {PartnerFile} from '@/types/partner'
+import {resolveSupplierRanges} from '@/api/modules/supplierRanges'
 vi.mock('@/api/modules/supplierRanges',()=>({supplierRanges:vi.fn().mockResolvedValue({content:[]}),supplierColors:vi.fn().mockResolvedValue({content:[{id:8,name:'供方黑色'}]}),resolveSupplierRanges:vi.fn()}))
 vi.mock('@/components/PhoneModelMultiSelect/index.vue',()=>({default:{name:'PhoneModelMultiSelect',props:['modelValue','members','allowedIds'],template:'<div>共享型号选择器</div>'}}))
 vi.mock('../operations/OperationSpecPicker.vue',()=>({default:{template:'<div>原规格选择器</div>'}}))
@@ -13,6 +14,27 @@ vi.mock('@/views/supplier/SupplierRangePanel.vue',()=>({default:{template:'<div>
 vi.mock('../PartnerPhoto.vue',()=>({default:{props:['id'],template:'<img class="partner-photo" :data-id="id"/>'}}))
 let wrapper:VueWrapper
 afterEach(async()=>{await flushPromises();wrapper?.unmount();await flushPromises()})
+describe('explicit adoption of a supplier model range',()=>{
+ const snapshot={id:7,type:'model',name:'已核定范围',code:'range-7',version:1,currentVersion:1,members:[{id:42},{id:44},{id:42}]}
+ const button=()=>wrapper.findAll('button').find(item=>item.text()==='采用此型号范围')!
+ it('adopts only explicitly confirmed model members through the existing confirmation event, preserving other facts',async()=>{
+  const row=reactive({...newSelectionRow(),supplierCode:'SUP-XD',phoneModelIds:[9],rangeRefs:[{type:'model' as const,reference:'range-7',version:1}],color:'原色',sampleQty:2,refs:[{id:11,type:'file',name:'原件',version:'V1'}]});const before={color:row.color,qty:row.sampleQty,refs:JSON.stringify(row.refs),pairs:JSON.stringify(row.pairings)}
+  vi.mocked(resolveSupplierRanges).mockResolvedValue({snapshots:[snapshot,{id:8,type:'color',version:1,currentVersion:1,members:[{id:99}]}],errors:[]});await startEditor(row,[],[],true,true,'catalog')
+  expect(row.phoneModelIds).toEqual([9]);await button().trigger('click');await flushPromises();expect(resolveSupplierRanges).toHaveBeenLastCalledWith('SUP-XD',row.rangeRefs,row.styleKey,row.configKey);expect(row.phoneModelIds).toEqual([9,42,44]);expect(wrapper.getComponent(Editor).emitted('phone-model-confirm')).toEqual([[[9,42,44]]]);expect(row.color).toBe(before.color);expect(row.sampleQty).toBe(before.qty);expect(JSON.stringify(row.refs)).toBe(before.refs);expect(JSON.stringify(row.pairings)).toBe(before.pairs);expect(row.selectedPairs).toEqual([])
+ })
+ it('checking a range alone never changes the explicit phone selection',async()=>{
+  const row=reactive({...newSelectionRow(),supplierCode:'SUP-XD',rangeRefs:[{type:'model' as const,reference:'range-7',version:1}]});vi.mocked(resolveSupplierRanges).mockResolvedValue({snapshots:[snapshot],errors:[]});await startEditor(row,[],[],true,true,'catalog');await wrapper.findAll('button').find(item=>item.text()==='核对范围与版本')!.trigger('click');await flushPromises();expect(row.phoneModelIds).toEqual([]);expect(wrapper.getComponent(Editor).emitted('phone-model-confirm')).toBeUndefined()
+ })
+ it('requires the existing explicit version acknowledgement and adopts the frozen members rather than new members',async()=>{
+  const row=reactive({...newSelectionRow(),supplierCode:'SUP-XD',rangeRefs:[{type:'model' as const,reference:'range-7',version:1}]});vi.mocked(resolveSupplierRanges).mockResolvedValue({snapshots:[{...snapshot,members:[{id:42}],currentVersion:2,versionChanged:true,memberChanges:{added:[{id:99}],removed:[]}}],errors:[]});await startEditor(row,[],[],true,true,'catalog');await button().trigger('click');await flushPromises();expect(row.phoneModelIds).toEqual([]);const ack=wrapper.get('.range-version-diff').getComponent(ElCheckbox);ack.vm.$emit('change',true);await button().trigger('click');await flushPromises();expect(row.phoneModelIds).toEqual([42]);expect(row.rangeVersionAcknowledgements).toEqual([{id:7,version:1,currentVersion:2}])
+ })
+ it('leaves phone IDs and confirmation untouched when range resolution fails',async()=>{
+  const row=reactive({...newSelectionRow(),supplierCode:'SUP-XD',phoneModelIds:[9],rangeRefs:[{type:'model' as const,reference:'range-7'}]});vi.mocked(resolveSupplierRanges).mockResolvedValue({snapshots:[],errors:[{message:'范围未启用'}]});await startEditor(row,[],[],true,true,'catalog');await button().trigger('click');await flushPromises();expect(row.phoneModelIds).toEqual([9]);expect(wrapper.getComponent(Editor).emitted('phone-model-confirm')).toBeUndefined();vi.mocked(resolveSupplierRanges).mockRejectedValueOnce(new Error('范围读取失败'));await button().trigger('click');await flushPromises();expect(row.phoneModelIds).toEqual([9]);expect(wrapper.text()).toContain('范围读取失败');vi.mocked(resolveSupplierRanges).mockResolvedValue({snapshots:[snapshot],errors:[]});await button().trigger('click');await flushPromises();expect(row.phoneModelIds).toEqual([9,42,44]);expect(wrapper.text()).not.toContain('范围读取失败')
+ })
+ it.each([{context:'selection' as const,canWrite:true},{context:'catalog' as const,canWrite:false}])('does not adopt a range from a historical selection or readonly context: %j',async({context,canWrite})=>{
+  const row=reactive({...newSelectionRow(),supplierCode:'SUP-XD',rangeRefs:[{type:'model' as const,reference:'range-7'}]});await startEditor(row,[],[],canWrite,true,context);expect(button()).toBeUndefined();const count=vi.mocked(resolveSupplierRanges).mock.calls.length;(wrapper.getComponent(Editor).vm as unknown as {adoptModelRange:()=>void}).adoptModelRange();await flushPromises();expect(vi.mocked(resolveSupplierRanges).mock.calls).toHaveLength(count);expect(row.phoneModelIds).toEqual([])
+ })
+})
 describe('explicit selected pair intent',()=>{
  it('adds the expressly selected phone once without copying a range or changing supply evidence, and retains intent when unchecked',async()=>{const row={...newSelectionRow(),supplierCode:'SUP-XD',phoneModelIds:[9],pairings:[{supplierCode:'SUP-XD',styleKey:'款A',configKey:'配置A',quoteVersion:'V1',phoneModelId:42,colorId:8,state:'available' as const,evidence:'本次供方实物核对'}]};wrapper=mount({components:{Editor},setup:()=>({row}),template:'<section><Editor :row="row" :files="[]" :suppliers="[]" can-write can-read-cost /></section>'},{global:{plugins:[ElementPlus],stubs:{ElInput:{props:['modelValue'],template:'<input :value="modelValue" />'},ElSelect:{template:'<div><slot/></div>'},ElOption:true,ElInputNumber:true,ElDatePicker:true,ElDialog:{template:'<div />'}}}});await flushPromises();const checkbox=wrapper.get('.pair-list').getComponent(ElCheckbox);checkbox.vm.$emit('change',true);await flushPromises();expect(row.phoneModelIds).toEqual([9,42]);expect(row.selectedPairs).toEqual([{phoneModelId:42,colorId:8}]);checkbox.vm.$emit('change',true);await flushPromises();expect(row.phoneModelIds).toEqual([9,42]);expect(row.selectedPairs).toHaveLength(1);checkbox.vm.$emit('change',false);await flushPromises();expect(row.phoneModelIds).toEqual([9,42]);expect(row.selectedPairs).toEqual([]);expect(row.pairings).toHaveLength(1);expect(row.pairings[0]).toMatchObject({state:'available',evidence:'本次供方实物核对'});expect(row.rangeRefs).toEqual([])})
 })
@@ -47,7 +69,7 @@ describe('unified catalog fields through the existing row editor',()=>{
  })
  it.each([
   {modelText:'原件明确 iPhone 18'}, {phoneModelIds:[18]}, {availablePhoneModelIds:[18]}, {unavailablePhoneModelIds:[12]},
-  {rangeRefs:[{type:'model' as const,reference:'原型号表'}]}, {rangeSnapshots:[{id:1,version:1,currentVersion:1,type:'model'}]},
+  {rangeRefs:[{type:'model' as const,reference:'原型号表'}]}, {rangeSnapshots:[{id:1,version:1,currentVersion:1,type:'model' as const}]},
   {pairings:[{phoneModelId:18,colorId:1,state:'available' as const}]}, {selectedPairs:[{phoneModelId:18,colorId:1}]}, {sourcePhoneModelIds:[18]}
  ])('keeps provided model evidence intact and rejects declaring it absent: %j',async(evidence)=>{
   const row=reactive({...newSelectionRow(),...evidence});const before=JSON.stringify(row);await startEditor(row,[],[],true,true,'catalog');expect(wrapper.get('.phone-scope-declaration').getComponent(ElCheckbox).props('disabled')).toBe(true)

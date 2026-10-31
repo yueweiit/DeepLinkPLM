@@ -222,7 +222,8 @@ public class PartnerSelectionService {
   var origin=map(row.get("catalogSourceSnapshot"));if(!origin.isEmpty()){
    require(text(origin.get("supplierCode")).equals(supplier),"目录来源的供应商不可更换，请另选真实来源");
    var allowed=scopeIds(origin.get("phoneModelIds"));var chosen=scopeIds(row.get("phoneModelIds"));
-   require(!chosen.isEmpty()&&allowed.containsAll(chosen),"unspecified".equals(text(origin.get("phoneScopeMode")))
+   boolean styleDraft="style".equals(text(origin.get("selectionIntent")));
+   require((styleDraft&&chosen.isEmpty())||(!chosen.isEmpty()&&(allowed.containsAll(chosen)||styleDraft&&"unspecified".equals(text(origin.get("phoneScopeMode"))))),"unspecified".equals(text(origin.get("phoneScopeMode")))
     ?"本行只能调整此前所选型号；新增型号请从目录增选，不能改写原选品快照"
     :"所选型号必须是来源当时可供型号的非空子集；请从目录另选来源，不能扩大供方范围");
    require(chosen.stream().noneMatch(scopeIds(origin.get("unavailablePhoneModelIds"))::contains),"来源明确不供的型号不能加入选品");
@@ -254,7 +255,7 @@ public class PartnerSelectionService {
   }else if(input.containsKey("color")&&!text(input.get("color")).equals(text(previous.get("color")))){row.remove("supplierColorIds");row.remove("supplierColors");}
   row.put("rangeRefs",maps(input.getOrDefault("rangeRefs",previous.get("rangeRefs"))));row.put("pairings",maps(input.getOrDefault("pairings",previous.get("pairings"))));row.put("selectedPairs",maps(input.getOrDefault("selectedPairs",previous.get("selectedPairs"))));
   for(var pair:maps(row.get("selectedPairs")))require(scopeIds(row.get("phoneModelIds")).contains(number(pair.get("phoneModelId"))),"选择的型号颜色组合超出本行已选型号");
-  if("not_provided".equals(text(row.get("phoneScopeDeclaration"))))require(!PartnerCatalogPhoneResolver.supplierScopeProvided(row),"已有型号原文、范围或配对，不能标记为供应商未注明型号");
+  if("not_provided".equals(text(row.get("phoneScopeDeclaration")))&&!("style".equals(text(origin.get("selectionIntent")))&&"unspecified".equals(text(origin.get("phoneScopeMode")))))require(!PartnerCatalogPhoneResolver.supplierScopeProvided(row),"已有型号原文、范围或配对，不能标记为供应商未注明型号");
   if(!origin.isEmpty())for(var pair:maps(row.get("selectedPairs")))require(maps(origin.get("unavailablePairs")).stream().noneMatch(p->number(p.get("phoneModelId"))==number(pair.get("phoneModelId"))&&number(p.get("colorId"))==number(pair.get("colorId"))),"来源已明确不供该型号颜色组合，不能在选品中改写为可供");
   row.put("rangeVersionAcknowledgements",maps(input.getOrDefault("rangeVersionAcknowledgements",previous.get("rangeVersionAcknowledgements"))));
   row.put("rangeIssues",List.of());row.put("rangeSnapshots",List.of());
@@ -319,7 +320,7 @@ public class PartnerSelectionService {
   for(var snapshot:snapshots)if(Boolean.TRUE.equals(snapshot.get("versionChanged")))require(maps(row.get("rangeVersionAcknowledgements")).stream().anyMatch(a->number(a.get("id"))==number(snapshot.get("id"))&&number(a.get("version"))==number(snapshot.get("version"))&&number(a.get("currentVersion"))==number(snapshot.get("currentVersion"))),"范围版本已变化，请查看增减成员并明确确认采用所见旧版本，或改用新版本");
   var pairs=ranges.normalizeSelectedPairs(supplier,maps(row.get("selectedPairs")),false);var facts=supplyFacts(row,false);
   var ids=scopeIds(row.get("phoneModelIds"));require(!ids.isEmpty(),"请明确本次所选手机型号");scopePhones(ids,ids);
-  var origin=map(row.get("catalogSourceSnapshot"));if(!origin.isEmpty()){require(scopeIds(origin.get("phoneModelIds")).containsAll(ids),"所选型号超出供应商提供的范围");require(ids.stream().noneMatch(scopeIds(origin.get("unavailablePhoneModelIds"))::contains),"供应商明确不供所选型号");}
+  var origin=map(row.get("catalogSourceSnapshot"));if(!origin.isEmpty()){require(scopeIds(origin.get("phoneModelIds")).containsAll(ids)||("style".equals(text(origin.get("selectionIntent")))&&"unspecified".equals(text(origin.get("phoneScopeMode")))),"所选型号超出供应商提供的范围");require(ids.stream().noneMatch(scopeIds(origin.get("unavailablePhoneModelIds"))::contains),"供应商明确不供所选型号");}
   for(String type:List.of("model","color")){var applicable=snapshots.stream().filter(scope->type.equals(text(scope.get("type")))).toList();if(!applicable.isEmpty()){var members=new HashSet<Long>();for(var scope:applicable)for(var member:maps(scope.get("members")))members.add(number(member.get("id")));if(type.equals("model"))require(members.containsAll(ids),"所选型号不在引用的范围快照内");for(var pair:pairs)require(members.contains(number(pair.get(type.equals("model")?"phoneModelId":"colorId"))),"所选型号／颜色不在引用的范围快照内，请核对具体成员");}}
   if(!pairs.isEmpty()){SupplierSupplyRules.validate(supplier,text(row.get("styleKey")),text(row.get("configKey")),text(row.get("quoteVersion")),facts,pairs,supplyContext(row));var pairIds=pairs.stream().map(p->number(p.get("phoneModelId"))).collect(java.util.stream.Collectors.toSet());require(new HashSet<>(ids).equals(pairIds),"选中型号与明确的型号—颜色配对不一致，请核对规格");}
   if(number(row.get("targetSpecId"))>0)products.snapshot(number(row.get("targetSpecId")),supplier,false);
@@ -353,7 +354,8 @@ public class PartnerSelectionService {
   var normalized=ranges.normalizeSelectedPairs(text(source.get("supplierCode")),pairs,false);
   SupplierSupplyRules.validate(text(source.get("supplierCode")),text(source.get("styleKey")),text(source.get("configKey")),text(source.get("quoteVersion")),maps(source.get("pairings")),normalized,supplyContext(source));return normalized;
  }
- private boolean needsPhoneResolution(Map<String,Object> row){return !confirmed(row)&&scopeIds(row.get("phoneModelIds")).isEmpty()&&!text(row.get("modelText")).isEmpty();}
+ // Style adoption keeps unchosen requirements as text; resolving them would turn supply scope into a selection.
+ private boolean needsPhoneResolution(Map<String,Object> row){return !confirmed(row)&&!"style".equals(text(map(row.get("catalogSourceSnapshot")).get("selectionIntent")))&&scopeIds(row.get("phoneModelIds")).isEmpty()&&!text(row.get("modelText")).isEmpty();}
  /** Labeled alternatives remain alternatives: no minimum-price guessing, currency default or arbitrary nested input. */
  private List<Map<String,Object>> priceOptions(Object raw){
   require(raw==null||raw instanceof List<?>,"报价选项必须是列表");var result=new ArrayList<Map<String,Object>>();
@@ -372,7 +374,7 @@ public class PartnerSelectionService {
  private Map<String,Object> visible(Map<String,Object> d){var publicData=publicOrigins(d);return map(permissions.costs()?publicData:withoutCosts(publicData));}
  private Object publicOrigins(Object value){
   if(value instanceof List<?> list)return list.stream().map(this::publicOrigins).toList();
-  if(value instanceof Map<?,?> source){var result=new LinkedHashMap<String,Object>();source.forEach((key,item)->{if(key.toString().equals("catalogSourceSnapshot")){var origin=map(item);var visible=new LinkedHashMap<String,Object>();for(String field:List.of("sourceKind","recordId","rowId","rowVersion","recordVersion","sourceCode","sourceName","supplierCode","modelText","phoneModelIds","phones","phoneScopeMode","phoneScopeDeclaration","unavailablePhoneModelIds","catalogStyleId","catalogStyleCode","catalogStyleLabel","supplierModelEntries","modelSheetRefs"))if(origin.containsKey(field))visible.put(field,origin.get(field));result.put(key.toString(),visible);}else result.put(key.toString(),publicOrigins(item));});return result;}
+  if(value instanceof Map<?,?> source){var result=new LinkedHashMap<String,Object>();source.forEach((key,item)->{if(key.toString().equals("catalogSourceSnapshot")){var origin=map(item);var visible=new LinkedHashMap<String,Object>();for(String field:List.of("sourceKind","recordId","rowId","rowVersion","recordVersion","sourceCode","sourceName","supplierCode","modelText","phoneModelIds","phones","phoneScopeMode","phoneScopeDeclaration","unavailablePhoneModelIds","catalogStyleId","catalogStyleCode","catalogStyleLabel","supplierModelEntries","modelSheetRefs","selectionIntent","selectionModelText"))if(origin.containsKey(field))visible.put(field,origin.get(field));result.put(key.toString(),visible);}else result.put(key.toString(),publicOrigins(item));});return result;}
   return value;
  }
  private Object withoutCosts(Object value){if(value instanceof List<?> l)return l.stream().filter(v->!hiddenFile(v)).map(this::withoutCosts).toList();if(value instanceof Map<?,?> m){var out=new LinkedHashMap<String,Object>();m.forEach((k,v)->{if(!COST_FIELDS.contains(k.toString())&&!k.toString().endsWith("Cents"))out.put(k.toString(),Set.of("pairings","selectedPairs").contains(k.toString())?PartnerCatalogFields.operationalPairings(v):withoutCosts(v));});return out;}return value;}
