@@ -3,18 +3,44 @@ import { phoneSeries, selectionSearchTerm, unavailablePhone } from '@/components
 import type { CompatiblePhone } from '@/types/molds'
 import { t } from '@/locales'
 
-type SummaryPhone = Partial<CompatiblePhone> & { modelName?: string; displayName?: string }
+export type SummaryPhone = Partial<CompatiblePhone> & { modelName?: string; displayName?: string }
+
+function displayModelKey(phone: SummaryPhone) {
+  const brands = [phone.brandName, ...phone.brandAliases || []].filter((name): name is string => !!name).map(name => name.normalize('NFKC').trim().toLowerCase())
+  const members = (phone.modelName || phone.displayName || '').normalize('NFKC').split(/[\/,，、\n]/).map(member => {
+    let name = selectionSearchTerm(member).toLowerCase().trim()
+    for (const brand of brands) if (name.startsWith(brand + ' ')) name = name.slice(brand.length).trim()
+    return name
+  })
+  const iphone = /^iphone(?:\s|\d)/.test(members[0] || '')
+  return members.map(name => (iphone ? name.replace(/^iphone\s*/, '') : name).replace(/\s+/g, '')).join('/')
+}
+
+/** Collapse equivalent display entries only. Original member IDs and associations remain untouched. */
+export function catalogDisplayPhones<P extends SummaryPhone>(phones: P[]): P[] {
+  const ids = new Set<number>(), identities = new Set<string>(), result: P[] = []
+  for (const phone of phones) {
+    if (phone.phoneModelId && ids.has(phone.phoneModelId)) continue
+    if (phone.phoneModelId) ids.add(phone.phoneModelId)
+    const brand = phone.brandId ? 'id:' + phone.brandId : phone.brandName?.normalize('NFKC').trim().toLowerCase()
+    const code = phone.phoneModelCode?.normalize('NFKC').trim(), model = displayModelKey(phone)
+    const identity = brand && code && model ? JSON.stringify([brand, code, model]) : ''
+    if (identity && identities.has(identity)) continue
+    if (identity) identities.add(identity)
+    result.push(phone)
+  }
+  return result
+}
 
 /** A display of the supplied members only; a generation span never claims every variant is selected. */
 export function catalogPhoneGroups<P extends SummaryPhone>(phones: P[]) {
   const groups = new Map<string, { name: string; generations: Set<number>; phones: P[] }>()
-  for (const phone of phones) {
+  for (const phone of catalogDisplayPhones(phones)) {
     const name = selectionSearchTerm(phone.displayName || phone.modelName || '')
     const apple = name.match(/\biphone\s*(\d{1,2})(?!\d)/i)
     const samsung = /samsung|三星|\bsm\b/i.test([phone.brandName, name].join(' ')) && name.match(/\bs\s*(\d{1,2})(?!\d)/i)
     const key = apple ? 'iPhone' : samsung ? 'Samsung Galaxy S' : phone.brandName || t('其他型号')
     const group = groups.get(key) || { name: key, generations: new Set<number>(), phones: [] }
-    if (phone.phoneModelId !== undefined && group.phones.some(item => item.phoneModelId === phone.phoneModelId)) continue
     const generation = apple?.[1] || (samsung && samsung[1])
     if (generation) group.generations.add(Number(generation))
     group.phones.push(phone)
@@ -72,7 +98,7 @@ export function catalogPhoneFamilies(row: Pick<CatalogStyle, 'phones' | 'phoneMo
 
 /** Names and codes come from the shared phone records, never a second selector. */
 export function catalogPhoneSummary(row: Pick<CatalogStyle,'phoneScopeMode'> & {phones?:SummaryPhone[];modelText?:string}): string {
-  const phones = row.phones || []
+  const phones = catalogDisplayPhones(row.phones || [])
   if (phones.length > 0 && phones.length <= 2) return phones.map(phone => phone.displayName||phone.modelName).filter(Boolean).join('、')||row.modelText||'型号资料待加载'
   if (phones.length > 2) return catalogPhoneGroups(phones).map(group => group.label).join(' / ')
   return row.modelText || (row.phoneScopeMode==='unspecified'?'供应商未注明型号':'型号资料待关联')

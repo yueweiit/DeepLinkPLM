@@ -216,7 +216,8 @@ describe('supplier-first product catalog', () => {
     expect(record.find('.catalog-style-check').exists()).toBe(true)
     expect(record.get('.catalog-style-photo').find('input[type=checkbox]').exists()).toBe(false)
     expect(record.get('.catalog-style-model strong').text()).toBe('iPhone 11')
-    expect(record.get('.catalog-style-model').text()).toContain('0185')
+    await record.get('.catalog-style-model .all-models').trigger('click');await flushPromises()
+    expect(wrapper.get('.selected-phone-details').text()).toContain('0185')
     expect(record.text()).not.toContain('配对待核实')
   })
 
@@ -339,21 +340,21 @@ describe('unified supplier style detail and permissions', () => {
     expect(wrapper.get('.catalog-materials').text()).not.toContain('供方完整报价原件')
     expect(wrapper.get('.source-originals').text()).toContain('供方完整报价原件.xls')
     expect(wrapper.get('.catalog-source').attributes('open')).toBeUndefined()
-    expect(wrapper.text()).toContain('0185')
+    await wrapper.get('.model-panel .all-models').trigger('click');await flushPromises()
+    expect(wrapper.get('.selected-phone-details').text()).toContain('0185')
+    await click('关闭')
     expect(wrapper.text()).toContain('只勾本次需要的型号，不必重新匹配')
   })
 
-  it('searches and pages a long existing phone range without opening another selector', async () => {
+  it('opens, searches and pages a long existing supplier phone range without another selector or a write', async () => {
     const many = Array.from({ length: 39 }, (_, index) => ({ ...phones[0], phoneModelId: index + 1, modelName: `iPhone ${index + 1}`, phoneModelCode: String(index).padStart(4, '0') }))
     api.catalogStyle.mockResolvedValue(row({ phones: many, modelText: 'iPhone11到18（mini除外）' }))
-    await start(detailPath)
-    expect(wrapper.findAll('.catalog-phone')).toHaveLength(12)
-    wrapper.getComponent(ElPagination).vm.$emit('update:current-page', 2); await flushPromises()
-    expect(wrapper.findAll('.catalog-phone')[0].text()).toContain('iPhone 13')
-    await wrapper.get('[aria-label="搜索本款手机型号"]').setValue('0038')
-    expect(wrapper.findAll('.catalog-phone')).toHaveLength(1)
-    expect(wrapper.get('.catalog-phone').text()).toContain('iPhone 39')
-    expect(wrapper.find('.phone-model-trigger').exists()).toBe(false)
+    const router=await start(detailPath),originalPath=router.currentRoute.value.fullPath
+    await wrapper.get('.model-panel .all-models').trigger('click');await flushPromises()
+    const dialog=wrapper.get('.selected-phone-details');expect(dialog.attributes('title')).toBe('供应商可供手机型号');expect(dialog.findAll('.selected-phone-group')).toHaveLength(12)
+    const first=dialog.findAll('.selected-phone-member')[0].text();wrapper.getComponent(ElPagination).vm.$emit('update:current-page',2);await flushPromises();expect(dialog.findAll('.selected-phone-group')).toHaveLength(12);expect(dialog.findAll('.selected-phone-member')[0].text()).not.toBe(first)
+    await dialog.get('[aria-label="搜索手机型号"]').setValue('0038');expect(dialog.findAll('.selected-phone-member')).toHaveLength(1);expect(dialog.text()).toContain('iPhone 39')
+    expect(wrapper.find('.phone-model-trigger').exists()).toBe(false);expect(router.currentRoute.value.fullPath).toBe(originalPath);expect(api.addCatalogSelection).not.toHaveBeenCalled();expect(api.updateCatalogStyle).not.toHaveBeenCalled()
   })
 
   it('does not invent prices, currencies or model identities when source fields are absent', async () => {
@@ -367,13 +368,13 @@ describe('unified supplier style detail and permissions', () => {
   it.each((['list','detail'] as const).flatMap(view=>([undefined,'supplier','unresolved','unspecified'] as const).map(mode=>({view,mode}))))('uses the backend scope meaning for an empty $view model field: $mode',async({view,mode})=>{
     const value=row({phoneScopeMode:mode,phoneModelIds:[],phones:[],modelText:''});api.catalogStyles.mockResolvedValue(page([value],{supplier}));api.catalogStyle.mockResolvedValue(value)
     await start(view==='detail'?detailPath:'/partner-products?supplierCode=TEST-SUP')
-    const text=wrapper.get(view==='detail'?'.model-panel .muted':'.catalog-style-model strong').text();expect(text).toBe(mode==='unspecified'?'供应商未注明型号':'型号资料待关联');expect(wrapper.text()).not.toContain('原资料未提供手机型号');expect(wrapper.text()).not.toContain('已匹配现有手机资料')
+    const text=wrapper.get(view==='detail'?'.model-panel .model-title':'.catalog-style-model strong').text();expect(text).toBe(mode==='unspecified'?'供应商未注明型号':'型号资料待关联');expect(wrapper.text()).not.toContain('原资料未提供手机型号');expect(wrapper.text()).not.toContain('已匹配现有手机资料')
     if(mode!=='unspecified')expect(wrapper.text()).not.toContain('供应商未注明型号')
   })
 
   it.each((['list','detail'] as const).flatMap(view=>([undefined,'supplier','unresolved','unspecified'] as const).map(mode=>({view,mode}))))('preserves real supplier model text in the $view instead of replacing it with a scope fallback: $mode',async({view,mode})=>{
     const value=row({phoneScopeMode:mode,phoneModelIds:[],phones:[],modelText:'原件型号表：iPhone 11–18，mini除外'});api.catalogStyles.mockResolvedValue(page([value],{supplier}));api.catalogStyle.mockResolvedValue(value)
-    await start(view==='detail'?detailPath:'/partner-products?supplierCode=TEST-SUP');expect(wrapper.get(view==='detail'?'.model-panel .muted':'.catalog-style-model strong').text()).toBe(value.modelText);expect(wrapper.text()).not.toContain('型号资料待关联');expect(wrapper.text()).not.toContain('供应商未注明型号')
+    await start(view==='detail'?detailPath:'/partner-products?supplierCode=TEST-SUP');expect(wrapper.get(view==='detail'?'.model-panel .model-title':'.catalog-style-model strong').text()).toBe(value.modelText);expect(wrapper.text()).not.toContain('型号资料待关联');expect(wrapper.text()).not.toContain('供应商未注明型号')
   })
 
   it('shows all actual configuration quotes using the backend priceOptions contract instead of inventing a minimum price', async () => {
@@ -401,6 +402,13 @@ describe('unified supplier style detail and permissions', () => {
     expect(wrapper.find('.source-originals').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('12.50')
     expect(wrapper.text()).not.toContain('受限原件')
+  })
+
+  it.each([0,1,2,4])('offers a real readonly supplier model detail for %i associated models',async count=>{
+    const members=Array.from({length:count},(_,i)=>({...phones[0],phoneModelId:301+i,modelName:'iPhone '+(11+i),phoneModelCode:String(301+i).padStart(4,'0')})),value=row({phoneScopeMode:'unspecified',phones:members,phoneModelIds:members.map(phone=>phone.phoneModelId),modelText:'',canWrite:false,canReadCost:false})
+    api.catalogStyles.mockResolvedValue(page([value],{supplier,canWrite:false,canReadCost:false}));const router=await start('/partner-products?supplierCode=TEST-SUP'),path=router.currentRoute.value.fullPath
+    const summary=wrapper.get('.catalog-style-model .phone-model-summary');if(!count){expect(summary.find('.all-models').exists()).toBe(false);expect(summary.text()).toBe('供应商未注明型号')}else{await summary.get('.all-models').trigger('click');await flushPromises();const dialog=wrapper.get('.selected-phone-details');expect(dialog.attributes('title')).toBe('供应商可供手机型号');expect(dialog.findAll('.selected-phone-member')).toHaveLength(count);expect(dialog.text()).toContain('0301')}
+    expect(router.currentRoute.value.fullPath).toBe(path);expect(api.catalogStyle).not.toHaveBeenCalled();expect(api.addCatalogSelection).not.toHaveBeenCalled();expect(api.updateCatalogStyle).not.toHaveBeenCalled();expect(wrapper.find('.catalog-style-check').exists()).toBe(false)
   })
 
   it('keeps read-only browsing without selection controls or costs', async () => {

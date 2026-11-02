@@ -13,6 +13,7 @@ import { partnerError } from '@/utils/partnerError'
 import PartnerPhoto from '../PartnerPhoto.vue'
 import CatalogSelectionDialog from './CatalogSelectionDialog.vue'
 import SupplierStyleDetail from './SupplierStyleDetail.vue'
+import PhoneModelSummary from '../PhoneModelSummary.vue'
 import CatalogSourceImport from './CatalogSourceImport.vue'
 import CatalogIdentityDialog from './CatalogIdentityDialog.vue'
 import CatalogModelSheetDialog from './CatalogModelSheetDialog.vue'
@@ -165,7 +166,7 @@ const photo = (row: CatalogStyle) => photos(row)[0]
           <div class="catalog-style-photo"><PartnerPhoto v-if="photo(row)" :id="photo(row)!.id" previewable :preview-files="photos(row)"/><span v-else class="catalog-no-photo">{{ uiText("暂无图片") }}</span><span v-if="photo(row)" class="catalog-photo-open" aria-hidden="true">{{ photos(row).length }}{{ uiText("图") }}</span></div>
           <div v-if="canWrite" class="catalog-style-check"><el-checkbox :model-value="checked.has(catalogKey(row))" :aria-label="uiText('选择{value0}',{value0:(row.name)})" :disabled="loading||selectionLoading||row.discarded" @change="check(row,Boolean($event))"/></div>
           <div class="catalog-style-name"><strong class="catalog-style-code">{{row.catalogStyleLabel||row.catalogStyleCode||uiText('款式号待补')}}</strong><el-button link type="primary" @click="open(row)">{{ row.name || uiText('未命名款式') }}</el-button><small v-if="row.supplierItemCode">{{ uiText("供方款号：") }}{{row.supplierItemCode}}</small><el-button v-if="row.productId" link @click="openProduct(row.productId)">{{ row.productCode || uiText('关联我方产品') }}</el-button></div>
-          <div class="catalog-style-model"><span class="catalog-cell-label">{{ uiText("手机型号") }}</span><strong>{{ catalogPhoneSummary(row) }}</strong><small v-if="row.phones?.length>2">{{ uiText("共 {value0} 个型号 · 查看明细",{value0:row.phones.length}) }}</small><small v-else-if="row.phones?.length">{{ row.phones.map(phone=>phone.phoneModelCode).filter(Boolean).join(' / ') }}</small></div>
+          <div class="catalog-style-model"><span class="catalog-cell-label">{{ uiText("手机型号") }}</span><PhoneModelSummary :phones="row.phones||[]" :count="Math.max(new Set(row.phoneModelIds||[]).size,new Set((row.phones||[]).map(phone=>phone.phoneModelId)).size)" :fallback="catalogPhoneSummary(row)" :original-text="row.modelText" scope="supply"/></div>
           <div class="catalog-style-config"><span class="catalog-cell-label">{{ uiText("供应商颜色") }}</span><strong>{{ row.color || uiText('未提供') }}</strong></div>
           <div class="catalog-style-material"><span class="catalog-cell-label">{{ uiText("材质") }}</span><span v-if="!row.material||row.material.length<=12">{{row.material||uiText('未提供')}}</span><el-button v-else link type="primary" @click="open(row)">{{ uiText("查看材质") }}</el-button></div>
           <div v-if="canReadCost" class="catalog-style-price"><span class="catalog-cell-label">{{ uiText("报价") }}</span><strong>{{ supplierPriceValue(row) }}</strong></div>
