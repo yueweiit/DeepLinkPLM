@@ -120,4 +120,22 @@ class SampleShipmentLocalIntegrationTest {
   jdbc.update("update plm_partner_record set data='{\"supplierCode\":\"SUP-ORIGINAL\",\"supplierName\":\"原样品供应商\"}'::jsonb where record_id=101");var d=dispatch(draft(2));jdbc.update("update plm_partner_record set data=jsonb_set(data,'{supplierCode}','\"SUP-UNRELATED\"') where record_id=?",d.get("id"));role="mexico";actorId=2;
   var scan=service.scan("SY-000101");assertThat(scan).containsEntry("supplierCode","SUP-ORIGINAL").containsEntry("supplierName","原样品供应商");assertThat(maps(service.detail(number(d.get("id"))).get("rows")).get(0)).containsEntry("supplierCode","SUP-ORIGINAL").containsEntry("supplierName","原样品供应商");assertThat(scan.toString()).doesNotContain("SUP-UNRELATED","sourceSnapshot");
  }
+ @Test void assignedReceiptLocationsRemainParcelHistoryAfterARealMixedBatchMoveWithoutLeakingOtherStock(){
+  var own=dispatch(draft(3));long ownId=number(own.get("id"));
+  var other=run(()->service.create(data("requestId","other-person-parcel","direction","mexico_outbound","destination","墨西哥样品间","receiverUserId",3L,"rows",List.of(data("rowId","line-a","sampleIdentityId",101L,"qty",2L)))));long otherId=number(other.get("id"));var otherDraftVersion=other.get("version");other=run(()->service.action(otherId,"dispatched",data("requestId","dispatch-other-parcel","version",otherDraftVersion,"date","2026-01-01","tracking","QA-OTHER-TRACK")));
+  var ownVersion=own.get("version");run(()->service.action(ownId,"receive",data("requestId","own-actual-receipt","version",ownVersion,"date","2026-01-02","location","墨西哥样品间 A柜／2层／3格","rows",List.of(data("rowId","line-a","goodQty",3L)))));
+  var otherVersion=other.get("version");run(()->service.action(otherId,"receive",data("requestId","other-actual-receipt","version",otherVersion,"date","2026-01-02","location","他人包裹私有柜","rows",List.of(data("rowId","line-a","goodQty",2L)))));
+  var move=SampleLedger.prepare(SampleLedger.replay(store.events(201)),"SP-000201","move",data("date","2026-01-03","location","墨西哥样品间 A柜／2层／3格","to","墨西哥样品间 B柜／1层／2格","qty",3L));store.event(201,"move",move,"after-receipt-move");
+  var realPositions=maps(SampleLedger.replay(store.events(201)).view().get("positions"));assertThat(realPositions).anySatisfy(position->assertThat(position).containsEntry("name","墨西哥样品间 B柜／1层／2格").containsEntry("onhand",3L));
+  role="mexico";actorId=2;var scan=service.scan("SY-000101");var parcels=maps(scan.get("shipments"));assertThat(parcels).hasSize(1);assertThat(parcels.get(0)).containsEntry("id",ownId);var row=maps(parcels.get(0).get("rows")).get(0);
+  assertThat(maps(row.get("receiptLocations"))).containsExactly(Map.of("date","2026-01-02","location","墨西哥样品间 A柜／2层／3格","goodQty",3L,"damagedQty",0L));
+  assertThat(scan.toString()).doesNotContain("他人包裹私有柜","深圳办公室","B柜","sourceSnapshot","batchId","positions");assertThat(row).containsEntry("inTransit",0L);
+ }
+ @Test void correctedReceiptsAreRemovedFromTheAssignedLocationHistoryAndInTransitIsNotAStoredLocation(){
+  var parcel=dispatch(draft(3));long id=number(parcel.get("id"));role="mexico";actorId=2;assertThat(maps(service.detail(id).get("rows")).get(0).get("receiptLocations")).isEqualTo(List.of());
+  var version=parcel.get("version");parcel=run(()->service.action(id,"receive",data("requestId","receipt-to-correct","version",version,"date","2026-01-02","location","错误签收位置","rows",List.of(data("rowId","line-a","goodQty",2L)))));
+  role="administrator";actorId=1;long receipt=store.events(id).stream().filter(event->"sample_shipment_receive".equals(event.get("action"))).mapToLong(event->number(event.get("id"))).findFirst().orElseThrow();var receivedVersion=parcel.get("version");parcel=run(()->service.action(id,"undo",data("requestId","correct-location","version",receivedVersion,"date","2026-01-03","targetEventId",receipt,"reason","签收位置录错")));
+  role="mexico";actorId=2;var scan=service.scan("SY-000101");assertThat(scan.toString()).doesNotContain("错误签收位置");var row=maps(maps(scan.get("shipments")).get(0).get("rows")).get(0);assertThat(maps(row.get("receiptLocations"))).isEmpty();assertThat(row).containsEntry("inTransit",3L);
+ }
+
 }

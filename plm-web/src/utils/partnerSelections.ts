@@ -12,11 +12,11 @@ export const pasteColumns=['name','series','supplierCode','supplierItemCode','ma
 export type PasteColumn=typeof pasteColumns[number]
 export const pasteLabels:Record<PasteColumn,string>={name:'款式名称',series:'系列',supplierCode:'供应商编码',supplierItemCode:'供方款号',material:'材质',specification:'规格',color:'颜色',modelText:'型号原文',unitPrice:'单价',currency:'币种',priceNote:'报价说明',moq:'起订条件',packaging:'包装',sampleQty:'拟拿样数量',notes:'备注',sourcePosition:'来源位置',priceUnit:'计价单位',moqQuantity:'起订数量',moqUnit:'起订单位',moqScope:'起订口径',moqNote:'起订补充'}
 /** Excel quoted TSV, including embedded newlines. This never parses or allocates phone/SKU identities. */
-export function parseSelectionTsv(text:string,delimiter='\t'):string[][] {
+export function parseSelectionTsv(text:string,delimiter='\t',preserveEmptyRows=false):string[][] {
   const rows:string[][]=[];let row:string[]=[],cell='',quoted=false
   for(let i=0;i<text.length;i++){const ch=text[i];if(ch==='"'&&(quoted||!cell)){if(quoted&&text[i+1]==='"'){cell+='"';i++}else quoted=!quoted}else if(!quoted&&(ch===delimiter||ch==='\n'||ch==='\r')){row.push(cell);cell='';if(ch!==delimiter){rows.push(row);row=[];if(ch==='\r'&&text[i+1]==='\n')i++}}else cell+=ch}
   if(quoted)throw new Error('粘贴内容中的双引号未闭合，请核对 Excel 单元格。')
-  row.push(cell);rows.push(row);return rows.filter(values=>values.some(value=>value.trim()))
+  row.push(cell);rows.push(row);if(preserveEmptyRows){if(/[\r\n]$/.test(text))rows.pop();return rows}return rows.filter(values=>values.some(value=>value.trim()))
 }
 export function pasteSelectionRows(text:string):SelectionRow[]{let values=parseSelectionTsv(text);if(!values.length)return [];let columns:readonly PasteColumn[]=pasteColumns
   const header=values[0].map(v=>Object.entries(pasteLabels).find(([,label])=>label===v.trim())?.[0] as PasteColumn|undefined)
@@ -26,4 +26,4 @@ export function pasteSelectionRows(text:string):SelectionRow[]{let values=parseS
 /** Only explicitly confirmed pairs are supply facts; range cross-products are never inferred. */
 export function pairCoverage(row:SelectionRow){return row.selectedPairs.map(pair=>({pair,record:row.pairings.find(item=>item.phoneModelId===pair.phoneModelId&&item.colorId===pair.colorId)})).reduce((counts,item)=>{counts[item.record?.state||'unverified']++;return counts},{available:0,unavailable:0,unverified:0})}
 export const fillableColumns=['name','series','material','specification','modelText','color','moq','packaging','notes','sampleQty'] as const
-export function rectangularChanges(text:string,start:string){const startIndex=fillableColumns.indexOf(start as typeof fillableColumns[number]);if(startIndex<0)throw new Error('请选择可填充的起始字段。');return parseSelectionTsv(text).map((cells,index)=>{if(cells.length+startIndex>fillableColumns.length)throw new Error(`第 ${index+1} 行超出当前粘贴字段。`);const changes:Partial<SelectionRow>={};cells.forEach((value,offset)=>{const key=fillableColumns[startIndex+offset];if(!value.trim())return;if(key==='sampleQty'){const quantity=Number(value);if(!Number.isSafeInteger(quantity)||quantity<0)throw new Error('拟拿样数量应为非负整数。');changes.sampleQty=quantity}else changes[key]=value});return changes})}
+export function rectangularChanges(matrix:string[][],start:string){const startIndex=fillableColumns.indexOf(start as typeof fillableColumns[number]);if(startIndex<0)throw new Error('请选择可填充的起始字段。');return matrix.map((cells,index)=>{if(cells.length+startIndex>fillableColumns.length)throw new Error(`第 ${index+1} 行超出当前粘贴字段。`);const changes:Partial<SelectionRow>={};cells.forEach((value,offset)=>{const key=fillableColumns[startIndex+offset];if(!value.trim())return;if(key==='sampleQty'){const quantity=Number(value);if(!Number.isSafeInteger(quantity)||quantity<0)throw new Error('拟拿样数量应为非负整数。');changes.sampleQty=quantity}else changes[key]=value});return changes})}

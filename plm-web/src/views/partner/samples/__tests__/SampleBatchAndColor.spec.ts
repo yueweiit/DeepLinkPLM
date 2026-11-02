@@ -18,21 +18,21 @@ describe('batch sample facts and colour corrections',()=>{
  it('submits two selected real sample types as one loan transaction with shared facts only once',async()=>{await start(Batch,{action:'loan',samples:[sample(71),sample(72)]});await fill(ElInput,'批量借用人','客户A');await fill(ElDatePicker,'批量预计归还日期','2099-01-01');await fill(ElInput,'批量统一数量','2');await click('应用到全部 2 项');await click('确认本次借出');expect(api.sampleIdentityBulkAction).toHaveBeenCalledWith('loan',expect.objectContaining({person:'客户A',due:'2099-01-01',items:[{sampleIdentityId:71,version:3,qty:2,location:'中国工程柜'},{sampleIdentityId:72,version:3,qty:2,location:'中国工程柜'}]}));expect(w.emitted('saved')).toHaveLength(1)})
  it('returns against the exact original batch and loan and preserves partial-return quantities',async()=>{api.sampleIdentity.mockResolvedValue({...sample(),loans:[{id:401,batchId:91,person:'客户A',qty:3,outstanding:2,location:'中国工程柜'}]});await start(Batch,{action:'return',samples:[sample()]});await fill(ElInputNumber,'本次数量 0',1);await click('确认本次归还');expect(api.sampleIdentityBulkAction).toHaveBeenCalledWith('return',expect.objectContaining({items:[{sampleIdentityId:71,version:3,allocations:[{batchId:91,loanId:401,qty:1,location:'中国工程柜',damaged:0}]}]}))})
  it('retries an ambiguous bulk save with the identical request and actual facts',async()=>{api.sampleIdentityBulkAction.mockRejectedValueOnce(Object.assign(new Error('网络中断'),{isAxiosError:true}));await start(Batch,{action:'loan',samples:[sample()]});await fill(ElInput,'批量借用人','客户A');await fill(ElDatePicker,'批量预计归还日期','2099-01-01');await fill(ElInputNumber,'本次数量 0',1);await click('确认本次借出');const original=api.sampleIdentityBulkAction.mock.calls[0]![1];expect(w.text()).toContain('保存结果待核对');await click('核对本次保存结果');expect(api.sampleIdentityBulkAction.mock.calls[1]![1]).toEqual(original);expect(w.emitted('saved')).toHaveLength(1)})
- it('moves all actual visible batch positions while retaining good, reserved and damaged states',async()=>{
+ it('defaults each physical position to one and explicitly moves all inventory when requested',async()=>{
   const positions=[{name:'中国工程柜',onhand:4,available:2,retained:1,damaged:1},{name:'墨西哥柜',onhand:3,available:3,retained:0,damaged:0}]
   api.sampleIdentity.mockImplementation(async(id:number)=>({...sample(id),balances:{onhand:7,available:5,retained:1,damaged:1,borrowed:9,inTransit:8},batches:[{id:id+100,code:'SP-'+id,balances:{positions:[positions[0]]}},{id:id+200,code:'SP-'+(id+1),balances:{positions:[positions[1]]}}]}))
-  await start(Batch,{action:'move',samples:[sample(71),sample(72)]});expect(w.findAll('.batch-rows article')).toHaveLength(8)
+  await start(Batch,{action:'move',samples:[sample(71),sample(72)]});expect(w.findAll('.batch-rows article')).toHaveLength(8);expect(w.findAllComponents(ElInputNumber).map(input=>input.props('modelValue'))).toEqual(Array(8).fill(1));await click('按各行全部在库数量')
   await fill(ElSelect,'批量目标位置','墨西哥展示柜');await click('确认本次移动位置')
   expect(api.sampleIdentityBulkAction).toHaveBeenCalledWith('move',expect.objectContaining({to:'墨西哥展示柜',items:[71,72].map(id=>({sampleIdentityId:id,version:3,allocations:[{batchId:id+100,qty:2,location:'中国工程柜',condition:'good'},{batchId:id+100,qty:1,location:'中国工程柜',condition:'retained'},{batchId:id+100,qty:1,location:'中国工程柜',condition:'damaged'},{batchId:id+200,qty:3,location:'墨西哥柜',condition:'good'}]}))}))
   expect(w.emitted('saved')).toHaveLength(1)
  })
  it('skips positions already at the target and accepts partial quantities without manufacturing another receipt',async()=>{
   api.sampleIdentity.mockResolvedValue({...sample(),batches:[{id:91,code:'SP-91',balances:{positions:[{name:'中国柜',onhand:3,available:3,retained:0,damaged:0}]}},{id:92,code:'SP-92',balances:{positions:[{name:'墨西哥柜',onhand:2,available:2,retained:0,damaged:0}]}}]})
-  await start(Batch,{action:'move',samples:[sample()]});await fill(ElSelect,'批量目标位置','墨西哥柜');await fill(ElInputNumber,'本次数量 0',1)
+  await start(Batch,{action:'move',samples:[sample()]});await fill(ElSelect,'批量目标位置','墨西哥柜')
   expect(w.text()).toContain('已在目标位置，本次不移动');await click('确认本次移动位置')
   expect(api.sampleIdentityBulkAction).toHaveBeenCalledWith('move',expect.objectContaining({items:[{sampleIdentityId:71,version:3,allocations:[{batchId:91,qty:1,location:'中国柜',condition:'good'}]}]}))
  })
- it('restores default inventory quantities and blocks requests without a target, positive quantity or physical stock',async()=>{
+ it('uses all inventory only on request and blocks missing target, positive quantity or physical stock',async()=>{
   api.sampleIdentity.mockResolvedValue({...sample(),batches:[{id:91,code:'SP-91',balances:{positions:[{name:'中国柜',onhand:3,available:3,retained:0,damaged:0}]}}]})
   await start(Batch,{action:'move',samples:[sample()]});await click('确认本次移动位置');expect(w.text()).toContain('请选择或填写目标位置');expect(api.sampleIdentityBulkAction).not.toHaveBeenCalled()
   await fill(ElSelect,'批量目标位置','墨西哥柜');await fill(ElInputNumber,'本次数量 0',0);await click('确认本次移动位置');expect(api.sampleIdentityBulkAction).not.toHaveBeenCalled();await click('按各行全部在库数量');expect(w.findComponent(ElInputNumber).props('modelValue')).toBe(3)
