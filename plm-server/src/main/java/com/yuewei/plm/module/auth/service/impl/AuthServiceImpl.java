@@ -37,8 +37,7 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public LoginVO login(LoginDTO loginDTO, HttpServletRequest request) {
         SysUser user = sysUserRepository.selectOne(new LambdaQueryWrapper<SysUser>()
-            .eq(SysUser::getUsername, loginDTO.getUsername())
-            .last("limit 1"));
+            .apply("lower(username) = lower({0})", loginDTO.getUsername()));
         if (!canLogin(user) || !passwordEncoder.matches(loginDTO.getPassword(), user.getPasswordHash())) {
             throw new BusinessException(ErrorCodeConstants.UNAUTHORIZED, LOGIN_ERROR_MESSAGE);
         }
