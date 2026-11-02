@@ -19,6 +19,10 @@ final class MoldSalesHistoricalProjection {
     // char(64) column uncast, and reject unexpected lengths instead of truncating an identity.
     private static String sealedSourceId(String alias){return "(case when length("+alias+".source_id)=72 then substring("+alias+".source_id,9)::char(64) end)";}
     record SourceScope(Set<List<String>> pairs){
+        static SourceScope review(String key){
+            var parts=key.split(":");require(parts.length==5&&parts[0].equals("review")&&parts[1].matches("[A-Z]{2}")&&parts[2].matches("[0-9]{4}"),"历史销量组不存在或未获授权");
+            return new SourceScope(Set.of(List.of(parts[1],parts[2])));
+        }
         static SourceScope history(String key){
             var parts=key.split(":");require(parts.length>=3&&parts[0].equals("history")&&parts[1].matches("[A-Z]{2}")&&parts[parts.length-1].matches("[0-9]{4}"),"历史销量组不存在或未获授权");
             return new SourceScope(Set.of(List.of(parts[1],parts[parts.length-1])));

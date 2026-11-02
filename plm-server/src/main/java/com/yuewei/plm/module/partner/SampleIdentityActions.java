@@ -25,13 +25,13 @@ public class SampleIdentityActions {
    require(remaining==0,"当前授权批次在该位置的可用数量不足，不能动用留样、借出或隐藏批次");
   }
   require(!allocations.isEmpty()&&allocations.size()<=100,"请列明本次实际分配批次");var saved=new ArrayList<Map<String,Object>>();int index=0;
-  for(var a:allocations){long batch=number(a.get("batchId"));var current=byId.get(batch);a.put("version",current.get("version"));a.put("requestId","identity-action-"+UUID.nameUUIDFromBytes((id+":"+request+":"+(index++)).getBytes(java.nio.charset.StandardCharsets.UTF_8)));var result=samples.action(batch,action,a);byId.put(batch,result);var allocation=new LinkedHashMap<String,Object>();allocation.put("batchId",batch);allocation.put("batchCode",current.get("code"));for(String f:List.of("qty","location","to","loanId","targetEventId"))if(a.containsKey(f))allocation.put(f,a.get(f));saved.add(allocation);}
+  for(var a:allocations){long batch=number(a.get("batchId"));var current=byId.get(batch);a.put("version",current.get("version"));a.put("requestId","identity-action-"+UUID.nameUUIDFromBytes((id+":"+request+":"+(index++)).getBytes(java.nio.charset.StandardCharsets.UTF_8)));var result=samples.action(batch,action,a);byId.put(batch,result);var allocation=new LinkedHashMap<String,Object>();allocation.put("batchId",batch);allocation.put("batchCode",current.get("code"));for(String f:List.of("qty","location","to","condition","loanId","targetEventId"))if(a.containsKey(f))allocation.put(f,a.get(f));saved.add(allocation);}
   store.event(id,"sample_identity_action",Map.of("requestHash",hash,"action",action,"allocations",saved),request);store.revision(id,head);store.save(id,head);return identities.detail(id);
  }
 
  /** Multiple types use the original action allocator, atomically, with one immutable request digest. */
  @Transactional public Map<String,Object> bulk(String action,Map<String,Object> input){
-  store.access.requireDomesticView();store.access.requirePermission("samples:write");require(Set.of("loan","return").contains(action),"批量操作仅支持借出和归还");
+  store.access.requireDomesticView();store.access.requirePermission("samples:write");require(Set.of("loan","return","move").contains(action),"批量操作仅支持借出、归还和移动位置");
   String request=required(input.get("requestId"),"提交标识"),hash=PartnerQualityRules.digest(store.json,Map.of("action",action,"input",input));
   require(input.get("items") instanceof List<?>,"请列出本次样品");var rows=maps(input.get("items"));require(!rows.isEmpty()&&rows.size()<=100,"一次请选择1至100种样品");
   var ids=new TreeSet<Long>();for(var row:rows)require(number(row.get("sampleIdentityId"))>0&&ids.add(number(row.get("sampleIdentityId"))),"样品主码重复或无效");

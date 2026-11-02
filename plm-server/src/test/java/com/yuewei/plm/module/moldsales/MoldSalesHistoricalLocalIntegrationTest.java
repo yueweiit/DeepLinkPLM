@@ -78,6 +78,16 @@ class MoldSalesHistoricalLocalIntegrationTest extends MoldSalesLocalFixture {
         jdbc.update("insert into plm_collaboration_item(item_id,style_name,compatible_models,product_line_id,phone_model_code)values(103,'骑士','New current phone',1,'9999')");visible.add(103L);
         assertThat(quantity(live(),"pending")).isZero();assertThat(service.historyReviewPage(1,30,"","pending")).containsEntry("totalElements",0);assertThat(map(map(service.status().get("historyReview")).get("initialSummary"))).isEqualTo(initial);assertThat(service.unmatched("sales")).isEmpty();
     }
+
+    @Test void historicalOrderDetailScopesTheProjectionBeforeGroupingWithoutChangingOriginalRows(){
+        var reference=rows(service.historyReviewPage(1,30,"Double Diseño","historical_reference").get("content")).get(0);
+        String before=originalArchive();var reads=spy(jdbc);org.springframework.test.util.ReflectionTestUtils.setField(service,"jdbc",reads);
+        var result=service.historyReviewDetail("AB","0058",reference.get("sourceGroupKey").toString(),1,20);
+        assertThat(result).containsEntry("totalElements",1L);assertThat(rows(result.get("orders"))).singleElement().satisfies(row->assertThat(row).containsEntry("originalProductName","Double Diseño"));
+        var args=org.mockito.ArgumentCaptor.forClass(Object[].class);
+        verify(reads,times(1)).queryForList(contains("array_to_json(array_agg"),args.capture());
+        assertThat(args.getValue()).containsExactly("AB","0058");assertThat(originalArchive()).isEqualTo(before);verifyNoInteractions(audit);
+    }
     @Test void scopeAndFinancePermissionsAreAppliedBeforeReturningHistoricalGroupsOrGlobalCounts(){
         when(access.actor()).thenReturn(new CurrentUser(2L,"scoped","Scoped",false));financeRead=false;
         when(access.visibleSqlClause(anyString(),anyString())).thenAnswer(i->{String kind=i.getArgument(0),column=i.getArgument(1);return kind.equals("product")?column+"=48":kind.equals("item")?"false":"false";});

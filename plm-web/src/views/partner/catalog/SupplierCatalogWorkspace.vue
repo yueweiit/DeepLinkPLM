@@ -146,7 +146,10 @@ const photo = (row: CatalogStyle) => photos(row)[0]
     <div v-if="!supplierCode" key="suppliers" class="catalog-branch">
       <form class="catalog-search supplier-search" @submit.prevent="searchSuppliers"><el-input v-model="supplierQuery" :placeholder='uiText("搜索有款式的供应商")' :aria-label='uiText("搜索供应商")' clearable/><el-button native-type="submit">{{ uiText("查询") }}</el-button></form>
       <div class="catalog-scroll supplier-scroll" :aria-busy="loading">
-        <div v-if="suppliers?.content.length" class="supplier-choices"><button v-for="row in suppliers.content" :key="row.supplierCode" class="supplier-choice" type="button" :aria-label="uiText('{value0}，{value1}款，查看款式',{value0:(row.supplierName),value1:(row.styleCount)})" @click="chooseSupplier(row)"><span class="supplier-monogram" aria-hidden="true">{{ row.shortCode || row.supplierName.slice(0,1) }}</span><span class="supplier-choice-info"><strong>{{ row.supplierName }}</strong><small v-if="row.status==='inactive'">{{ uiText("资料已停用") }}</small></span><span class="supplier-style-count">{{ row.styleCount }}{{ uiText(" 款") }}<span aria-hidden="true">→</span></span></button></div>
+        <table v-if="suppliers?.content.length" class="supplier-table" :aria-label="uiText('合作选品供应商目录')">
+          <thead><tr><th>{{uiText('供应商全名')}}</th><th>{{uiText('简称')}}</th><th>{{uiText('供应商类型')}}</th><th class="numeric">{{uiText('目录产品')}}</th><th class="numeric">{{uiText('已选产品')}}</th><th>{{uiText('操作')}}</th></tr></thead>
+          <tbody><tr v-for="row in suppliers.content" :key="row.supplierCode"><td><button class="supplier-choice" type="button" :aria-label="uiText('{value0}，{value1}款，查看款式',{value0:row.supplierName,value1:row.styleCount})" @click="chooseSupplier(row)">{{row.supplierName}}</button><small v-if="row.status==='inactive'">{{uiText('资料已停用')}}</small></td><td :data-label="uiText('简称')">{{row.shortName||uiText('未填写')}}</td><td :data-label="uiText('类型')">{{row.businessCategories?.includes('partner_selection')?uiText('合作选品供应商'):uiText('待分类')}}</td><td class="numeric" :data-label="uiText('目录')">{{row.styleCount}} {{uiText('款')}}</td><td class="numeric selected-count" :data-label="uiText('已选')"><strong>{{row.selectedStyleCount??0}}</strong> {{uiText('款')}}</td><td><el-button link type="primary" @click="chooseSupplier(row)">{{uiText('查看产品')}}</el-button></td></tr></tbody>
+        </table>
         <el-empty v-else-if="!loading&&!error" :description='uiText("没有找到有款式的供应商")' :image-size="65"><el-button v-if="suppliers?.canWrite" @click="router.push({path:'/suppliers',query:{from:route.fullPath}})">{{ uiText("维护供应商资料") }}</el-button></el-empty>
         <p v-if="loading&&!suppliers" class="catalog-loading" role="status">{{ uiText("正在加载供应商…") }}</p>
       </div>
@@ -162,7 +165,7 @@ const photo = (row: CatalogStyle) => photos(row)[0]
           <div class="catalog-style-photo"><PartnerPhoto v-if="photo(row)" :id="photo(row)!.id" previewable :preview-files="photos(row)"/><span v-else class="catalog-no-photo">{{ uiText("暂无图片") }}</span><span v-if="photo(row)" class="catalog-photo-open" aria-hidden="true">{{ photos(row).length }}{{ uiText("图") }}</span></div>
           <div v-if="canWrite" class="catalog-style-check"><el-checkbox :model-value="checked.has(catalogKey(row))" :aria-label="uiText('选择{value0}',{value0:(row.name)})" :disabled="loading||selectionLoading||row.discarded" @change="check(row,Boolean($event))"/></div>
           <div class="catalog-style-name"><strong class="catalog-style-code">{{row.catalogStyleLabel||row.catalogStyleCode||uiText('款式号待补')}}</strong><el-button link type="primary" @click="open(row)">{{ row.name || uiText('未命名款式') }}</el-button><small v-if="row.supplierItemCode">{{ uiText("供方款号：") }}{{row.supplierItemCode}}</small><el-button v-if="row.productId" link @click="openProduct(row.productId)">{{ row.productCode || uiText('关联我方产品') }}</el-button></div>
-          <div class="catalog-style-model"><span class="catalog-cell-label">{{ uiText("手机型号") }}</span><strong>{{ catalogPhoneSummary(row) }}</strong><small v-if="row.phones?.length>2">{{ row.phoneMatchSummary?.codeGroupCount || row.phones.length }}{{ uiText(" 个型号编码组 · 详情查看") }}</small><small v-else-if="row.phones?.length">{{ row.phones.map(phone=>phone.phoneModelCode).filter(Boolean).join(' / ') }}</small></div>
+          <div class="catalog-style-model"><span class="catalog-cell-label">{{ uiText("手机型号") }}</span><strong>{{ catalogPhoneSummary(row) }}</strong><small v-if="row.phones?.length>2">{{ uiText("共 {value0} 个型号 · 查看明细",{value0:row.phones.length}) }}</small><small v-else-if="row.phones?.length">{{ row.phones.map(phone=>phone.phoneModelCode).filter(Boolean).join(' / ') }}</small></div>
           <div class="catalog-style-config"><span class="catalog-cell-label">{{ uiText("供应商颜色") }}</span><strong>{{ row.color || uiText('未提供') }}</strong></div>
           <div class="catalog-style-material"><span class="catalog-cell-label">{{ uiText("材质") }}</span><span v-if="!row.material||row.material.length<=12">{{row.material||uiText('未提供')}}</span><el-button v-else link type="primary" @click="open(row)">{{ uiText("查看材质") }}</el-button></div>
           <div v-if="canReadCost" class="catalog-style-price"><span class="catalog-cell-label">{{ uiText("报价") }}</span><strong>{{ supplierPriceValue(row) }}</strong></div>
@@ -197,12 +200,19 @@ const photo = (row: CatalogStyle) => photos(row)[0]
 .catalog-search,.catalog-list-toolbar,.catalog-list-toolbar>div,.catalog-pager{display:flex;gap:6px 10px;align-items:center;flex-wrap:wrap;flex:none;min-width:0}
 .catalog-search .el-input{flex:1;min-width:0}.supplier-search .el-input{max-width:480px}
 .catalog-scroll{flex:1;min-height:0;min-width:0;overflow-y:auto}
-.supplier-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:1px}
-.supplier-choice{display:flex;gap:10px;align-items:center;min-height:58px;min-width:0;box-sizing:border-box;border:1px solid var(--el-border-color-lighter);border-radius:6px;background:var(--el-bg-color);color:var(--el-text-color-primary);padding:10px;cursor:pointer;text-align:left}
-.supplier-choice:hover,.supplier-choice:focus-visible{border-color:var(--el-color-primary);background:var(--el-color-primary-light-9)}
-.supplier-monogram{display:grid;place-items:center;flex:none;width:36px;height:36px;border-radius:6px;background:var(--el-color-primary-light-9);color:var(--el-color-primary);font-size:15px;font-weight:700;overflow-wrap:anywhere}
-.supplier-choice-info{display:flex;flex:1;min-width:0;flex-direction:column;gap:3px}.supplier-choice-info strong{font-size:15px;overflow-wrap:anywhere}.supplier-choice-info small{font-size:12px;color:var(--el-text-color-secondary)}
-.supplier-style-count{display:flex;align-items:center;gap:8px;font-size:14px;flex:none;white-space:nowrap}.supplier-style-count>span{font-size:16px;color:var(--el-color-primary)}
+.supplier-scroll{overflow:auto;border:1px solid var(--el-border-color-lighter);border-radius:4px;background:var(--el-bg-color)}
+.supplier-table{width:100%;border-collapse:separate;border-spacing:0;font-size:12px;line-height:1.5;text-align:left}
+.supplier-table th{position:sticky;top:0;z-index:1;background:var(--el-fill-color-light);color:var(--el-text-color-secondary);font-weight:500;white-space:nowrap}
+.supplier-table th,.supplier-table td{padding:7px 12px;height:40px;box-sizing:border-box;border-bottom:1px solid var(--el-border-color-lighter)}
+.supplier-table th:first-child{width:38%}.supplier-table td:first-child{overflow-wrap:anywhere}.supplier-table td:not(:first-child){white-space:nowrap}.supplier-table tr:hover td{background:var(--el-fill-color-lighter)}
+.supplier-table .numeric{text-align:right;font-variant-numeric:tabular-nums}.selected-count strong{font-size:15px;color:var(--el-color-primary)}
+.supplier-choice{border:0;background:none;padding:0;color:var(--el-color-primary);font:inherit;text-align:left;cursor:pointer;overflow-wrap:anywhere}.supplier-choice:hover{text-decoration:underline}.supplier-table small{display:block;color:var(--el-text-color-secondary)}
+@container(max-width:760px){
+ .supplier-table,.supplier-table tbody{display:block}.supplier-table thead{display:none}
+ .supplier-table tbody tr{position:relative;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);padding:7px 10px;border-bottom:1px solid var(--el-border-color-lighter)}
+ .supplier-table td{border:0;height:auto;padding:3px 0;min-width:0}.supplier-table td:first-child{grid-column:1/-1;padding-right:72px}.supplier-table td:not(:first-child){white-space:normal}
+ .supplier-table td::before{content:attr(data-label);color:var(--el-text-color-secondary);margin-right:6px}.supplier-table .numeric{text-align:left}.supplier-table td:last-child{position:absolute;right:10px;top:7px}
+}
 .catalog-pager,.catalog-list-toolbar{justify-content:space-between;font-size:12px;color:var(--el-text-color-secondary)}.catalog-list-toolbar .el-checkbox{margin:0;height:28px}
 .catalog-style-list{border:1px solid var(--el-border-color-lighter);border-radius:6px;background:var(--el-bg-color);--catalog-columns:64px 30px minmax(0,1.5fr) minmax(0,1.7fr) minmax(0,1fr) minmax(0,1fr) minmax(0,.8fr) minmax(0,.65fr) minmax(0,.65fr) minmax(0,.9fr) 108px}
 .without-cost{--catalog-columns:64px 30px minmax(0,1.5fr) minmax(0,1.7fr) minmax(0,1fr) minmax(0,1fr) minmax(0,.65fr) minmax(0,.9fr) 108px}
@@ -247,13 +257,12 @@ const photo = (row: CatalogStyle) => photos(row)[0]
  .without-cost .catalog-style-config{grid-column:3/5}.without-cost .catalog-style-moq{grid-column:5/7}
  .readonly-catalog .catalog-style-row{grid-template-columns:44px 0 minmax(0,1.25fr) minmax(0,.7fr) minmax(0,.8fr) minmax(0,1fr) 52px}
  .readonly-catalog.without-cost .catalog-style-row{grid-template-columns:44px 0 repeat(4,minmax(0,1fr)) 52px}
- .supplier-choices{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @container(max-width:480px){
  .catalog-style-row,.without-cost .catalog-style-row,.readonly-catalog .catalog-style-row,.readonly-catalog.without-cost .catalog-style-row{grid-template-columns:44px 22px repeat(4,minmax(0,1fr));grid-template-rows:auto auto auto auto}
  .catalog-style-name{grid-column:3/-1;grid-row:1}.catalog-style-model{grid-column:3/-1;grid-row:2}
  .catalog-style-row>.catalog-style-config{grid-column:3;grid-row:3}.catalog-style-row>.catalog-style-price{grid-column:4;grid-row:3}.catalog-style-row>.catalog-style-currency{grid-column:5;grid-row:3}.catalog-style-row>.catalog-style-moq{grid-column:6;grid-row:3}
  .catalog-style-actions{grid-column:3/-1;grid-row:4;flex-direction:row;gap:8px}
- .supplier-choices{grid-template-columns:minmax(0,1fr)}.catalog-pager :deep(.el-pagination){max-width:100%;flex-wrap:wrap}
+ .catalog-pager :deep(.el-pagination){max-width:100%;flex-wrap:wrap}
 }
 </style>

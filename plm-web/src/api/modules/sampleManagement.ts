@@ -15,7 +15,7 @@ export const scanSample=async(code:string)=>unwrapResponse<SampleScanResult>(awa
 
 export const sampleShipmentOptions=async()=>unwrapResponse<{receivers:{id:number;name:string}[]}>(await request.get('/sample-shipments/options'))
 
-export const sampleIdentityBulkAction=async(action:'loan'|'return',data:Record<string,unknown>)=>unwrapResponse<{content:SampleIdentity[]}>(await request.post(`/sample-identities/bulk-actions/${action}`,data))
+export const sampleIdentityBulkAction=async(action:'loan'|'return'|'move',data:Record<string,unknown>)=>unwrapResponse<{content:SampleIdentity[]}>(await request.post(`/sample-identities/bulk-actions/${action}`,data))
 export interface SampleColorChoice {id:number;name:string;supplierColorCode?:string}
 export interface SampleColorPreview {sampleCode:string;version:number;before:{id:number;name:string};after:{id:number;name:string};targetIdentityId:number;targetSampleCode:string;batchCount:number}
 export const sampleIdentityColors=async(id:number)=>unwrapResponse<{content:SampleColorChoice[]}>(await request.get(`/sample-identities/${id}/colors`))

@@ -6,6 +6,9 @@ export interface CatalogSupplier {
   id?: number
   supplierCode: string
   supplierName: string
+  shortName?: string
+  businessCategories?: string[]
+  selectedStyleCount?: number
   shortCode?: string
   status?: string
   styleCount: number

@@ -2,6 +2,7 @@ package com.yuewei.plm.module.partner;
 
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.function.Function;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -58,8 +59,14 @@ public class PartnerCatalogStyles {
   }
  }
  public Map<String,Object> identity(String kind,long record,String row){
-  var found=store.jdbc.queryForList("select s.style_id as \"catalogStyleId\",s.code as \"catalogStyleCode\",s.supplier_code as \"supplierCode\",coalesce(p.short_code,'') as \"supplierShortCode\",x.fields::text from plm_partner_catalog_style_source x join plm_partner_catalog_style s on s.style_id=x.style_id join plm_supplier_profile p on p.supplier_code=s.supplier_code where x.source_kind=? and x.record_id=? and x.row_id=?::uuid",kind,record,row);
-  if(found.isEmpty())return Map.of();var result=new LinkedHashMap<>(found.get(0));result.putAll(decode(store.json,result.remove("fields")));String code=text(result.get("catalogStyleCode")),shortCode=text(result.remove("supplierShortCode"));result.put("catalogStyleLabel",shortCode.isEmpty()?code:shortCode+"-"+code);return result;
+  var key=new SourceKey(kind,record,UUID.fromString(row));return identities(List.of(key)).getOrDefault(key,Map.of());
+ }
+ private record SourceKey(String kind,long record,UUID row) {}
+ private Map<SourceKey,Map<String,Object>> identities(Collection<SourceKey> keys){
+  if(keys.isEmpty())return Map.of();
+  var requested=keys.stream().distinct().map(k->Map.of("source_kind",k.kind(),"record_id",k.record(),"row_id",k.row())).toList();
+  var found=store.jdbc.queryForList("select s.style_id as \"catalogStyleId\",s.code as \"catalogStyleCode\",s.supplier_code as \"supplierCode\",coalesce(p.short_code,'') as \"supplierShortCode\",x.fields::text,x.source_kind,x.record_id,x.row_id as source_row_id from jsonb_to_recordset(?::jsonb) requested(source_kind text,record_id bigint,row_id uuid) join plm_partner_catalog_style_source x on x.source_kind=requested.source_kind and x.record_id=requested.record_id and x.row_id=requested.row_id join plm_partner_catalog_style s on s.style_id=x.style_id join plm_supplier_profile p on p.supplier_code=s.supplier_code",encode(store.json,requested));
+  var result=new HashMap<SourceKey,Map<String,Object>>();for(var row:found){var value=new LinkedHashMap<>(row);var key=new SourceKey(text(value.remove("source_kind")),number(value.remove("record_id")),UUID.fromString(text(value.remove("source_row_id"))));value.putAll(decode(store.json,value.remove("fields")));String code=text(value.get("catalogStyleCode")),shortCode=text(value.remove("supplierShortCode"));value.put("catalogStyleLabel",shortCode.isEmpty()?code:shortCode+"-"+code);result.put(key,value);}return result;
  }
  public Map<String,Object> ensure(String kind,long record,Map<String,Object> row,long existingStyle,String reason,String request){
   require(Set.of("quote","selection").contains(kind)&&PartnerSelectionService.validRowId(text(row.get("rowId"))),"目录来源身份无效");
@@ -78,7 +85,19 @@ public class PartnerCatalogStyles {
   return identity(kind,record,text(row.get("rowId")));
  }
  public Map<String,Object> enrich(String kind,long record,Map<String,Object> source){
-  var result=PartnerCatalogFields.project(source);var id=identity(kind,record,text(source.get("rowId")));
+  return withIdentity(source,identity(kind,record,text(source.get("rowId"))));
+ }
+ public List<Map<String,Object>> enrichAll(String kind,long record,List<Map<String,Object>> sources){
+  return enrichSources(sources,row->new SourceKey(kind,record,UUID.fromString(text(row.get("rowId")))));
+ }
+ public List<Map<String,Object>> enrichAll(List<Map<String,Object>> sources){
+  return enrichSources(sources,row->new SourceKey(text(row.get("sourceKind")),number(row.get("recordId")),UUID.fromString(text(row.get("rowId")))));
+ }
+ private List<Map<String,Object>> enrichSources(List<Map<String,Object>> sources,Function<Map<String,Object>,SourceKey> key){
+  var identities=identities(sources.stream().map(key).toList());return sources.stream().map(row->withIdentity(row,identities.getOrDefault(key.apply(row),Map.of()))).toList();
+ }
+ private Map<String,Object> withIdentity(Map<String,Object> source,Map<String,Object> id){
+  var result=PartnerCatalogFields.project(source);
   if(!id.isEmpty()){for(String key:List.of("catalogStyleId","catalogStyleCode","catalogStyleLabel"))result.put(key,id.get(key));
    // Historical normalization lives on the identity link; source JSON/row version remains intact.
    for(String key:PartnerCatalogFields.FIELDS)if(!key.equals("currencySource")&&!source.containsKey(key))if(id.containsKey(key))result.put(key,id.get(key));

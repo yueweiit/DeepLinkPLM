@@ -1,5 +1,37 @@
 import type { CatalogIdentity, CatalogStyle } from '@/types/partnerCatalog'
 import { phoneSeries, selectionSearchTerm, unavailablePhone } from '@/components/PhoneModelMultiSelect/selection'
+import type { CompatiblePhone } from '@/types/molds'
+import { t } from '@/locales'
+
+type SummaryPhone = Partial<CompatiblePhone> & { modelName?: string; displayName?: string }
+
+/** A display of the supplied members only; a generation span never claims every variant is selected. */
+export function catalogPhoneGroups<P extends SummaryPhone>(phones: P[]) {
+  const groups = new Map<string, { name: string; generations: Set<number>; phones: P[] }>()
+  for (const phone of phones) {
+    const name = selectionSearchTerm(phone.displayName || phone.modelName || '')
+    const apple = name.match(/\biphone\s*(\d{1,2})(?!\d)/i)
+    const samsung = /samsung|三星|\bsm\b/i.test([phone.brandName, name].join(' ')) && name.match(/\bs\s*(\d{1,2})(?!\d)/i)
+    const key = apple ? 'iPhone' : samsung ? 'Samsung Galaxy S' : phone.brandName || t('其他型号')
+    const group = groups.get(key) || { name: key, generations: new Set<number>(), phones: [] }
+    if (phone.phoneModelId !== undefined && group.phones.some(item => item.phoneModelId === phone.phoneModelId)) continue
+    const generation = apple?.[1] || (samsung && samsung[1])
+    if (generation) group.generations.add(Number(generation))
+    group.phones.push(phone)
+    groups.set(key, group)
+  }
+  return [...groups.values()].map(group => {
+    const generations = [...group.generations].sort((a, b) => a - b), spans: string[] = []
+    for (let start = 0; start < generations.length;) {
+      let end = start
+      while (end + 1 < generations.length && generations[end + 1] === generations[end] + 1) end++
+      spans.push(end - start >= 2 ? `${generations[start]}—${generations[end]}` : generations.slice(start, end + 1).join('、'))
+      start = end + 1
+    }
+    const family = group.name === 'Samsung Galaxy S' ? group.name + spans.map(span => span.replace('—', '—S')).join('、S') : `${group.name} ${spans.join('、')}`
+    return { name: group.name, label: spans.length ? t('{value0} 系列', { value0: family }) : group.name, phones: group.phones }
+  })
+}
 
 export const catalogKey = (row: CatalogIdentity) => `${row.sourceKind}:${row.recordId}:${row.rowId}`
 export const catalogIdentity = (row: CatalogIdentity): CatalogIdentity => ({ sourceKind: row.sourceKind, recordId: row.recordId, rowId: row.rowId, rowVersion: row.rowVersion, recordVersion: row.recordVersion })
@@ -39,10 +71,10 @@ export function catalogPhoneFamilies(row: Pick<CatalogStyle, 'phones' | 'phoneMo
 }
 
 /** Names and codes come from the shared phone records, never a second selector. */
-export function catalogPhoneSummary(row: Pick<CatalogStyle,'phoneScopeMode'> & {phones?:{modelName?:string;displayName?:string}[];modelText?:string}): string {
+export function catalogPhoneSummary(row: Pick<CatalogStyle,'phoneScopeMode'> & {phones?:SummaryPhone[];modelText?:string}): string {
   const phones = row.phones || []
-  if (phones.length > 0 && phones.length <= 2) return phones.map(phone => phone.modelName||phone.displayName).filter(Boolean).join('、')||row.modelText||'型号资料待加载'
-  if (phones.length > 2) return phones[0].modelName||phones[0].displayName||'型号资料待加载'
+  if (phones.length > 0 && phones.length <= 2) return phones.map(phone => phone.displayName||phone.modelName).filter(Boolean).join('、')||row.modelText||'型号资料待加载'
+  if (phones.length > 2) return catalogPhoneGroups(phones).map(group => group.label).join(' / ')
   return row.modelText || (row.phoneScopeMode==='unspecified'?'供应商未注明型号':'型号资料待关联')
 }
 

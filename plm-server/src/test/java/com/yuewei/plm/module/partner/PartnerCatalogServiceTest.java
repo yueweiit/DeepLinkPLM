@@ -52,7 +52,7 @@ class PartnerCatalogServiceTest {
         when(access.visibleSqlClause(eq("supplier_profile"), anyString())).thenReturn("p.supplier_id=3");
         when(access.visibleSqlClause(eq("file"), anyString())).thenReturn("a.attachment_id=7");
         when(permissions.costs()).thenReturn(true);
-        when(jdbc.queryForList(startsWith("select s.style_id as"),anyString(),anyLong(),anyString())).thenReturn(List.of(values("catalogStyleId",1L,"catalogStyleCode","CP-000001","supplierCode","XD","supplierShortCode","XD","fields","{}")));
+        identities(values("catalogStyleId",1L,"catalogStyleCode","CP-000001","supplierCode","XD","supplierShortCode","XD","fields","{}"));
         when(permissions.engineering()).thenReturn(true);
         when(suppliers.requireSupplier("XD")).thenReturn(profile());
         when(phones.resolveAll(anyList())).thenAnswer(call -> call.getArgument(0));
@@ -64,6 +64,12 @@ class PartnerCatalogServiceTest {
     }
 
     private Map<String, Object> profile() { return Map.of("supplierCode", "XD", "supplierName", "熊大"); }
+    private void identities(Map<String,Object> data){
+        when(jdbc.queryForList(startsWith("select s.style_id as"),anyString())).thenAnswer(call->{
+            var requested=store.json.readTree(call.getArgument(1,String.class));var result=new ArrayList<Map<String,Object>>();
+            for(var key:requested){var row=new LinkedHashMap<>(data);row.put("source_kind",key.path("source_kind").asText());row.put("record_id",key.path("record_id").asLong());row.put("source_row_id",key.path("row_id").asText());result.add(row);}return result;
+        });
+    }
     private Map<String, Object> values(Object... entries) {
         var result = new LinkedHashMap<String, Object>();
         for (int i = 0; i < entries.length; i += 2) result.put(text(entries[i]), entries[i + 1]);
@@ -116,7 +122,7 @@ class PartnerCatalogServiceTest {
         assertTrue(sql.getValue().contains("not exists(select 1 from plm_partner_event"));
         assertTrue(sql.getValue().contains("e.data->'createdRowIds'"));
         var countSql = ArgumentCaptor.forClass(String.class);
-        verify(jdbc).queryForObject(countSql.capture(), eq(Long.class), eq(new Object[] {"%熊大%", "%熊大%", "%熊大%"}));
+        verify(jdbc).queryForObject(countSql.capture(), eq(Long.class), eq(new Object[] {"%熊大%", "%熊大%", "%熊大%", "%熊大%"}));
         String suppliersFrom = "from plm_supplier_profile p join catalog_suppliers c on c.supplier_code=p.supplier_code where ";
         assertTrue(sql.getValue().contains(suppliersFrom));
         assertTrue(countSql.getValue().contains(suppliersFrom));
@@ -178,7 +184,7 @@ class PartnerCatalogServiceTest {
             transactions = new DataSourceTransactionManager(source);
             transaction = transactions.getTransaction(new DefaultTransactionDefinition());
             jdbc.execute("""
-                create temp table plm_supplier_profile(supplier_id bigint,supplier_code text,supplier_name text,short_code text,status text,deleted_flag int default 0);
+                create temp table plm_supplier_profile(supplier_id bigint,supplier_code text,supplier_name text,short_code text,status text,deleted_flag int default 0,data jsonb default '{}');
                 create temp table plm_partner_record(record_id bigint,kind text,code text,name text,status text default 'draft',version bigint,updated_at timestamptz default now(),supplier_code text,deleted_flag int default 0,data jsonb default '{}');
                 create temp table plm_partner_selection_row(record_id bigint,row_id uuid,row_version bigint,sort_order bigint,data jsonb,confirmed boolean default false);
                 create temp table plm_partner_quote_line(record_id bigint,line_id uuid,row_version bigint,sort_order bigint,data jsonb);
@@ -235,6 +241,79 @@ class PartnerCatalogServiceTest {
 
         @AfterEach void rollback() {
             if (transaction != null && !transaction.isCompleted()) transactions.rollback(transaction);
+        }
+
+        @Test void identityLookupIsBatchedAndKeepsInputAndMissingSourceSemantics(){
+            jdbc.update("insert into plm_partner_catalog_style values(1,'CP-000001','QUOTE')");
+            for(int count:List.of(0,1,50)){
+                var input=new ArrayList<Map<String,Object>>();
+                for(int i=0;i<count;i++){
+                    String id=UUID.randomUUID().toString();input.add(values("rowId",id,"name","Row "+i,"currency","","unitPrice","0","confirmationSnapshot",Map.of("name","Recorded")));
+                    if(count==1||i<count-1)jdbc.update("insert into plm_partner_catalog_style_source values('quote',10,?::uuid,1,'{\"currency\":\"USD\",\"currencySource\":\"supplier\"}')",id);
+                }
+                String before=encode(store.json,input);var reads=spy(jdbc);
+                var styles=new PartnerCatalogStyles(new PartnerStore(reads,store.json,scopedAccess,mock(OperationLogService.class)));
+                var result=styles.enrichAll("quote",10,input);
+                assertEquals(count,result.size());assertEquals(before,encode(store.json,input));
+                if(count==0)verifyNoInteractions(reads);
+                else{
+                    verify(reads,times(1)).queryForList(contains("jsonb_to_recordset"),anyString());
+                    assertEquals("CP-000001",result.get(0).get("catalogStyleCode"));assertEquals("BQ-CP-000001",result.get(0).get("catalogStyleLabel"));
+                    assertEquals("USD",result.get(0).get("currency"));assertEquals("supplier",result.get(0).get("currencySource"));
+                    assertEquals(Map.of("name","Recorded"),result.get(0).get("confirmationSnapshot"));
+                    if(count>1)assertFalse(result.get(count-1).containsKey("catalogStyleId"));
+                    verify(reads,never()).update(anyString(),any(Object[].class));
+                }
+            }
+        }
+
+        @Test void batchedIdentityKeepsSourceKindRecordAndCanonicalUuidSeparate(){
+            String id=UUID.randomUUID().toString();
+            jdbc.execute("insert into plm_partner_catalog_style values(1,'CP-000001','QUOTE'),(2,'CP-000002','QUOTE'),(3,'CP-000003','QUOTE')");
+            jdbc.update("insert into plm_partner_catalog_style_source values('quote',10,?::uuid,1,'{}'),('selection',10,?::uuid,2,'{}'),('quote',20,?::uuid,3,'{}')",id,id,id);
+            var input=List.of(values("sourceKind","quote","recordId",10L,"rowId",id.toUpperCase(Locale.ROOT)),values("sourceKind","selection","recordId",10L,"rowId",id),values("sourceKind","quote","recordId",20L,"rowId",id));
+            var reads=spy(jdbc);var styles=new PartnerCatalogStyles(new PartnerStore(reads,store.json,scopedAccess,mock(OperationLogService.class)));
+            assertEquals(List.of("CP-000001","CP-000002","CP-000003"),styles.enrichAll(input).stream().map(row->row.get("catalogStyleCode")).toList());
+            verify(reads,times(1)).queryForList(contains("jsonb_to_recordset"),anyString());
+            assertEquals("CP-000001",styles.identity("quote",10,id.toUpperCase(Locale.ROOT)).get("catalogStyleCode"));
+        }
+
+        @Test void supplierListShowsFullNameAndShortNameAndCountsSelectedStylesOnceAcrossModelsAndSheets(){
+            jdbc.execute("update plm_supplier_profile set supplier_name='测试完整供应商有限公司',data='{\"shortName\":\"供方简称\",\"businessCategories\":[\"partner_selection\"]}' where supplier_code='QUOTE'");
+            jdbc.execute("insert into plm_partner_record(record_id,kind,code,name,version,data) values(101,'selection','SL-101','Selected',1,'{\"purpose\":\"my_selection\"}'),(102,'selection','SL-102','Other selection',1,'{\"purpose\":\"my_selection\"}')");
+            for(long id:List.of(101L,101L,102L)){
+                String row=selection(id,"QUOTE",false);
+                jdbc.update("update plm_partner_selection_row set data=data||'{\"catalogStyleId\":7,\"phoneModelIds\":[1,2,3]}' where row_id=?::uuid",row);
+            }
+            String cancelled=selection(101,"QUOTE",true),hidden=selection(50,"QUOTE",false);
+            jdbc.update("update plm_partner_selection_row set data=data||'{\"catalogStyleId\":8}' where row_id in (?::uuid,?::uuid)",cancelled,hidden);
+            for(int i=0;i<2;i++){String manual=selection(101,"QUOTE",false);jdbc.update("update plm_partner_selection_row set data=data||'{\"catalogStyleId\":0}' where row_id=?::uuid",manual);}
+            var result=catalog.suppliers(Map.of("q","供方简称"));
+            assertEquals(1L,result.get("totalElements"));var row=maps(result.get("content")).get(0);
+            assertEquals("测试完整供应商有限公司",row.get("supplierName"));assertEquals("供方简称",row.get("shortName"));
+            assertEquals(List.of("partner_selection"),row.get("businessCategories"));assertEquals(3L,number(row.get("selectedStyleCount")));
+        }
+
+        @Test void selectionReceiptSummaryCountsPhysicalReceiptsNotPlansTransitOrUndoneReceipts(){
+            jdbc.execute("alter table plm_partner_event add column event_id bigserial");
+            jdbc.execute("insert into plm_partner_record(record_id,kind,code,name,version,data) values(101,'selection','SL-101','Selected',1,'{\"purpose\":\"my_selection\"}')");
+            String first=selection(101,"QUOTE",false),sameStyle=selection(101,"QUOTE",false),unreceived=selection(101,"QUOTE",false);
+            jdbc.update("update plm_partner_selection_row set data=data||'{\"catalogStyleId\":7,\"sampleQty\":999}' where row_id in (?::uuid,?::uuid)",first,sameStyle);
+            jdbc.update("update plm_partner_selection_row set data=data||'{\"catalogStyleId\":8,\"sampleQty\":500}' where row_id=?::uuid",unreceived);
+            receipt(201,first,3);receipt(202,sameStyle,2);receipt(203,unreceived,8);receipt(50,unreceived,50);
+            jdbc.execute("insert into plm_partner_event(record_id,action,data) select 203,'undo',jsonb_build_object('targetEventId',event_id) from plm_partner_event where record_id=203 and action='receive'");
+            jdbc.update("insert into plm_partner_event(record_id,action,data) values(201,'dispatch','{\"qty\":3}'),(201,'dispatch_receive','{\"qty\":3}')");
+            var scopedStore=new PartnerStore(jdbc,new ObjectMapper(),scopedAccess,mock(OperationLogService.class));
+            var summary=new PartnerSelectionRows(scopedStore).summaries(List.of(101L)).get(101L);
+            assertEquals(2L,number(summary.get("selectedStyleCount")));assertEquals(1L,number(summary.get("receivedStyleCount")));assertEquals(5L,number(summary.get("receivedQuantity")));
+            var service=new PartnerSelectionService(scopedStore,permissions,suppliers,mock(PartnerProductService.class),materials);
+            var page=service.page(Map.of("size","1"));var shown=maps(page.get("content")).get(0);
+            assertEquals(101L,number(shown.get("id")));assertEquals(5L,number(shown.get("receivedQuantity")));assertEquals(1,maps(page.get("content")).size());
+        }
+
+        private void receipt(long id,String selectionRow,long qty){
+            jdbc.update("insert into plm_partner_record(record_id,kind,code,name,version,data) values(?,'sample',?,'Received',1,?::jsonb)",id,"SP-"+id,encode(store.json,Map.of("selectionId",101L,"selectionRowId",selectionRow,"receivedQty",qty)));
+            jdbc.update("insert into plm_partner_event(record_id,action,data) values(?,'receive',?::jsonb)",id,encode(store.json,Map.of("qty",qty)));
         }
 
         private void renameFixture(){
@@ -778,7 +857,7 @@ class PartnerCatalogServiceTest {
         var scope=mock(PartnerCatalogPhoneResolver.ResolutionScope.class);when(phones.newScope()).thenReturn(scope);when(scope.resolveAll(anyList())).thenAnswer(call->call.getArgument(0));
         when(suppliers.shortCodeHistory("XD")).thenReturn(List.of(" OLD2 "));
         var source=values("source_kind","selection","record_id",9L,"source_code","SL-9","source_name","原资料","record_version",4L,"row_id",rowId,"row_version",1L,"supplier_code","XD","confirmed",false,"row_data",encode(store.json,Map.of("name","原款")));
-        when(jdbc.queryForList(contains("select s.style_id as"),anyString(),anyLong(),anyString())).thenReturn(List.of(values("catalogStyleId",8L,"catalogStyleCode","CP-000008","supplierCode","XD","supplierShortCode","NEW2","fields","{}")));
+        identities(values("catalogStyleId",8L,"catalogStyleCode","CP-000008","supplierCode","XD","supplierShortCode","NEW2","fields","{}"));
         for(String keyword:List.of("OLD2-CP-000008","FOREIGN-CP-000008")){
             when(jdbc.queryForList(startsWith("select c.*,c.data::text"),any(Object[].class))).thenReturn(List.of(source),List.of());
             var result=catalog.styles(Map.of("supplierCode","XD","keyword",keyword));assertEquals(keyword.startsWith("OLD2")?1L:0L,result.get("totalElements"));
@@ -801,15 +880,18 @@ class PartnerCatalogServiceTest {
         assertEquals(List.of(8L), maps(result.get("sourceOriginals")).stream().map(file -> number(file.get("id"))).toList());
         var lookup = ArgumentCaptor.forClass(String.class);
         var chosen = ArgumentCaptor.forClass(String.class);
-        verify(jdbc).queryForList(lookup.capture(), chosen.capture());
-        assertTrue(lookup.getValue().contains("jr.row_id=c.row_id"));
-        assertTrue(lookup.getValue().contains("j.record_id=c.record_id"));
-        assertTrue(lookup.getValue().contains("j.kind='import' and j.status='committed'"));
-        assertTrue(lookup.getValue().contains("f.record_id=j.record_id and f.attachment_id=j.source_attachment_id"));
-        assertTrue(lookup.getValue().contains("a.deleted_flag=0"));
-        assertTrue(lookup.getValue().contains("a.attachment_id=7"));
-        assertTrue(chosen.getValue().contains(rowId));
-        assertFalse(chosen.getValue().contains(otherRow));
+        verify(jdbc,atLeastOnce()).queryForList(lookup.capture(), chosen.capture());
+        int originalLookup=java.util.stream.IntStream.range(0,lookup.getAllValues().size())
+            .filter(index->lookup.getAllValues().get(index).startsWith("select distinct c.record_id,c.row_id::text,j.source_attachment_id")).findFirst().orElseThrow();
+        String sql=lookup.getAllValues().get(originalLookup), chosenRows=chosen.getAllValues().get(originalLookup);
+        assertTrue(sql.contains("jr.row_id=c.row_id"));
+        assertTrue(sql.contains("j.record_id=c.record_id"));
+        assertTrue(sql.contains("j.kind='import' and j.status='committed'"));
+        assertTrue(sql.contains("f.record_id=j.record_id and f.attachment_id=j.source_attachment_id"));
+        assertTrue(sql.contains("a.deleted_flag=0"));
+        assertTrue(sql.contains("a.attachment_id=7"));
+        assertTrue(chosenRows.contains(rowId));
+        assertFalse(chosenRows.contains(otherRow));
         var attachmentArgs = ArgumentCaptor.forClass(Object[].class);
         verify(jdbc).queryForList(contains("from plm_partner_file f join plm_attachment"), attachmentArgs.capture());
         assertArrayEquals(new Object[] {9L, 8L}, attachmentArgs.getValue());
@@ -949,6 +1031,21 @@ class PartnerCatalogServiceTest {
         sourceRow("XD");String id=UUID.randomUUID().toString();var saved=new LinkedHashMap<String,Map<String,Object>>();saved.put(id,existingStyleDraft(id));writableTarget(saved,new java.util.concurrent.atomic.AtomicLong(3));
         var command=item(9L,"XD");var preview=catalog.additionPreview(command);assertEquals(true,preview.get("canAdd"));assertEquals("merge",maps(preview.get("items")).get(0).get("action"));command.put("previewToken",preview.get("previewToken"));catalog.addToSelection(command);
         var update=ArgumentCaptor.forClass(Map.class);verify(selections).patchCatalogRows(eq(10L),update.capture());var op=maps(update.getValue().get("operations")).get(0);assertEquals(id,op.get("rowId"));assertEquals(2L,op.get("rowVersion"));var changes=map(op.get("changes"));assertEquals(List.of(12L),changes.get("phoneModelIds"));assertFalse(changes.containsKey("sampleQty"));assertFalse(changes.containsKey("catalogSourceSnapshot"));verifyNoInteractions(materials);
+    }
+
+    @Test void firstPhoneChoiceKeepsManualColourPriceNotesAndQuantityOnTheSameStyleRow(){
+        sourceRow("XD");String id=UUID.randomUUID().toString();var saved=new LinkedHashMap<String,Map<String,Object>>();var previous=existingStyleDraft(id);var data=decode(store.json,previous.get("data"));map(data.get("catalogSourceSnapshot")).put("recordVersion",3L);data.put("color","业务员填写的颜色");data.put("unitPrice","12.50");data.put("notes","业务员补充的选品要求");previous.put("data",encode(store.json,data));saved.put(id,previous);writableTarget(saved,new java.util.concurrent.atomic.AtomicLong(3));
+        when(jdbc.queryForList(contains("from plm_partner_selection_row where record_id=? and row_id=?::uuid"),eq(9L),eq(rowId))).thenReturn(List.of(values("row_id",rowId,"row_version",1L,"confirmed",false,"row_data",encode(store.json,values("name","熊大款","supplierCode","XD","phoneModelIds",List.of(12L,18L),"refs",List.of())))));
+        var command=item(9L,"XD");maps(command.get("items")).get(0).put("phoneModelIds",List.of(12L,18L));var preview=catalog.additionPreview(command);assertEquals(true,preview.get("canAdd"));assertEquals("merge",maps(preview.get("items")).get(0).get("action"));command.put("previewToken",preview.get("previewToken"));var result=catalog.addToSelection(command);
+        assertEquals(0L,number(result.get("addedCount")));assertEquals(1L,number(result.get("updatedCount")));assertEquals(List.of(id),result.get("rowIds"));var update=ArgumentCaptor.forClass(Map.class);verify(selections).patchCatalogRows(eq(10L),update.capture());var operation=maps(update.getValue().get("operations")).get(0);assertEquals(id,operation.get("rowId"));assertEquals(2L,operation.get("rowVersion"));var changes=map(operation.get("changes"));assertEquals(List.of(12L,18L),changes.get("phoneModelIds"));assertEquals(Set.of("phoneModelIds","modelText","selectedPairs","catalogSourceSnapshot"),changes.keySet());assertEquals(4L,map(changes.get("catalogSourceSnapshot")).get("recordVersion"));assertEquals(3L,map(data.get("catalogSourceSnapshot")).get("recordVersion"));assertFalse(map(changes.get("catalogSourceSnapshot")).containsKey("selectionIntent"));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"confirmed","already_chosen","cancelled"})
+    void aNewSourceVersionDoesNotRebaseConfirmedChosenOrCancelledSelections(String state){
+        sourceRow("XD");String id=UUID.randomUUID().toString();var saved=new LinkedHashMap<String,Map<String,Object>>();var previous=existingStyleDraft(id);var data=decode(store.json,previous.get("data"));map(data.get("catalogSourceSnapshot")).put("recordVersion",3L);
+        switch(state){case "confirmed"->previous.put("confirmed",true);case "already_chosen"->data.put("phoneModelIds",List.of(12L));case "cancelled"->{data.put("discarded",true);data.put("selected",false);}default->throw new AssertionError(state);}
+        previous.put("data",encode(store.json,data));saved.put(id,previous);writableTarget(saved,new java.util.concurrent.atomic.AtomicLong(3));assertEquals(false,catalog.additionPreview(item(9L,"XD")).get("canAdd"));assertEquals(previous,saved.get(id));verify(selections,never()).patchCatalogRows(anyLong(),anyMap());verifyNoInteractions(materials);
     }
 
     @Test void anExplicitZeroCanFillAnUnplannedExistingStyleWithoutBeingLostAsAnEmptyValue(){

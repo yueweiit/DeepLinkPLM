@@ -180,11 +180,17 @@ describe('supplier-first product catalog', () => {
     expect(api.catalogStyles).not.toHaveBeenCalled()
   })
 
-  it('keeps a single page of supplier choices compact, with readable names and style counts instead of technical IDs', async () => {
-    const choices = ['熊大', '蓝之碧', '赛伯乐', '品俊', '佛山莫凡科技', '热点科技'].map((supplierName, index) => ({ ...supplier, supplierName, supplierCode: `SUP-PRIVATE-${index}`, shortCode: index === 0 ? 'XD' : '', styleCount: [19, 122, 83, 43, 15, 23][index] }))
+  it('lists supplier full names, abbreviations, classifications and selected style counts without technical IDs or cards', async () => {
+    const choices = ['熊大', '蓝之碧', '赛伯乐', '品俊', '佛山莫凡科技', '热点科技'].map((shortName, index) => ({ ...supplier, supplierName:`${shortName}有限公司`,shortName,businessCategories:['partner_selection'],selectedStyleCount:index, supplierCode: `SUP-PRIVATE-${index}`, shortCode: index === 0 ? 'XD' : '', styleCount: [19, 122, 83, 43, 15, 23][index] }))
     api.catalogSuppliers.mockResolvedValue(page(choices))
     await start()
     expect(wrapper.findAll('.supplier-choice')).toHaveLength(6)
+    expect(wrapper.findAll('.supplier-table th').map(cell=>cell.text())).toEqual(['供应商全名','简称','供应商类型','目录产品','已选产品','操作'])
+    expect(wrapper.findAll('.supplier-table tbody tr').map(row=>row.get('.selected-count').text())).toEqual(['0 款','1 款','2 款','3 款','4 款','5 款'])
+    expect(wrapper.findAll('.supplier-table tbody tr').every(row=>row.text().includes('合作选品供应商'))).toBe(true)
+    expect(wrapper.get('.supplier-table tbody tr').text()).toContain('熊大有限公司')
+    expect(wrapper.get('.supplier-table tbody tr').findAll('td')[1].text()).toBe('熊大')
+    expect(wrapper.find('.supplier-choices').exists()).toBe(false)
     expect(wrapper.text()).toContain('共 6 家有款式的供应商')
     expect(wrapper.text()).not.toContain('SUP-PRIVATE-')
     expect(wrapper.text()).not.toContain('先选择供应商，再查看款式')

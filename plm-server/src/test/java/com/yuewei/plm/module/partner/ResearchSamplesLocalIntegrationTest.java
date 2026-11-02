@@ -19,14 +19,14 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /** Full migrated local clone, one rollback transaction per scenario. No real OA or stock posting. */
-@EnabledIfEnvironmentVariable(named="PLM_SAMPLE_DOMAINS_TEST_URL",matches="jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/plm_sample_domains_qa")
+@EnabledIfEnvironmentVariable(named="PLM_SAMPLE_DOMAINS_TEST_URL",matches="jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/(?:plm_sample_domains_qa|plm_sales_policy_qa)")
 class ResearchSamplesLocalIntegrationTest {
     private JdbcTemplate jdbc;private DataSourceTransactionManager manager;private TransactionStatus tx;
     private PartnerStore store;private PartnerSampleService samples;private ResearchSampleSources sources;private PartnerQueryService query;
     private PilotAccessService access;private long phone,model,research,otherModel,set,otherSet;private String prefix;
     private Map<String,Object> values(Object... pairs){var d=new LinkedHashMap<String,Object>();for(int i=0;i<pairs.length;i+=2)d.put(text(pairs[i]),pairs[i+1]);return d;}
     @BeforeEach void setup(){
-        var ds=new DriverManagerDataSource(System.getenv("PLM_SAMPLE_DOMAINS_TEST_URL")+"?currentSchema=plm","postgres","");jdbc=new JdbcTemplate(ds);manager=new DataSourceTransactionManager(ds);tx=manager.getTransaction(new DefaultTransactionDefinition());
+        var ds=new DriverManagerDataSource(System.getenv("PLM_SAMPLE_DOMAINS_TEST_URL")+"?currentSchema=plm","postgres",System.getenv().getOrDefault("PLM_SAMPLE_DOMAINS_TEST_PASSWORD",""));jdbc=new JdbcTemplate(ds);manager=new DataSourceTransactionManager(ds);tx=manager.getTransaction(new DefaultTransactionDefinition());
         prefix="QA样品域-"+UUID.randomUUID().toString().substring(0,8);long base=9_200_000_000L+new Random().nextInt(100_000_000);research=base;model=base+1;otherModel=base+2;
         phone=jdbc.queryForObject("select id from plm_phone_model_member where status='enabled' order by id limit 1",Long.class);
         for(long id:List.of(research,model,otherModel))jdbc.update("insert into plm_product(product_id,product_code,product_name,product_type,version_no,created_by,updated_by,project_kind,project_registered_at,development_mode,phone_model_member_id,parent_product_id) values(?,?,?,?,?,'qa','qa',?,now(),?,?,?)",id,"QA-"+id,prefix+id,id==research?"product_line":"model_variant","V1",id==research?"product_research":"model_extension",id==research?"launch_v1":null,phone,id==research?null:research);
@@ -50,6 +50,19 @@ class ResearchSamplesLocalIntegrationTest {
     private Map<String,Object> trial(){var d=receipt("trial","pc");d.putAll(values("projectId",model,"moldSetId",set,"trialBatch","T0"));return d;}
     private Map<String,Object> modelReceipt(){var d=receipt("model","");d.remove("sampleKind");d.putAll(values("modelProductId",research,"phoneModelId",phone,"provenance",prefix+"产品实收凭据"));return d;}
     private Map<String,String> scope(String domain){return Map.of("domain",domain,"keyword",prefix,"size","50");}
+
+    @Test void omittedCustodianDefaultsToTheLoggedInUserAcrossModelAndResearchSources(){
+        var researchReceipt=receipt("self","prototype");researchReceipt.putAll(values("projectId",research,"roundId",round(true)));
+        for(var input:List.of(modelReceipt(),trial(),researchReceipt)){input.remove("ownerName");var saved=samples.create(input);assertEquals(store.access.actorId(),number(saved.get("ownerUserId")));assertEquals(store.access.actor().displayName(),saved.get("ownerName"));assertEquals(3L,number(map(saved.get("balances")).get("onhand")));}
+    }
+    @Test void selectedSystemCustodianUsesServerNameAndDirectReceiptRetrySurvivesAccountDeactivation(){
+        long keeper=store.access.actorId();jdbc.update("update sys_user set display_name=? where user_id=?",prefix+"真实保管",keeper);var input=modelReceipt();input.put("ownerUserId",keeper);input.put("ownerName","伪造客户端姓名");String raw=signature(store.json,input);var saved=samples.create(input);assertEquals(raw,signature(store.json,input));assertEquals(keeper,number(saved.get("ownerUserId")));assertEquals(prefix+"真实保管",saved.get("ownerName"));
+        jdbc.update("update sys_user set status='inactive',display_name='后来改名' where user_id=?",keeper);var retried=samples.create(input);assertEquals(saved.get("id"),retried.get("id"));assertEquals(saved.get("ownerName"),retried.get("ownerName"));assertEquals(3L,number(map(retried.get("balances")).get("onhand")));input.put("requestId",UUID.randomUUID().toString());assertThrows(RuntimeException.class,()->samples.create(input));
+    }
+    @Test void legacyNameOnlyReceiptsKeepTheirHistoricalCustodianWithoutGuessingAUserId(){
+        var input=modelReceipt();input.put("ownerName","旧表保管人原文");var saved=samples.create(input);assertEquals("旧表保管人原文",saved.get("ownerName"));assertFalse(saved.containsKey("ownerUserId"));
+    }
+
     @Test void realDevicesKeepIdentityAndRepeatedReceiptDoesNotAddStock(){
         var input=device();var first=samples.create(input);var repeated=samples.create(input);assertEquals(first.get("id"),repeated.get("id"));assertEquals(3L,number(map(repeated.get("balances")).get("onhand")));assertEquals("model",first.get("sampleDomain"));assertEquals("原物料-0185",first.get("assetNumber"));assertEquals(1,maps(first.get("events")).size());
         input.put("requestId",UUID.randomUUID().toString());input.put("sampleKind","dummy");var dummy=samples.create(input);assertEquals("dummy",dummy.get("sampleKind"));assertNotEquals(first.get("id"),dummy.get("id"));

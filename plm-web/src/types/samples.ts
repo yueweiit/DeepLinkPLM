@@ -1,5 +1,6 @@
 export type SampleDomain = 'model' | 'research' | 'partner' | 'unclassified'
 export type SampleKind = 'phone' | 'dummy' | 'pc' | 'tpu' | 'case' | 'prototype' | 'supplier' | 'unspecified'
+export interface SampleCustodianOption {userId:number;name:string;departmentName?:string}
 export interface ResearchSampleProject {id:number;code:string;name:string;projectKind?:string;modelProductId?:number;phoneModels?:import('@/components/PhoneObjectSelect/types').ObjectPhone[]}
 export interface ResearchSampleChoices {
   canReadSets?:boolean

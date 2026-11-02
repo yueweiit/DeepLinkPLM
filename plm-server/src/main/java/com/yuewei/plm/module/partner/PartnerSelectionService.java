@@ -3,6 +3,7 @@ package com.yuewei.plm.module.partner;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yuewei.plm.common.exception.BusinessException;
 import com.yuewei.plm.module.attachment.vo.AttachmentVO;
+import com.yuewei.plm.module.moldreference.PhoneDisplayNames;
 import jakarta.servlet.http.HttpServletRequest;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -21,7 +22,7 @@ public class PartnerSelectionService {
  private static final Set<String> DEVELOPMENT=Set.of("unknown","claimed","preferred","alternative","disputed");
  private static final Set<String> COST_FIELDS=Set.of("unitPrice","currency","priceNote","priceCents","priceOptions","sampleFeeNote","terms","sourceAttachmentId","rawQuoteFields","currencySource","priceUnit");
  private static final List<String> TEXT_FIELDS=List.of("name","series","supplierCode","supplierItemCode","material","specification","thickness","features","leadTimeNote","sampleFeeNote","color","modelText","phoneScopeDeclaration","priceNote","moq","packaging","notes","sourcePosition","sourceSequence","sameStyleKey","developmentEvidence","supplyScopeNote","styleKey","configKey","quoteVersion","quoteId","quoteLineId","sourceSheet","sourceVersion");
- private static final Set<String> READ_ONLY=Set.of("productId","productCode","specId","specIds","specLinks","confirmedAt","confirmationSnapshot","confirmed","selectionConfirmationVersion","receiptColorMode","rangeSnapshots","sampleBatches","sampleBatchCodes","catalogSourceSnapshot","catalogStyleId","catalogStyleCode","catalogStyleLabel","sourcePhoneModelIds","sourcePhones","supplierColors");
+ private static final Set<String> READ_ONLY=Set.of("productId","productCode","specId","specIds","specLinks","confirmedAt","confirmationSnapshot","confirmed","selectionConfirmationVersion","receiptColorMode","rangeSnapshots","sampleBatches","sampleBatchCodes","receivedQuantity","catalogSourceSnapshot","catalogStyleId","catalogStyleCode","catalogStyleLabel","sourcePhoneModelIds","sourcePhones","supplierColors");
  private final PartnerStore store;
  private final PartnerOperationsAccess permissions;
  private final SupplierProfileService suppliers;
@@ -52,10 +53,12 @@ public class PartnerSelectionService {
   long page=Math.max(1,number(query.getOrDefault("page","1"))),size=Math.max(1,Math.min(100,number(query.getOrDefault("size","30"))));
   long total=store.jdbc.queryForObject("select count(*) from plm_partner_record r where "+where,Long.class,args.toArray());args.add(size);args.add(Math.multiplyExact(page-1,size));
   var content=store.jdbc.queryForList("select r.record_id as id,r.code,r.name,r.status,r.version,r.updated_at as \"updatedAt\",coalesce((r.data->>'rowCount')::bigint,0) as \"rowCount\",coalesce((r.data->>'confirmedCount')::bigint,0) as \"confirmedCount\" from plm_partner_record r where "+where+" order by r.updated_at desc,r.record_id desc limit ? offset ?",args.toArray());
+  var summaries=rows().summaries(content.stream().map(r->number(r.get("id"))).toList());
+  for(var row:content)row.putAll(summaries.getOrDefault(number(row.get("id")),Map.of("selectedStyleCount",0L,"receivedStyleCount",0L,"receivedQuantity",0L)));
   return Map.of("content",content,"totalElements",total,"page",page,"size",size,"totalPages",(total+size-1)/size,"canWrite",permissions.engineering(),"canReadCost",permissions.costs());
  }
  public Map<String,Object> detail(long id){
-  view();var d=store.load(id,"selection",false);if(isCatalogSource(d))d=sourceSupplierHeader(store,d);d.remove("rows");d.put("schemaVersion",2);d.putAll(rows().counts(id));
+  view();var d=store.load(id,"selection",false);if(isCatalogSource(d))d=sourceSupplierHeader(store,d);d.remove("rows");d.put("schemaVersion",2);d.putAll(rows().counts(id));d.putAll(rows().summaries(List.of(id)).getOrDefault(id,Map.of("selectedStyleCount",0L,"receivedStyleCount",0L,"receivedQuantity",0L)));
   d.put("files",store.jdbc.queryForList("select a.attachment_id as id,a.file_name as name,a.version_no as version,a.content_type as type,a.file_size as size from plm_partner_file f join plm_attachment a on a.attachment_id=f.attachment_id where f.record_id=? and a.deleted_flag=0 and "+store.access.visibleSqlClause("file","a.attachment_id")+" order by a.attachment_id desc limit 100",id));
   d.put("events",store.jdbc.queryForList("select event_id as id,action,created_at as time,created_by as operator from plm_partner_event where record_id=? order by event_id desc limit 30",id));
   var originals=permissions.costs()?originals(id,Map.of("page","1","size","5")):Map.of("content",List.of(),"totalElements",0);
@@ -87,7 +90,10 @@ public class PartnerSelectionService {
  }
  public List<String> supplierCodes(long id){view();store.load(id,"selection",false);return store.jdbc.queryForList("select distinct coalesce(data->>'supplierCode','') as code from plm_partner_selection_row where record_id=? order by code",String.class,id);}
  public Map<String,Object> row(long id,String rowId){view();selection(id,false);require(validRowId(rowId),"行标识无效");var r=rows().find(id,rowId,false);require(!r.isEmpty(),"选品行不存在或不属于当前表");return currentRows(id,List.of(enrich(r))).get(0);}
- private List<Map<String,Object>> currentRows(long id,List<Map<String,Object>> rows){var styles=new PartnerCatalogStyles(store);var result=rows.stream().map(r->styles.enrich("selection",id,r)).toList();styles.projectCurrent(result);return result.stream().map(this::visible).toList();}
+ private List<Map<String,Object>> currentRows(long id,List<Map<String,Object>> rows){var styles=new PartnerCatalogStyles(store);var result=styles.enrichAll("selection",id,rows);styles.projectCurrent(result);return result.stream().map(this::displayRow).map(this::visible).toList();}
+ private Map<String,Object> displayRow(Map<String,Object> row){
+  var result=new LinkedHashMap<>(row);result.put("phones",maps(row.get("phones")).stream().map(phone->{var shown=new LinkedHashMap<>(phone);for(String field:List.of("modelName","displayName"))if(phone.containsKey(field))shown.put(field,PhoneDisplayNames.displaySpelling(text(phone.get(field))));return shown;}).toList());return result;
+ }
  public Map<String,Object> importedRowBaseline(long id,String rowId){permissions.engineer();store.load(id,"selection",false);require(validRowId(rowId),"行标识无效");return rows().find(id,rowId,false);}
  private Map<String,Object> enrich(Map<String,Object> row){return enrichBatch(List.of(row),true).get(0);}
  /** Related facts are fetched per bounded page/batch, never once per exported row. */
@@ -97,7 +103,7 @@ public class PartnerSelectionService {
   var productIds=result.stream().filter(r->number(r.get("productId"))>0&&text(r.get("productCode")).isEmpty()).map(r->number(r.get("productId"))).distinct().toList();
   Map<Long,String> codes=new HashMap<>();for(var chunk:chunks(productIds))for(var item:store.jdbc.queryForList("select record_id,code from plm_partner_record where kind='product' and deleted_flag=0 and record_id in ("+marks(chunk.size())+")",chunk.toArray()))codes.put(number(item.get("record_id")),text(item.get("code")));
   var confirmedIds=result.stream().filter(PartnerSelectionService::confirmed).map(r->text(r.get("rowId"))).toList();Map<String,List<Map<String,Object>>> samples=new HashMap<>();
-  if(!confirmedIds.isEmpty())for(var sample:store.jdbc.queryForList("select s.record_id as id,s.code,s.name,s.data->>'selectionRowId' as \"selectionRowId\",s.data->>'receivedDate' as date,s.data->>'displayLabel' as \"displayLabel\" from plm_partner_record s where s.kind='sample' and s.deleted_flag=0 and s.data->>'selectionRowId' in ("+marks(confirmedIds.size())+") and "+store.access.visibleSqlClause("partner","s.record_id")+" order by s.record_id desc",confirmedIds.toArray())){String rid=text(sample.remove("selectionRowId"));samples.computeIfAbsent(rid,k->new ArrayList<>()).add(sample);}
+  if(!confirmedIds.isEmpty())for(var sample:store.jdbc.queryForList("select s.record_id as id,s.code,s.name,s.data->>'selectionRowId' as \"selectionRowId\",s.data->>'receivedDate' as date,s.data->>'displayLabel' as \"displayLabel\","+PartnerSelectionRows.receivedQuantitySql("s")+" as qty from plm_partner_record s where s.kind='sample' and s.deleted_flag=0 and s.data->>'selectionRowId' in ("+marks(confirmedIds.size())+") and "+store.access.visibleSqlClause("partner","s.record_id")+" order by s.record_id desc",confirmedIds.toArray())){String rid=text(sample.remove("selectionRowId"));samples.computeIfAbsent(rid,k->new ArrayList<>()).add(sample);}
   var ids=result.stream().flatMap(r->maps(r.get("refs")).stream()).map(r->number(r.get("id"))).filter(n->n>0).distinct().toList();Map<Long,Map<String,Object>> files=new HashMap<>();
   for(var chunk:chunks(ids))for(var file:store.jdbc.queryForList("select a.attachment_id as id,a.file_name as name,a.version_no as version,a.content_type as type,a.file_size as size from plm_attachment a where a.deleted_flag=0 and a.attachment_id in ("+marks(chunk.size())+") and "+store.access.visibleSqlClause("file","a.attachment_id"),chunk.toArray()))files.put(number(file.get("id")),file);
   var downstream=downstreamRows(result.stream().map(r->text(r.get("rowId"))).filter(r->!r.isEmpty()).toList(),null);
@@ -108,6 +114,7 @@ public class PartnerSelectionService {
   }
   if(codes.containsKey(number(r.get("productId"))))r.put("productCode",codes.get(number(r.get("productId"))));
   r.put("sampleBatches",samples.getOrDefault(text(r.get("rowId")),List.of()));
+  r.put("receivedQuantity",maps(r.get("sampleBatches")).stream().mapToLong(x->number(x.get("qty"))).sum());
   r.put("sampleBatchCodes",maps(r.get("sampleBatches")).stream().map(x->text(x.get("code"))).toList());
   var fileIds=maps(r.get("refs")).stream().map(f->number(f.get("id"))).filter(n->n>0).distinct().toList();
   r.put("fileDetails",fileIds.stream().sorted().map(files::get).filter(Objects::nonNull).toList());
@@ -162,13 +169,24 @@ public class PartnerSelectionService {
    if(kind.equals("clear")){for(Object key:list(op.get("fields")))changes.put(text(key),"");}
    if(op.containsKey("original"))for(var e:map(op.get("original")).entrySet())require(signature(store.json,e.getValue()).equals(signature(store.json,old.get(e.getKey()))),"原值已变化："+e.getKey());
    requireDraftChangeAllowed(old,changes,blocked);
-   var baseline=old;if(catalogue&&changes.containsKey("catalogSourceSnapshot")){require(old.isEmpty(),"不能覆盖既有选品的来源快照");baseline=new LinkedHashMap<>(old);baseline.put("catalogSourceSnapshot",map(changes.remove("catalogSourceSnapshot")));for(String field:COST_FIELDS)if(changes.containsKey(field))baseline.put(field,changes.get(field));if(changes.containsKey("pairings"))baseline.put("pairings",changes.get("pairings"));}
+   var baseline=catalogue?catalogWriteBaseline(old,changes):old;
    var prepared=canonicalRow(id,baseline,rawWithId(changes,rid),phoneScope);
    if(catalogue&&old.isEmpty()&&!map(prepared.get("catalogSourceSnapshot")).isEmpty()){var snapshot=new LinkedHashMap<>(map(prepared.get("catalogSourceSnapshot")));snapshot.put("selectionBaseline",catalogBaseline(prepared));prepared.put("catalogSourceSnapshot",snapshot);}
    rows().put(id,prepared,old,request);if(catalogue&&old.isEmpty())new PartnerCatalogStyles(store).inherit(id,rid,map(prepared.get("catalogSourceSnapshot")),request);changed++;
   }
   saveHeader(id,head);store.event(id,"selection_rows",Map.of("changed",changed),request);return detail(id);
  }
+ private Map<String,Object> catalogWriteBaseline(Map<String,Object> old,Map<String,Object> changes){
+  if(!changes.containsKey("catalogSourceSnapshot"))return old;
+  require(old.isEmpty()||awaitingFirstPhones(old),"不能覆盖已明确型号或已确认选品的来源快照");
+  var baseline=new LinkedHashMap<>(old);var origin=new LinkedHashMap<>(map(changes.remove("catalogSourceSnapshot")));
+  // First-model completion preserves manual colour, price and notes; the row revision retains the previous source.
+  if(!old.isEmpty())origin.put("selectionBaseline",map(old.get("catalogSourceSnapshot")).get("selectionBaseline"));
+  baseline.put("catalogSourceSnapshot",origin);
+  if(old.isEmpty()){for(String field:COST_FIELDS)if(changes.containsKey(field))baseline.put(field,changes.get(field));if(changes.containsKey("pairings"))baseline.put("pairings",changes.get("pairings"));}
+  return baseline;
+ }
+ static boolean awaitingFirstPhones(Map<String,Object> row){return !confirmed(row)&&!Boolean.TRUE.equals(row.get("discarded"))&&!Boolean.FALSE.equals(row.get("selected"))&&"style".equals(text(map(row.get("catalogSourceSnapshot")).get("selectionIntent")))&&scopeIds(row.get("phoneModelIds")).isEmpty();}
  @Transactional public Map<String,Object> batch(long id,Map<String,Object> input){
   permissions.engineer();String request=request(input);var head=selection(id,true);if(replayed(id,request,"selection_batch"))return detail(id);store.check(head,number(input.get("version")));
   var changes=map(input.get("changes"));require(!changes.isEmpty(),"请选择本次批量修改的字段");final long[] count={0};var phoneScope=phoneScope();

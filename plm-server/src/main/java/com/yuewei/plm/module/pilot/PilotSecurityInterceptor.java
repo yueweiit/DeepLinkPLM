@@ -119,7 +119,7 @@ public class PilotSecurityInterceptor implements HandlerInterceptor {
   }
   if(Set.of("supplier","overseas_sales").contains(role))throw denied();access.requireDomesticView();
   boolean identityRead=get&&(path.equals("/api/v1/sample-identities")||path.matches("/api/v1/sample-identities/(?:[0-9]+|resolve|candidates)"));
-  boolean identityWrite=post&&(path.equals("/api/v1/sample-identities")||path.matches("/api/v1/sample-identities/[0-9]+/actions/(?:loan|return|move|retain|gift|consume|scrap|loss|count|undo|custody)")||path.matches("/api/v1/sample-identities/batches/[0-9]+/identity"));
+  boolean identityWrite=post&&(path.equals("/api/v1/sample-identities")||path.matches("/api/v1/sample-identities/bulk-actions/(?:loan|return|move)")||path.matches("/api/v1/sample-identities/[0-9]+/actions/(?:loan|return|move|retain|gift|consume|scrap|loss|count|undo|custody)")||path.matches("/api/v1/sample-identities/batches/[0-9]+/identity"));
   boolean shipmentRead=get&&(path.equals("/api/v1/sample-shipments")||path.matches("/api/v1/sample-shipments/(?:[0-9]+|options)"));
   boolean shipmentWrite=post&&(path.equals("/api/v1/sample-shipments")||path.matches("/api/v1/sample-shipments/[0-9]+/(?:files|actions/(?:dispatched|tracking|receive|loss|cancel|undo))"))||Set.of("PUT","DELETE").contains(method)&&path.matches("/api/v1/sample-shipments/[0-9]+");
   if(identityRead||shipmentRead||get&&path.equals("/api/v1/sample-scan")){access.requirePermission("partner:view");return true;}

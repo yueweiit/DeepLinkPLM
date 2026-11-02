@@ -73,8 +73,8 @@ public class PartnerCatalogService {
         List<Object> arguments = new ArrayList<>();
         String keyword = text(query.getOrDefault("q", query.get("keyword")));
         if (!keyword.isEmpty()) {
-            filter += " and (p.supplier_name ilike ? or p.supplier_code ilike ? or p.short_code ilike ?)";
-            for (int i = 0; i < 3; i++) arguments.add("%" + keyword + "%");
+            filter += " and (p.supplier_name ilike ? or p.supplier_code ilike ? or p.short_code ilike ? or p.data->>'shortName' ilike ?)";
+            for (int i = 0; i < 4; i++) arguments.add("%" + keyword + "%");
         }
         long page = page(query), size = size(query);
         String catalog = "with catalog as (" + sourceSql(query) + "), catalog_suppliers as ("
@@ -84,11 +84,20 @@ public class PartnerCatalogService {
             Long.class, arguments.toArray());
         arguments.add(size);
         arguments.add(offset(page, size));
-        String sql = catalog
+        String sql = catalog + ", selected_styles as (select s.data->>'supplierCode' as supplier_code,count(distinct "
+            + PartnerSelectionRows.styleIdentitySql("s") + ") as selected_count from plm_partner_selection_row s "
+            + "join plm_partner_record r on r.record_id=s.record_id where r.kind='selection' and r.deleted_flag=0 "
+            + "and r.data->>'purpose'='my_selection' and coalesce(r.data->>'catalogSource','false')<>'true' and "
+            + PartnerSelectionRows.activeSelectedSql("s") + " and (" + store.access.visibleSqlClause("partner", "r.record_id")
+            + ") group by s.data->>'supplierCode') "
             + "select p.supplier_id as id,p.supplier_code as \"supplierCode\",p.supplier_name as \"supplierName\","
-            + "p.short_code as \"shortCode\",p.status,c.style_count as \"styleCount\" "
+            + "coalesce(p.data->>'shortName','') as \"shortName\",p.short_code as \"shortCode\",p.status,c.style_count as \"styleCount\","
+            + "coalesce((select selected_count from selected_styles s where s.supplier_code=p.supplier_code),0) as \"selectedStyleCount\","
+            + "p.data::text as \"profileData\" "
             + scopedSuppliers + " order by p.supplier_name,p.supplier_code limit ? offset ?";
-        return pageResult(store.jdbc.queryForList(sql, arguments.toArray()), total, page, size);
+        var content=store.jdbc.queryForList(sql,arguments.toArray());
+        for(var row:content)row.put("businessCategories",SupplierProfileService.businessCategories(decode(store.json,row.remove("profileData")).get("businessCategories")));
+        return pageResult(content, total, page, size);
     }
 
     /** SQ is the existing supplier-owned candidate source; legacy SL sources are only explicitly classified. */
@@ -342,9 +351,10 @@ public class PartnerCatalogService {
         var args = new ArrayList<>(filter.arguments);
         args.add(size);
         args.add(offset);
-        return store.jdbc.queryForList("select c.*,c.data::text as row_data from (" + filter.sourceSql + ") c where "
+        var rows = store.jdbc.queryForList("select c.*,c.data::text as row_data from (" + filter.sourceSql + ") c where "
             + filter.sql + " order by c.updated_at desc,c.record_id desc,c.sort_order,c.row_id limit ? offset ?", args.toArray())
             .stream().map(this::decodeSource).toList();
+        return new PartnerCatalogStyles(store).enrichAll(rows);
     }
 
     private Map<String, Object> decodeSource(Map<String, Object> source) {
@@ -363,7 +373,7 @@ public class PartnerCatalogService {
         row.put("supplierCode", source.get("supplier_code"));
         row.put("sourcePurpose", source.getOrDefault("source_purpose", "quote".equals(text(source.get("source_kind")))?"catalog_source":"my_selection"));
         row.put("confirmed", source.get("confirmed"));
-        return new PartnerCatalogStyles(store).enrich(text(row.get("sourceKind")),number(row.get("recordId")),row);
+        return row;
     }
 
     private Map<String, Object> source(String kind, long id, String rowId, String supplier) {
@@ -401,7 +411,7 @@ public class PartnerCatalogService {
         db.put("source_status", header.get("status"));
         db.put("supplier_code", actual);
         db.put("source_purpose",kind.equals("quote")||PartnerSelectionService.isCatalogSource(header)?"catalog_source":"my_selection");
-        return decodeSource(db);
+        return new PartnerCatalogStyles(store).enrich(kind,id,decodeSource(db));
     }
 
     @Transactional(readOnly = true)
@@ -818,8 +828,8 @@ public class PartnerCatalogService {
                     var saved=decode(store.json,found.get("data"));saved.put("rowId",found.get("row_id"));saved.put("rowVersion",found.get("row_version"));saved.put("confirmed",found.get("confirmed"));existing.add(saved);
                 }
                 var oldChosen=new LinkedHashSet<Long>();var oldView=new ArrayList<Map<String,Object>>();
-                for(var saved:existing){var snapshot=map(saved.get("catalogSourceSnapshot"));
-                    require(number(snapshot.get("rowVersion"))==number(row.get("rowVersion"))&&number(snapshot.get("recordVersion"))==number(row.get("recordVersion")),"目标选品已采用该款另一来源版本，请先核对版本差异或另建选品");
+                for(var saved:existing){
+                    require(sameSourceVersion(saved,row)||!styleOnly&&PartnerSelectionService.awaitingFirstPhones(saved),"目标选品已采用该款另一来源版本，请先核对版本差异或另建选品");
                     var shared=PartnerSelectionService.scopeIds(saved.get("phoneModelIds")).stream().filter(chosen::contains).toList();
                     if(styleOnly||!shared.isEmpty()){
                         require(!Boolean.TRUE.equals(saved.get("discarded"))&&!Boolean.FALSE.equals(saved.get("selected")),"已有选品中的型号已取消或排除，请在原选品明确处理，不能静默恢复");
@@ -830,7 +840,7 @@ public class PartnerCatalogService {
                 }
                 var newIds=chosen.stream().filter(id->!oldChosen.contains(id)).toList();
                 // An unspecified supplier scope is not a claim of full supply. A later new
-                // model gets its own draft row, except an unchanged style-only draft awaiting its first model.
+                // model gets its own draft row, except an active style-only draft awaiting its first model.
                 Map<String,Object> merge=newIds.isEmpty()?Map.of():existing.stream().filter(this::mergeable).filter(saved->!unspecified||("style".equals(text(map(saved.get("catalogSourceSnapshot")).get("selectionIntent")))&&PartnerSelectionService.scopeIds(saved.get("phoneModelIds")).isEmpty())).findFirst().orElse(Map.of());
                 Long planned=item.containsKey("sampleQty")?number(item.get("sampleQty")):null;var active=existing.stream().filter(saved->!Boolean.TRUE.equals(saved.get("discarded"))&&!Boolean.FALSE.equals(saved.get("selected"))).filter(saved->styleOnly||PartnerSelectionService.scopeIds(saved.get("phoneModelIds")).stream().anyMatch(chosen::contains)||(!merge.isEmpty()&&text(saved.get("rowId")).equals(text(merge.get("rowId"))))).toList();var quantities=active.stream().filter(saved->number(saved.get("sampleQty"))>0).toList();
                 require(planned==null||newIds.isEmpty()||!merge.isEmpty()||active.isEmpty(),"本次同时含已有独立选样和新增型号，请分开选择并填写各次拟拿样合计，不能自动分配数量");
@@ -855,10 +865,12 @@ public class PartnerCatalogService {
     }
 
     private boolean mergeable(Map<String,Object> row){
+        if(PartnerSelectionService.awaitingFirstPhones(row))return true;
         if(PartnerSelectionService.confirmed(row)||Boolean.TRUE.equals(row.get("discarded"))||Boolean.FALSE.equals(row.get("selected")))return false;
         var baseline=map(map(row.get("catalogSourceSnapshot")).get("selectionBaseline"));
         var actual=new LinkedHashMap<>(PartnerSelectionService.catalogBaseline(row));var original=new LinkedHashMap<>(baseline);actual.remove("sampleQty");original.remove("sampleQty");return !baseline.isEmpty()&&signature(store.json,original).equals(signature(store.json,actual));
     }
+    private boolean sameSourceVersion(Map<String,Object> saved,Map<String,Object> source){var origin=map(saved.get("catalogSourceSnapshot"));return number(origin.get("rowVersion"))==number(source.get("rowVersion"))&&number(origin.get("recordVersion"))==number(source.get("recordVersion"));}
 
     @Transactional
     public Map<String,Object> addToSelection(Map<String,Object> input) {
@@ -898,7 +910,9 @@ public class PartnerCatalogService {
             if(!choice.mergeTarget.isEmpty()){
                 var old=choice.mergeTarget;var ids=new TreeSet<>(PartnerSelectionService.scopeIds(old.get("phoneModelIds")));ids.addAll(choice.added);
                 var pairs=new ArrayList<>(maps(old.get("selectedPairs")));for(var pair:choice.pairs)if(choice.added.contains(number(pair.get("phoneModelId"))))pairs.add(pair);
-                String targetRow=text(old.get("rowId"));selectionCommand(commands,targetRow,old.get("rowVersion"),Map.of("phoneModelIds",new ArrayList<>(ids),"modelText",chosenNames(row,new ArrayList<>(ids)),"selectedPairs",pairs));resultRows.add(targetRow);
+                var changes=new LinkedHashMap<String,Object>(Map.of("phoneModelIds",new ArrayList<>(ids),"modelText",chosenNames(row,new ArrayList<>(ids)),"selectedPairs",pairs));
+                if(!sameSourceVersion(old,row))changes.put("catalogSourceSnapshot",selectionOrigin(choice,PartnerSelectionService.scopeIds(row.get("_catalogSourceOriginalIds")),store.canonicalFiles(record,row.get("modelSheetRefs"))));
+                String targetRow=text(old.get("rowId"));selectionCommand(commands,targetRow,old.get("rowVersion"),changes);resultRows.add(targetRow);
                 origins.add(Map.of("targetRowId",targetRow,"sourceKind",kind,"recordId",record,"rowId",rowId,"rowVersion",row.get("rowVersion"),"recordVersion",row.get("recordVersion"),"phoneModelIds",choice.added,"sourceOriginalIds",PartnerSelectionService.scopeIds(row.get("_catalogSourceOriginalIds"))));continue;
             }
             var refs=store.canonicalFiles(record,row.get("refs"));var originalIds=PartnerSelectionService.scopeIds(row.get("_catalogSourceOriginalIds"));
@@ -913,7 +927,7 @@ public class PartnerCatalogService {
                 changes.put("selectedPairs",choice.pairs.stream().filter(p->choice.added.contains(number(p.get("phoneModelId")))).toList());
                 changes.put("refs",refs);changes.put("supplierCode",supplier);changes.put("selected",true);changes.put("discarded",false);
                 if(originalIds.size()==1)changes.put("sourceAttachmentId",originalIds.get(0));if(kind.equals("quote")){changes.put("quoteId",Long.toString(record));changes.put("quoteLineId",rowId);}
-                var snapshot=new LinkedHashMap<String,Object>();for(String field:List.of("sourceKind","recordId","rowId","rowVersion","recordVersion","sourceCode","sourceName","supplierCode","modelText","phoneModelIds","phones","phoneScopeMode","phoneScopeDeclaration","catalogStyleId","catalogStyleCode","catalogStyleLabel","supplierModelEntries"))snapshot.put(field,row.get(field));snapshot.put("modelSheetRefs",modelSheetRefs);snapshot.put("unavailablePhoneModelIds",PartnerSelectionService.scopeIds(row.get("unavailablePhoneModelIds")));snapshot.put("unavailablePairs",maps(row.get("pairings")).stream().filter(p->"unavailable".equals(text(p.get("state")))).map(p->Map.of("phoneModelId",p.get("phoneModelId"),"colorId",p.get("colorId"))).toList());snapshot.put("sourceOriginalIds",originalIds);if(choice.styleOnly){snapshot.put("selectionIntent","style");snapshot.put("selectionModelText",choice.selectionModelText);}changes.put("catalogSourceSnapshot",snapshot);
+                changes.put("catalogSourceSnapshot",selectionOrigin(choice,originalIds,modelSheetRefs));
                 commands.add(Map.of("op","upsert","rowId",targetRow,"rowVersion",0,"changes",changes));resultRows.add(targetRow);
                 origins.add(Map.of("targetRowId",targetRow,"sourceKind",kind,"recordId",record,"rowId",rowId,"rowVersion",row.get("rowVersion"),"recordVersion",row.get("recordVersion"),"phoneModelIds",choice.added,"sourceOriginalIds",originalIds));
             }
@@ -924,6 +938,12 @@ public class PartnerCatalogService {
         store.remember("catalog_add",request,target);store.event(target,"catalog_add",Map.of("fingerprint",fingerprint,"result",result,"origins",origins,"createdRowIds",commands.stream().filter(op->number(op.get("rowVersion"))==0).map(op->op.get("rowId")).toList()),eventKey);return result;
     }
 
+    private Map<String,Object> selectionOrigin(Choice choice,List<Long> originalIds,List<Map<String,Object>> modelSheetRefs){
+        var row=choice.source;var snapshot=new LinkedHashMap<String,Object>();
+        for(String field:List.of("sourceKind","recordId","rowId","rowVersion","recordVersion","sourceCode","sourceName","supplierCode","modelText","phoneModelIds","phones","phoneScopeMode","phoneScopeDeclaration","catalogStyleId","catalogStyleCode","catalogStyleLabel","supplierModelEntries"))snapshot.put(field,row.get(field));
+        snapshot.put("modelSheetRefs",modelSheetRefs);snapshot.put("unavailablePhoneModelIds",PartnerSelectionService.scopeIds(row.get("unavailablePhoneModelIds")));snapshot.put("unavailablePairs",maps(row.get("pairings")).stream().filter(p->"unavailable".equals(text(p.get("state")))).map(p->Map.of("phoneModelId",p.get("phoneModelId"),"colorId",p.get("colorId"))).toList());snapshot.put("sourceOriginalIds",originalIds);
+        if(choice.styleOnly){snapshot.put("selectionIntent","style");snapshot.put("selectionModelText",choice.selectionModelText);}return snapshot;
+    }
     private void selectionCommand(List<Map<String,Object>> commands,String row,Object version,Map<String,Object> changes){for(var command:commands)if(row.equals(text(command.get("rowId")))){map(command.get("changes")).putAll(changes);return;}commands.add(new LinkedHashMap<>(Map.of("op","upsert","rowId",row,"rowVersion",version,"changes",new LinkedHashMap<>(changes))));}
 
     private String chosenNames(Map<String,Object> source,List<Long> ids){var names=new ArrayList<String>();for(long id:ids)names.add(maps(source.get("phones")).stream().filter(p->number(p.get("phoneModelId"))==id).map(p->text(p.getOrDefault("displayName",p.get("modelName")))).findFirst().orElseThrow(()->invalid("所选型号主数据已失效")));return String.join(" / ",names);}

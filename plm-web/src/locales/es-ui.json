@@ -4240,5 +4240,12 @@
   "选择该供应商承担的业务，可多选": "Seleccione una o varias funciones del proveedor",
   "开模申请与研发开模只显示开模供应商；同一家公司可兼任两类。": "Las solicitudes y el desarrollo de moldes muestran proveedores de moldes; una empresa puede tener ambas funciones.",
   "维护供应商分类 ↗": "Gestionar clasificación del proveedor ↗",
-  "暂无已分类的开模供应商，请在供应商资料中设置业务分类。": "No hay proveedores clasificados para moldes. Configure su clasificación comercial en la ficha del proveedor."
+  "暂无已分类的开模供应商，请在供应商资料中设置业务分类。": "No hay proveedores clasificados para moldes. Configure su clasificación comercial en la ficha del proveedor.",
+  "{value0} 系列": "Serie {value0}",
+  "其他型号": "Otros modelos",
+  "已选 {value0} 个型号": "{value0} modelos seleccionados",
+  "共 {value0} 个型号 · 查看明细": "{value0} modelos · Ver detalle",
+  "搜索已选手机型号": "Buscar entre los modelos seleccionados",
+  "匹配 {value0} 个": "{value0} coincidencias",
+  "按品牌查看": "Ver por marca"
 }

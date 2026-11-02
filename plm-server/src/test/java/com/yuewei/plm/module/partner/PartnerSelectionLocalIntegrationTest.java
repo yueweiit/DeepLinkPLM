@@ -26,7 +26,7 @@ import static com.yuewei.plm.module.partner.PartnerValues.*;
 import static com.yuewei.plm.module.partner.PartnerSelectionService.scopeIds;
 
 /** Real PostgreSQL transactions, restricted to a disposable schema in a fixed loopback QA database. */
-@EnabledIfEnvironmentVariable(named="PLM_SELECTION_TEST_URL",matches="(?:jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/plm_selection_range_qa|jdbc:postgresql://127\\.0\\.0\\.1:15504/catalog_nonempty_filter_tests|jdbc:postgresql://127\\.0\\.0\\.1:15483/plm_foundation_crud_it\\?currentSchema=plm|jdbc:postgresql://127\\.0\\.0\\.1:15504/plm_source_index_qa_20261031_6b7oial9)")
+@EnabledIfEnvironmentVariable(named="PLM_SELECTION_TEST_URL",matches="(?:jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/plm_selection_range_qa|jdbc:postgresql://127\\.0\\.0\\.1:15504/catalog_nonempty_filter_tests|jdbc:postgresql://127\\.0\\.0\\.1:15483/plm_foundation_crud_it\\?currentSchema=plm|jdbc:postgresql://127\\.0\\.0\\.1:15504/plm_source_index_qa_20261031_6b7oial9|jdbc:postgresql://127\\.0\\.0\\.1:15504/plm_sales_policy_qa)")
 class PartnerSelectionLocalIntegrationTest {
  private JdbcTemplate jdbc,admin;private TransactionTemplate tx;private String schema;
  private PartnerSelectionService selections;private PartnerProductService products;private PartnerSampleService samples;
@@ -37,7 +37,8 @@ class PartnerSelectionLocalIntegrationTest {
   admin=new JdbcTemplate(new DriverManagerDataSource(url,"postgres",password));schema="selection_qa_"+UUID.randomUUID().toString().replace("-","");admin.execute("create schema "+schema);
   var ds=new DriverManagerDataSource(url.split("\\?",2)[0]+"?currentSchema="+schema,"postgres",password);jdbc=new JdbcTemplate(ds);tx=new TransactionTemplate(new DataSourceTransactionManager(ds));
   jdbc.execute("""
-   create table sys_user(user_id bigint primary key); insert into sys_user values(1);
+   create table sys_user(user_id bigint primary key,username text,user_name text,display_name text,department_name text,status text default 'active',deleted_flag int default 0);
+   insert into sys_user(user_id,username,display_name,department_name) values(1,'qa-engineer','国内工程QA','工程'),(2,'keeper-b','系统保管B','样品室');
    create table plm_partner_record(record_id bigserial primary key,kind text not null,code text unique,name text,status text default 'draft',version bigint default 0,data jsonb default '{}',site text,external_id text,customer_id bigint,source_project_id bigint,supplier_code text,parent_record_id bigint,owner_user_id bigint,deleted_flag int default 0,created_by text,updated_by text,created_at timestamptz default now(),updated_at timestamptz default now());
    create table plm_partner_create_request(actor_id bigint,kind text,request_id text,object_id bigint,primary key(actor_id,kind,request_id));
    create table plm_partner_revision(revision_id bigserial,record_id bigint,revision bigint,data jsonb,created_by text,created_at timestamptz default now());
@@ -603,6 +604,25 @@ class PartnerSelectionLocalIntegrationTest {
   try(var c=Objects.requireNonNull(jdbc.getDataSource()).getConnection()){ScriptUtils.executeSqlScript(c,new ClassPathResource("db/migration/V20261021_1200__partner_selection_rows.sql"));}catch(Exception e){throw new AssertionError(e);}
   assertEquals(2,count("plm_partner_selection_row"));assertEquals(1L,jdbc.queryForObject("select count(*) from plm_partner_selection_row where confirmed",Long.class));var frozen=baseline(existing);assertEquals(Map.of("原文","保留"),frozen.get("confirmationSnapshot"));
   var draft=jdbc.queryForMap("select row_id::text,data::text from plm_partner_selection_row where data->>'legacyRowId'='old-local-key'");var migrated=decode(store.json,draft.get("data"));assertEquals("0185组合原文",migrated.get("modelText"));assertEquals("供方黑",migrated.get("color"));assertFalse(migrated.containsKey("pairings"));assertFalse(migrated.containsKey("selectedPairs"));assertFalse(decode(store.json,jdbc.queryForObject("select data::text from plm_partner_record where record_id=?",String.class,id())).containsKey("rows"));
+ }
+
+ @Test void custodianOptionsExposeOnlyEnabledUsersAndKeepTheSamplePermission(){
+  jdbc.update("insert into sys_user(user_id,username,display_name,status,deleted_flag) values(3,'disabled','停用账号','inactive',0),(4,'deleted','已删除账号','active',1)");
+  clearInvocations(store.access);var choices=maps(samples.custodianOptions().get("content"));assertEquals(Set.of(1L,2L),choices.stream().map(r->number(r.get("userId"))).collect(java.util.stream.Collectors.toSet()));
+  assertTrue(choices.stream().allMatch(r->r.keySet().equals(Set.of("userId","name","departmentName"))));
+  verify(store.access).requireDomesticView();verify(store.access).requirePermission("samples:write");
+  doThrow(new IllegalStateException("无收样权限")).when(store.access).requirePermission("samples:write");assertThrows(RuntimeException.class,samples::custodianOptions);
+ }
+ @Test void oneSystemCustodianAppliesToEveryBulkReceiptAndRetryKeepsTheSavedSnapshot(){
+  var row=draftSelection();enableReceiptIdentities();var input=typedReceipt(row,"黑色");input.put("ownerUserId",2L);input.put("ownerName","客户端伪造姓名");
+  var first=maps(input.get("rows")).get(0);var second=new LinkedHashMap<>(first);second.put("clientRowId","actual-two");second.put("phoneModelId",13L);input.put("rows",List.of(first,second));String raw=signature(store.json,input);
+  assertEquals(true,samples.receiptPreview(id(),input).get("canSave"));var saved=tx.execute(t->samples.receiveSelection(id(),input));assertEquals(raw,signature(store.json,input));assertEquals(2,maps(saved.get("batches")).size());
+  for(var batch:maps(saved.get("batches"))){var detail=samples.detail(number(batch.get("id")));assertEquals(2L,number(detail.get("ownerUserId")));assertEquals("系统保管B",detail.get("ownerName"));assertEquals("系统保管B",detail.get("custodian"));assertEquals(1L,jdbc.queryForObject("select owner_user_id from plm_partner_record where record_id=?",Long.class,batch.get("id")));}
+  jdbc.update("update sys_user set status='inactive',display_name='后来改名' where user_id=2");assertEquals(signature(store.json,saved),signature(store.json,tx.execute(t->samples.receiveSelection(id(),input))));assertEquals(2L,jdbc.queryForObject("select count(*) from plm_partner_record where kind='sample'",Long.class));
+ }
+ @Test void disabledCustodianPreviewsTheIssueAndCannotCreateReceiptOrFreezeSelection(){
+  var row=draftSelection();enableReceiptIdentities();var input=typedReceipt(row,"黑色");input.put("ownerUserId",2L);input.put("ownerName","看似有效的手填姓名");jdbc.update("update sys_user set status='inactive' where user_id=2");String before=persistedRow(text(row.get("rowId")));
+  var preview=samples.receiptPreview(id(),input);assertEquals(false,preview.get("canSave"));assertTrue(preview.toString().contains("保管人账号不存在或已停用"));assertThrows(RuntimeException.class,()->tx.execute(t->samples.receiveSelection(id(),input)));assertEquals(before,persistedRow(text(row.get("rowId"))));assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_record where kind='sample'",Long.class));assertEquals(0L,count("plm_supplier_color"));
  }
 
  private Map<String,Object> typedReceipt(Map<String,Object> row,String color){
