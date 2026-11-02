@@ -13,6 +13,9 @@ import static org.mockito.Mockito.*;
 
 class DevelopmentUnitCostWorkflowTest {
     private Map<String,Object> imported(String currency,String output) {
+        return imported(currency,output,Map.of());
+    }
+    private Map<String,Object> imported(String currency,String output,Map<String,Object> previous) {
         var jdbc=mock(JdbcTemplate.class);var service=mock(ProductDevelopmentService.class);
         var reference=Map.<String,Object>of("type","bom","id",10L,"versionNo","MES-1","content",Map.of("header",Map.of("quantity",output)));
         when(service.snapshotReferences(eq(20L),anyList())).thenReturn(List.of(reference));
@@ -22,7 +25,8 @@ class DevelopmentUnitCostWorkflowTest {
         var line=new LinkedHashMap<String,Object>();line.put("product_bom_item_id",100L);line.put("item_name","原物料");line.put("quantity",new BigDecimal("0.00000001"));line.put("unit_cost_snapshot",null);line.put("loss_rate",null);
         when(jdbc.queryForList(startsWith("select product_bom_item_id,line_no"),eq(31L))).thenReturn(List.of(line));
         var workflow=new DevelopmentUnitCostWorkflow(mock(PilotAccessService.class),new UnitCostSheetCalculator(new BomCostCalculator()),mock(ProductBomWorkflowService.class),jdbc,mock(DevelopmentWorkflowStore.class));
-        var state=new LinkedHashMap<String,Object>();workflow.action(20L,state,"unit_cost_from_bom",new LinkedHashMap<>(Map.of("bomId",10L,"routeId",31L)),service);
+        var state=new LinkedHashMap<String,Object>();if(!previous.isEmpty())state.put("unitCostDraft",previous);
+        workflow.action(20L,state,"unit_cost_from_bom",new LinkedHashMap<>(Map.of("bomId",10L,"routeId",31L,"replaceDraft",true)),service);
         var draft=DevelopmentWorkflowStore.map(state.get("unitCostDraft"));assertThat(draft.get("references")).isEqualTo(List.of(reference));return draft;
     }
     @Test void importedBatchUsageAndKnownCurrencyRetainEvidenceWithoutInventingPerUnitUsage(){
@@ -33,6 +37,28 @@ class DevelopmentUnitCostWorkflowTest {
         var draft=imported(null,"1.0000");assertThat(draft.get("currency")).isEqualTo("");
         var material=LaunchReviewWorkflow.records(draft.get("rows")).get(0);assertThat(material.get("quantity")).isEqualTo(new BigDecimal("0.00000001"));assertThat(material.get("unitPrice")).isNull();assertThat(material.get("lossPct")).isNull();assertThat(draft.get("complete")).isEqualTo(false);assertThat(draft.get("missing").toString()).contains("币种待确认");
     }
+    @Test void rebuildingFromBomKeepsColumnDefinitionsButDoesNotGuessWhichOldCellBelongsToANewBomLine(){
+        var columns=List.of(Map.of("id","supplier","label","供方","type","text"),Map.of("id","weight","label","重量","type","number","hidden",true));
+        var previous=Map.<String,Object>of("extraColumns",columns,"visibleOptionalColumns",List.of("taxRate","remark"),"rows",List.of(Map.of("id","bom-100","extraValues",Map.of("supplier","旧行资料"))));
+        var draft=imported("CNY","1",previous);
+        assertThat(draft).containsEntry("extraColumns",columns).containsEntry("visibleOptionalColumns",List.of("taxRate","remark"));
+        assertThat(LaunchReviewWorkflow.records(draft.get("rows"))).allSatisfy(row->assertThat(row).doesNotContainKey("extraValues"));
+        assertThat(LaunchReviewWorkflow.records(previous.get("rows")).get(0)).containsEntry("extraValues",Map.of("supplier","旧行资料"));
+    }
+    @Test void savingExtraCellsRoundTripsThroughTheExistingStoreWithoutChangingCostCalculation(){
+        var access=mock(PilotAccessService.class);var actor=mock(com.yuewei.plm.common.security.CurrentUser.class);when(actor.displayName()).thenReturn("工程岗位");when(access.actor()).thenReturn(actor);
+        var service=mock(ProductDevelopmentService.class);when(service.snapshotReferences(anyLong(),anyList())).thenReturn(List.of());
+        var store=new DevelopmentWorkflowStore(mock(JdbcTemplate.class),new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules());
+        var workflow=new DevelopmentUnitCostWorkflow(access,new UnitCostSheetCalculator(new BomCostCalculator()),mock(ProductBomWorkflowService.class),mock(JdbcTemplate.class),store);
+        var row=Map.<String,Object>of("id","r1","category","material","name","材料","mode","unit","unitPrice",2,"extraValues",Map.of("supplier","合成供应商","weight",0));
+        var input=Map.<String,Object>of("title","合成成本","currency","CNY","taxBasis","source","rows",List.of(row),"extraColumns",List.of(Map.of("id","supplier","label","供方","type","text"),Map.of("id","weight","label","重量","type","number")),"visibleOptionalColumns",List.of("remark"));
+        var state=new LinkedHashMap<String,Object>();workflow.action(20L,state,"unit_cost_save",new LinkedHashMap<>(input),service);
+        var restored=DevelopmentWorkflowStore.map(store.read(store.encode(state)));
+        var draft=DevelopmentWorkflowStore.map(restored.get("unitCostDraft"));
+        assertThat(draft).containsEntry("extraColumns",input.get("extraColumns")).containsEntry("visibleOptionalColumns",List.of("remark"));
+        var saved=LaunchReviewWorkflow.records(draft.get("rows")).get(0);assertThat(saved).containsEntry("extraValues",row.get("extraValues")).containsEntry("unitCost",2);
+        verify(access).requireFinanceWrite();
+    }
     @Test void purchasedFinishedProductUsesExistingQuoteHistoryWithoutInventingAManufacturingBom(){
         var access=mock(PilotAccessService.class);var actor=mock(com.yuewei.plm.common.security.CurrentUser.class);when(actor.displayName()).thenReturn("成本工程师");when(access.actor()).thenReturn(actor);
         var bomWriter=mock(ProductBomWorkflowService.class);var service=mock(ProductDevelopmentService.class);
@@ -41,9 +67,11 @@ class DevelopmentUnitCostWorkflowTest {
         var workflow=new DevelopmentUnitCostWorkflow(access,new UnitCostSheetCalculator(new BomCostCalculator()),bomWriter,mock(JdbcTemplate.class),mock(DevelopmentWorkflowStore.class));
         var rows=new ArrayList<Map<String,Object>>();for(String group:UnitCostSheetCalculator.BASE_GROUPS)rows.add(Map.of("id",group,"category",group,"name",group,"mode","unit","unitPrice",group.equals("material")?12:0,"taxIncluded",false,"taxRate",0));
         var data=new HashMap<String,Object>(Map.of("title","供方成品单件核算","currency","CNY","taxBasis","net","basisType","supplier_quote","quoteEventId",7L,"quoteUnitNote","每件未税，无币种及数量换算","reason","本次已核对供方报价","rows",rows));
+        data.put("extraColumns",List.of(Map.of("id","supplier","label","供方","type","text")));
+        data.put("visibleOptionalColumns",List.of("taxRate"));
         var state=new HashMap<String,Object>(Map.of("plan",Map.of("method","direct","needsMold",false)));
         workflow.action(20L,state,"unit_cost_confirm",data,service);
-        var version=LaunchReviewWorkflow.records(state.get("unitCostVersions")).get(0);assertThat(version).containsEntry("basisType","supplier_quote").containsKey("adoptedQuote").doesNotContainKeys("bomId","routeId","bomCostSnapshotId");verifyNoInteractions(bomWriter);
+        var version=LaunchReviewWorkflow.records(state.get("unitCostVersions")).get(0);assertThat(version).containsEntry("basisType","supplier_quote").containsKey("adoptedQuote").doesNotContainKeys("bomId","routeId","bomCostSnapshotId");assertThat(version).containsEntry("extraColumns",data.get("extraColumns")).containsEntry("visibleOptionalColumns",List.of("taxRate"));verifyNoInteractions(bomWriter);
         state.put("plan",Map.of("method","own_mold","needsMold",true));assertThatThrownBy(()->workflow.action(20L,state,"unit_cost_confirm",data,service)).hasMessageContaining("仅适用于");
     }
 

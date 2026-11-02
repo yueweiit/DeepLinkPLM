@@ -398,12 +398,15 @@ export interface ResearchBusinessPage extends PageResponse<ResearchBusinessRow> 
 export const getResearchBusiness = async (params:{kind:string;keyword?:string;status?:string;projectId?:number;page:number;size:number}):Promise<ResearchBusinessPage> =>
   unwrapResponse(await request.get('/product-research/business',{params}));
 
+export interface UnitCostExtraColumn { id:string; label:string; type:'text'|'number'; hidden?:boolean }
+export type UnitCostOptionalColumn = 'taxIncluded'|'taxRate'|'lossPct'|'description'|'remark'
 export interface UnitCostRow {
   id:string; category:string; name:string; description?:string; mode:'unit'|'usage'|'divide';
   unitPrice:number|null; quantity?:number|null; lossPct?:number|null; allocationQty?:number|null;
   taxIncluded?:boolean|null; taxRate?:number|null; remark?:string; warning?:string; sourceCell?:string;
   estimated?:boolean; unitCost?:number|null; displayCost?:number|null; bomItemId?:number;
   sourceQuantity?:number|string|null;sourceOutputQty?:number|string|null;
+  extraValues?:Record<string,string|number|null>;
 }
 export interface UnitCostSheet {
   title:string;currency:string;displayCurrency?:string;exchangeRate?:number|null;exchangeRateDate?:string|null;
@@ -413,6 +416,7 @@ export interface UnitCostSheet {
   complete?:boolean;confirmedAt?:string;confirmedBy?:string;voidReason?:string;bomCostSnapshotId?:number;
   sourceOutputQty?:number|string|null;
   basisType?:'bom'|'supplier_quote';quoteEventId?:number|null;quoteUnitNote?:string;
+  extraColumns?:UnitCostExtraColumn[];visibleOptionalColumns?:UnitCostOptionalColumn[];
 }
 
 export async function getResearchReferencePage(query:PhoneObjectQuery):Promise<PhoneObjectPage<PhoneObjectOption>> {return unwrapResponse(await request.get('/product-research/reference-options/page',{params:query}))}

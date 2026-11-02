@@ -27,19 +27,22 @@ afterEach(()=>{app?.unmount();vi.restoreAllMocks();});
 describe('single-cost spreadsheet actions',()=>{
  it('keeps unknown tax and FX dates blank and preserves inputs after a save failure',async()=>{
   await start(UnitCostSheetView);expect((wrapper.get('input[aria-label="汇率依据日期"]').element as HTMLInputElement).value).toBe('');
-  await wrapper.get('input[aria-label="费用项目"]').setValue('PC原料');vi.mocked(researchAction).mockRejectedValueOnce(Error('项目已被其他操作更新'));
-  await button('保存成本草稿').trigger('click');await flushPromises();expect(wrapper.text()).toContain('项目已被其他操作更新');expect((wrapper.get('input[aria-label="费用项目"]').element as HTMLInputElement).value).toBe('PC原料');
+  await wrapper.get('textarea[aria-label="费用项目"]').setValue('PC原料');vi.mocked(researchAction).mockRejectedValueOnce(Error('项目已被其他操作更新'));
+  await button('保存成本草稿').trigger('click');await flushPromises();expect(wrapper.text()).toContain('项目已被其他操作更新');expect((wrapper.get('textarea[aria-label="费用项目"]').element as HTMLInputElement).value).toBe('PC原料');
   expect(vi.mocked(researchAction).mock.calls[0].slice(0,3)).toEqual([42,'unit_cost_save',8]);expect(vi.mocked(researchAction).mock.calls[0][3]).toMatchObject({exchangeRateDate:null,rows:[{name:'PC原料',unitPrice:13.8,allocationQty:16,taxRate:null}]});
  });
  it('adds and deletes draft detail lines through visible controls and can delete the saved draft',async()=>{
-  await start(UnitCostSheetView);await button('新建核算').trigger('click');await flushPromises();expect(wrapper.findAll('input[aria-label="费用项目"]')).toHaveLength(5);
-  await wrapper.findAll('button[aria-label="删除费用明细"]')[0].trigger('click');await flushPromises();expect(wrapper.findAll('input[aria-label="费用项目"]')).toHaveLength(4);
+  await start(UnitCostSheetView);await wrapper.get('.more-actions > summary').trigger('click');await button('新建核算').trigger('click');await flushPromises();expect(wrapper.findAll('textarea[aria-label="费用项目"]')).toHaveLength(5);
+  const originalRows=wrapper.findAll('[data-cost-row]').map(row=>row.attributes('data-cost-row'));
+  expect(button('删除选中').attributes('disabled')).toBeDefined();
+  await wrapper.get('input[aria-label="勾选成本第1行"]').setValue(true);await button('删除选中').trigger('click');await flushPromises();
+  expect(wrapper.findAll('textarea[aria-label="费用项目"]')).toHaveLength(4);expect(wrapper.findAll('[data-cost-row]').map(row=>row.attributes('data-cost-row'))).toEqual(originalRows.slice(1));expect(researchAction).not.toHaveBeenCalled();
   await button('删除草稿').trigger('click');await flushPromises();expect(researchAction).toHaveBeenCalledWith(42,'unit_cost_delete',8,{});expect(wrapper.emitted('updated')).toHaveLength(1);
  });
  it('shows confirmed versions read-only and copies them to a new editable draft',async()=>{
   const d=detail();d.workflow.unitCostVersions=[{...cost(),id:1,status:'confirmed',confirmedBy:'财务',confirmedAt:'2026-10-16'}];delete d.workflow.unitCostDraft;await start(UnitCostSheetView,d);
-  const select=wrapper.findAllComponents({name:'ElSelect'})[0];select.vm.$emit('change','1');await flushPromises();expect(wrapper.text()).toContain('复制为新版本');expect(wrapper.find('input[aria-label="费用项目"]').exists()).toBe(false);
-  await button('复制为新版本').trigger('click');await flushPromises();expect(wrapper.find('input[aria-label="费用项目"]').exists()).toBe(true);expect((wrapper.get('input[aria-label="成本修订原因"]').element as HTMLInputElement).value).toBe('');
+  const select=wrapper.findAllComponents({name:'ElSelect'})[0];select.vm.$emit('change','1');await flushPromises();expect(wrapper.text()).toContain('复制为新版本');expect(wrapper.find('textarea[aria-label="费用项目"]').exists()).toBe(false);
+  await button('复制为新版本').trigger('click');await flushPromises();expect(wrapper.find('textarea[aria-label="费用项目"]').exists()).toBe(true);expect((wrapper.get('input[aria-label="成本修订原因"]').element as HTMLInputElement).value).toBe('');
  });
 });
 describe('review draft actions reuse development rounds',()=>{
@@ -86,7 +89,7 @@ describe('stage handoffs keep the original engineering evidence',()=>{
  });
  it('does not silently replace a saved cost draft when creating another sheet',async()=>{
   await start(UnitCostSheetView);vi.mocked(ElMessageBox.confirm).mockRejectedValueOnce('cancel');await button('新建核算').trigger('click');await flushPromises();
-  expect(wrapper.findAll('input[aria-label="费用项目"]')).toHaveLength(1);expect((wrapper.get('input[aria-label="费用项目"]').element as HTMLInputElement).value).toBe('PC');expect(researchAction).not.toHaveBeenCalled();
+  expect(wrapper.findAll('textarea[aria-label="费用项目"]')).toHaveLength(1);expect((wrapper.get('textarea[aria-label="费用项目"]').element as HTMLInputElement).value).toBe('PC');expect(researchAction).not.toHaveBeenCalled();
  });
 });
 

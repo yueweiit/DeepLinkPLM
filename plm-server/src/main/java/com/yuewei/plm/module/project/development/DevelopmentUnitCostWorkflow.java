@@ -36,6 +36,8 @@ public class DevelopmentUnitCostWorkflow {
             require(routes.size()==1,"请选择该BOM的具体工艺路线");
             var header=jdbc.queryForMap("select quantity,currency_code from plm_product_bom where product_bom_id=?",bom);
             var input=new LinkedHashMap<String,Object>();input.put("title","BOM单件核算");input.put("currency",text(header.get("currency_code")));input.put("taxBasis","source");input.put("bomId",bom);input.put("routeId",route);input.put("references",List.of(reference));
+            var previous=map(state.get("unitCostDraft"));
+            for(String key:List.of("extraColumns","visibleOptionalColumns"))if(previous.containsKey(key))input.put(key,previous.get(key));
             var output=(java.math.BigDecimal)header.get("quantity");
             input.put("sourceOutputQty",output);
             var rows=new ArrayList<Map<String,Object>>();

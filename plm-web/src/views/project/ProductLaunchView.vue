@@ -1478,7 +1478,7 @@ function resultLabel(value: string) {
             >{{ uiText("计划上市 ") }}{{ confirmedPlan.launchDate }}</span
           >
         </header>
-        <div class="list-scroll">
+        <div class="list-scroll" :class="{ 'unit-cost-workspace': workspace === 'cost' && costType === 'unit' }">
           <template v-if="workspace === 'cost'">
             <div class="toolbar">
               <el-radio-group :model-value="costType" @change="changeCostType"
@@ -2664,6 +2664,9 @@ h3,.work-heading{font-size:14px;font-weight:700;line-height:1.5;margin:0 0 12px}
 .save-bar .el-button--primary{font-weight:600}
 .readonly-notice{background:var(--el-fill-color-light);padding:8px 12px;line-height:1.6;border-radius:4px;flex:none}
 .list-scroll{flex:1;min-height:0;overflow:auto;overflow-x:hidden;background:var(--el-bg-color);border:1px solid var(--el-border-color-lighter);border-radius:6px}
+.unit-cost-workspace{display:flex;flex-direction:column;gap:8px;overflow:hidden;padding:8px}
+.unit-cost-workspace>.toolbar{flex:none}
+.unit-cost-workspace :deep(.unit-cost-sheet){flex:1;min-height:0}
 .project-row,.business-row,.mold-row{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--el-border-color-lighter);overflow-wrap:anywhere;min-height:44px}
 .approval-line,.phone-line{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 8px;min-width:0;overflow-wrap:anywhere}.approval-line{margin-top:5px}.approval-reason{color:var(--el-color-danger)}.application-choices{display:flex;flex-direction:column;align-items:flex-start;max-height:min(440px,60vh);overflow-y:auto;overflow-x:hidden}.application-choices .el-button{height:auto;white-space:normal;text-align:left;max-width:100%}
 .project-row>div:first-child>strong{font-size:14px;font-weight:700}
