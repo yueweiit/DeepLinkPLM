@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {computed,nextTick,onMounted,ref} from 'vue'
+import {computed,nextTick,onMounted,ref,watch} from 'vue'
 import {useResizeObserver} from '@vueuse/core'
 import {t as uiText} from '@/locales'
 import type {SelectionRow} from '@/types/partnerSelections'
@@ -9,13 +9,15 @@ const props=defineProps<{rows:SelectionRow[];busy:boolean;saveError:string;field
 const emit=defineEmits<{close:[];apply:[changes:{rowId:string;changes:Partial<SelectionRow>}[]]}>()
 const original=props.rows.map(row=>fillableColumns.map(key=>String(row[key]??'')))
 const cells=ref(original.map(row=>[...row])),activeRow=ref(Math.max(0,props.rows.findIndex(row=>!locked(row)))),activeColumn=ref(0)
-const grid=ref<HTMLElement>(),error=ref(''),reviewed=ref<{rowId:string;changes:Partial<SelectionRow>}[]>([])
+const grid=ref<HTMLElement>(),currentEditor=ref<HTMLTextAreaElement>(),error=ref(''),reviewed=ref<{rowId:string;changes:Partial<SelectionRow>}[]>([])
+const activeValue=computed(()=>cells.value[activeRow.value]?.[activeColumn.value]??'')
+const activeReadOnly=computed(()=>!props.rows[activeRow.value]||locked(props.rows[activeRow.value]))
 const differences=computed(()=>cells.value.map((row,index)=>row.map((value,column)=>value!==original[index][column]?value:'')))
 const pendingCount=computed(()=>differences.value.filter(row=>row.some(value=>value.trim())).length)
 const hasEdits=computed(()=>cells.value.some((row,index)=>row.some((value,column)=>value!==original[index][column])))
 function locked(row:SelectionRow){return !props.canEdit(row)||row.discarded||frozenSelectionRow(row)}
-function resizeCells(){void nextTick(()=>grid.value?.querySelectorAll<HTMLTextAreaElement>('textarea').forEach(cell=>{cell.style.height='0px';cell.style.height=Math.max(66,cell.scrollHeight)+'px'}))}
-function invalidate(){reviewed.value=[];error.value='';resizeCells()}
+function resizeEditor(){void nextTick(()=>{const cell=currentEditor.value;if(cell){cell.style.height='0px';cell.style.height=Math.min(144,Math.max(32,cell.scrollHeight))+'px'}})}
+function invalidate(){reviewed.value=[];error.value='';resizeEditor()}
 function focusCell(){void nextTick(()=>grid.value?.querySelector<HTMLTextAreaElement>(`[data-row="${activeRow.value}"][data-column="${activeColumn.value}"]`)?.focus())}
 function updateCell(row:number,column:number,event:Event){cells.value[row][column]=(event.target as HTMLTextAreaElement).value;invalidate()}
 function paste(event:ClipboardEvent,row:number,column:number){
@@ -40,8 +42,9 @@ function check(){
  }catch(e){error.value=e instanceof Error?e.message:String(e)}
 }
 function reset(){cells.value=original.map(row=>[...row]);invalidate()}
-useResizeObserver(grid,resizeCells)
-onMounted(()=>{resizeCells();focusCell()})
+watch([activeRow,activeColumn],resizeEditor)
+useResizeObserver(grid,resizeEditor)
+onMounted(()=>{resizeEditor();focusCell()})
 </script>
 
 <template>
@@ -51,6 +54,7 @@ onMounted(()=>{resizeCells();focusCell()})
     <strong class="active-position">{{uiText('当前填写：')}}{{activeRow+1}}{{uiText(' 行')}} · {{uiText(fieldLabel(fillableColumns[activeColumn]))}}</strong>
     <el-button :disabled="busy||!hasEdits" @click="reset">{{uiText('重置本次填写')}}</el-button>
    </div>
+   <textarea ref="currentEditor" class="current-cell-editor" :value="activeValue" :readonly="activeReadOnly" :disabled="busy" :aria-label="uiText('当前单元格内容')" :placeholder="uiText('当前单元格内容')" rows="1" @input="updateCell(activeRow,activeColumn,$event)"/>
    <p class="paste-hint">{{uiText('选中单元格后粘贴 Excel，可直接修改；空白保留原值。仅填写本页已有选样行。')}}</p>
    <div ref="grid" class="paste-grid">
     <table :aria-label="uiText('选品矩形粘贴表格')">
@@ -59,7 +63,7 @@ onMounted(()=>{resizeCells();focusCell()})
      <tbody><tr v-for="(row,index) in rows" :key="row.rowId" :class="{'locked-row':locked(row)}">
       <th scope="row" class="row-number">{{index+1}}</th><th scope="row" class="original-style">{{row.name||uiText('未命名行')}}<small v-if="locked(row)">{{uiText('不可修改')}}</small></th>
       <td v-for="(field,column) in fillableColumns" :key="field" :class="{'active-cell':activeRow===index&&activeColumn===column,'changed-cell':!!differences[index][column].trim()}">
-       <span v-if="locked(row)">{{original[index][column]||'—'}}</span>
+       <span v-if="locked(row)" tabindex="0" @focus="activeRow=index;activeColumn=column">{{original[index][column]||'—'}}</span>
        <textarea v-else :value="cells[index][column]" :data-row="index" :data-column="column" :aria-label="String(index+1)+' · '+uiText(fieldLabel(field))" :disabled="busy" rows="3" :placeholder="original[index][column]?uiText('空白保留原值'):''" @focus="activeRow=index;activeColumn=column" @input="updateCell(index,column,$event)" @paste="paste($event,index,column)"/>
       </td>
      </tr></tbody>
@@ -73,9 +77,12 @@ onMounted(()=>{resizeCells();focusCell()})
 </template>
 
 <style scoped>
-.paste-content{display:flex;flex-direction:column;gap:8px;min-height:0;height:min(560px,calc(100dvh - 190px));font-size:12px}
+.paste-content{display:flex;flex-direction:column;gap:8px;min-height:0;height:calc(100dvh - 190px);font-size:12px}
 .paste-toolbar{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;flex:none}
 .active-position{font-weight:600;color:#175fba;background:#edf5ff;border-radius:4px;padding:6px 9px}
+.current-cell-editor{box-sizing:border-box;flex:none;width:100%;min-height:32px;max-height:144px;padding:6px 8px;border:1px solid #bdd1e9;border-radius:4px;background:#fff;color:#23374e;font:inherit;line-height:18px;resize:none;overflow:auto;outline:none}
+.current-cell-editor:focus{border-color:#3785ed;box-shadow:0 0 0 1px #3785ed}
+.current-cell-editor[readonly]{background:#f4f6f8;color:#66778b}
 .paste-hint{margin:0;color:#61758c;line-height:1.5;flex:none}
 .paste-grid{flex:1;min-height:0;overflow:auto;border:1px solid #c7d5e4;border-radius:4px;background:white}
 table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;font-size:12px}
@@ -87,10 +94,10 @@ thead{position:sticky;top:0;z-index:1}thead th{background:#edf3fa;color:#294969;
 .original-style{background:#f8fafc;font-weight:500;color:#334e6a;padding:6px;line-height:1.5}
 .original-style small{display:block;color:#8590a0;font-weight:400}
 td{padding:0;color:#23374e}
-td textarea{display:block;box-sizing:border-box;width:100%;min-width:0;min-height:66px;border:0;background:transparent;padding:6px 4px;resize:none;overflow:hidden;outline:none;font:inherit;line-height:1.5;color:inherit;overflow-wrap:anywhere}
+td textarea{display:block;box-sizing:border-box;width:100%;min-width:0;height:66px;border:0;background:transparent;padding:6px 4px;resize:none;overflow:auto;outline:none;font:inherit;line-height:1.5;color:inherit;overflow-wrap:anywhere}
 .active-heading{background:#dbeaff;color:#175fba}.active-cell{outline:2px solid #3785ed;outline-offset:-2px;background:#f4f9ff}
 .changed-cell{background:#eaf5ff}.changed-cell textarea{color:#145fb3}
-.locked-row td{background:#f4f5f7;color:#8a94a2}.locked-row td span{display:block;padding:6px 4px;line-height:1.5}
+.locked-row td{background:#f4f5f7;color:#8a94a2}.locked-row td span{display:block;box-sizing:border-box;height:66px;overflow:auto;padding:6px 4px;line-height:1.5;outline:none}
 .paste-error{color:#c33535;font-size:12px;line-height:1.5;flex:none}
 .paste-summary{display:flex;gap:12px;flex-wrap:wrap;color:#245583;font-weight:600;flex:none}.paste-summary span{color:#718197;font-weight:400}
 @media(max-width:1000px){.style-column{width:94px}.number-column{width:26px}}

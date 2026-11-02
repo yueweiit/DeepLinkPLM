@@ -4,6 +4,7 @@ import dynamic from './es-dynamic.json'
 export default {
   ...ui,
   ...dynamic,
+  "当前单元格内容": "Contenido completo de la celda actual",
   "请填写样品实际放在哪个柜／层／格": "Indique el armario, nivel y casilla donde se guardan realmente las muestras",
   "系统用户（选填）": "Usuario del sistema (opcional)",
   "选中单元格后粘贴 Excel，可直接修改；空白保留原值。仅填写本页已有选样行。": "Seleccione una celda y pegue desde Excel o edítela. Los blancos conservan el valor; solo se modifican filas existentes de esta página.",
