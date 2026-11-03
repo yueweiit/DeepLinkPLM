@@ -81,8 +81,10 @@ describe('full-size preview feedback',()=>{
   let resolve!:(value:unknown)=>void;api.metadata.mockReturnValueOnce(new Promise(yes=>{resolve=yes}));api.fileBlob.mockResolvedValue(new Blob(['image'],{type:'image/png'}))
   start({files:[{id:901,name:'旧原件.xlsx',version:'V1',type:'application/octet-stream'},{id:902,name:'当前图片.png',version:'V1',type:'image/png'}]});await wrapper.findAll('button').find(button=>button.text()==='预览')!.trigger('click');await flushPromises()
   const signal=api.metadata.mock.calls[0][1].signal as AbortSignal
-  ;[...document.body.querySelectorAll('button')].find(button=>button.textContent?.includes('下一张'))!.click();await flushPromises();expect(signal.aborted).toBe(true)
-  resolve({attachmentId:901,previewable:false,previewType:'office'});await flushPromises();expect(document.body.querySelector('.preview-image')).not.toBeNull();expect(document.body.textContent).not.toContain('下载原文件');expect(api.fileBlob.mock.calls.every(call=>call[0]===902)).toBe(true)
+  expect(wrapper.getComponent(PartnerFilePreview).props('files')).toEqual([{id:901,name:'旧原件.xlsx',version:'V1',type:'application/octet-stream'}]);expect(document.body.querySelector('.preview-nav')).toBeNull()
+  wrapper.getComponent(ElDialog).vm.$emit('close');await flushPromises();expect(signal.aborted).toBe(true)
+  await wrapper.findAll('button').filter(button=>button.text()==='预览')[1].trigger('click');await flushPromises()
+  resolve({attachmentId:901,previewable:false,previewType:'office'});await flushPromises();expect(document.body.querySelector('.preview-image')).not.toBeNull();expect(api.fileBlob.mock.calls.every(call=>call[0]===902)).toBe(true)
  })
  it('aborts metadata on close and does not start the late binary preview',async()=>{
   let resolve!:(value:unknown)=>void;api.metadata.mockReturnValueOnce(new Promise(yes=>{resolve=yes}))
@@ -104,8 +106,8 @@ describe('full-size preview feedback',()=>{
   resolve(new Blob(['original workbook']));await flushPromises();expect(api.saveBlob).not.toHaveBeenCalled()
  })
  it.each(['application/pdf','text/plain'])('keeps the existing supported %s document preview',async(type)=>{
-  api.fileBlob.mockResolvedValue(new Blob(['document'],{type}));start();await wrapper.findAll('button').find(button=>button.text()==='预览')!.trigger('click');await flushPromises()
-  expect(document.body.querySelector('.preview-frame')?.getAttribute('src')).toMatch(/^blob:preview-/);expect(document.body.textContent).not.toContain('下载原文件')
+  api.fileBlob.mockResolvedValue(new Blob(['document'],{type}));start({files:[{id:91,name:type==='application/pdf'?'说明.pdf':'说明.txt',version:'V1',type,size:8}]});await wrapper.findAll('button').find(button=>button.text()==='预览')!.trigger('click');await flushPromises()
+  expect(document.body.querySelector('.preview-frame')?.getAttribute('src')).toMatch(/^blob:preview-/);expect(document.body.querySelector('.preview-stage')?.textContent).not.toContain('此格式请下载查看');expect(document.body.querySelector('.preview-nav')).toBeNull()
  })
  it('opens the dialog immediately while a slow original is loading, before any Blob arrives',async()=>{
   let resolve!:(blob:Blob)=>void;api.fileBlob.mockReturnValue(new Promise<Blob>(yes=>{resolve=yes}))
@@ -131,5 +133,20 @@ describe('full-size preview feedback',()=>{
   api.fileBlob.mockResolvedValue(new Blob(['image'],{type:'image/png'}));start();await wrapper.findAll('button').find(button=>button.text()==='预览')!.trigger('click');await flushPromises()
   const src=document.body.querySelector('.preview-image')!.getAttribute('src');await wrapper.setProps({id:8});await flushPromises()
   expect(wrapper.findComponent(PartnerFilePreview).exists()).toBe(false);expect(revoke).toHaveBeenCalledWith(src)
+ })
+})
+
+
+describe('direct image and separate attachment entries',()=>{
+ it('opens the clicked thumbnail immediately and keeps only images in its gallery without changing adopted references',async()=>{
+  api.fileBlob.mockResolvedValue(new Blob(['image'],{type:'image/png'}));start();await wrapper.findAll('.file-thumbnail')[1].trigger('click');await flushPromises()
+  const viewer=wrapper.getComponent(PartnerFilePreview);expect(viewer.props('file')).toMatchObject({id:3});expect(viewer.props('files')?.map((file:{id:number})=>file.id)).toEqual([1,3,5,7])
+  expect(wrapper.getComponent(ElDialog).props('title')).toBe('图片预览 · 2 / 4');expect(document.body.querySelector('.preview-image')).not.toBeNull()
+  expect(wrapper.find('.file-thumbnail button').exists()).toBe(false);expect(wrapper.emitted('update:modelValue')).toBeUndefined();expect(api.uploadPartnerFile).not.toHaveBeenCalled()
+ })
+ it('previews a PDF by itself rather than inserting it between image navigation targets',async()=>{
+  api.metadata.mockResolvedValueOnce({attachmentId:2,previewable:true,previewType:'pdf',previewStatus:'ready'});api.fileBlob.mockResolvedValue(new Blob(['pdf'],{type:'application/pdf'}));start()
+  await wrapper.findAll('.file-row')[1].findAll('button').find(button=>button.text()==='预览')!.trigger('click');await flushPromises()
+  expect(wrapper.getComponent(PartnerFilePreview).props('files')).toEqual([files[1]]);expect(wrapper.getComponent(ElDialog).props('title')).toBe('附件预览 · 1 / 1');expect(document.body.querySelector('.preview-nav')).toBeNull();expect(document.body.querySelector('.preview-frame')).not.toBeNull()
  })
 })

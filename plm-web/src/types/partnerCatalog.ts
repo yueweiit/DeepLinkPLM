@@ -178,6 +178,7 @@ export interface CatalogPurposePreview {
 }
 
 export interface CatalogSelectionItem extends CatalogIdentity {
+  sampleColors?: string[]
   sampleQty?: number
   phoneModelIds: number[]
   selectionIntent?: 'style'

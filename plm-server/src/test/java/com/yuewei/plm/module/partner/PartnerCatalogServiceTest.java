@@ -1054,4 +1054,25 @@ class PartnerCatalogServiceTest {
         var update=ArgumentCaptor.forClass(Map.class);verify(selections).patchCatalogRows(eq(10L),update.capture());var operation=maps(update.getValue().get("operations")).get(0);assertEquals(id,operation.get("rowId"));assertEquals(Map.of("sampleQty",0L),operation.get("changes"));verifyNoInteractions(materials);
     }
 
+
+    @Test void sampleColoursAreExplicitIntentAndPersistWithoutAllocatingSupplyPairsOrSamples(){
+        sourceRow("XD");var saved=new LinkedHashMap<String,Map<String,Object>>();writableTarget(saved,new java.util.concurrent.atomic.AtomicLong(3));
+        var command=item(9L,"XD");var choice=maps(command.get("items")).get(0);choice.put("selectionIntent","style");choice.put("phoneModelIds",List.of());choice.put("sampleColors",List.of(" 黑色 ","白色","黑色"));
+        var preview=catalog.additionPreview(command);assertEquals(true,preview.get("canAdd"));assertEquals(List.of("黑色","白色"),maps(preview.get("items")).get(0).get("sampleColors"));command.put("previewToken",preview.get("previewToken"));catalog.addToSelection(command);
+        var stored=decode(store.json,saved.values().iterator().next().get("data"));assertEquals(List.of("黑色","白色"),stored.get("sampleColors"));assertEquals(List.of(),stored.get("selectedPairs"));assertEquals(List.of(),stored.get("phoneModelIds"));assertFalse(stored.containsKey("sampleBatches"));assertFalse(stored.containsKey("newSupplierColors"));verify(store,never()).create(anyString(),anyString());
+    }
+    @Test void previewTokenBindsTheExactChosenColours(){
+        sourceRow("XD");writableTarget(new LinkedHashMap<>(),new java.util.concurrent.atomic.AtomicLong(3));var command=item(9L,"XD");var choice=maps(command.get("items")).get(0);choice.put("sampleColors",List.of("黑色"));previewed(command);choice.put("sampleColors",List.of("白色"));
+        assertThrows(BusinessException.class,()->catalog.addToSelection(command));verify(selections,never()).patchCatalogRows(anyLong(),anyMap());
+    }
+    @Test void addingColourToAnExistingStyleDraftUpdatesTheSameRowAndPreservesItsOtherFields(){
+        sourceRow("XD");String id=UUID.randomUUID().toString();var saved=new LinkedHashMap<String,Map<String,Object>>();saved.put(id,existingStyleDraft(id));writableTarget(saved,new java.util.concurrent.atomic.AtomicLong(3));
+        var command=item(9L,"XD");var choice=maps(command.get("items")).get(0);choice.put("selectionIntent","style");choice.put("phoneModelIds",List.of());choice.put("sampleColors",List.of("黑色","白色"));var result=catalog.addToSelection(previewed(command));
+        assertEquals(0L,number(result.get("addedCount")));assertEquals(1L,number(result.get("updatedCount")));assertEquals(List.of(id),result.get("rowIds"));var update=ArgumentCaptor.forClass(Map.class);verify(selections).patchCatalogRows(eq(10L),update.capture());var operation=maps(update.getValue().get("operations")).get(0);assertEquals(id,operation.get("rowId"));assertEquals(Map.of("sampleColors",List.of("黑色","白色")),operation.get("changes"));verifyNoInteractions(materials);
+    }
+    @Test void omissionDoesNotClearSavedColoursAndConfirmedChoicesCannotBeOverwritten(){
+        sourceRow("XD");String id=UUID.randomUUID().toString();var saved=new LinkedHashMap<String,Map<String,Object>>();var previous=existingStyleDraft(id);var data=decode(store.json,previous.get("data"));data.put("sampleColors",List.of("黑色"));previous.put("data",encode(store.json,data));previous.put("confirmed",true);saved.put(id,previous);writableTarget(saved,new java.util.concurrent.atomic.AtomicLong(3));
+        var command=item(9L,"XD");var choice=maps(command.get("items")).get(0);choice.put("selectionIntent","style");choice.put("phoneModelIds",List.of());catalog.addToSelection(previewed(command));verify(selections,never()).patchCatalogRows(anyLong(),anyMap());assertEquals(previous,saved.get(id));
+        choice.put("sampleColors",List.of("白色"));var preview=catalog.additionPreview(command);assertEquals(false,preview.get("canAdd"));assertTrue(preview.toString().contains("先修改选样再调整颜色"));assertEquals(previous,saved.get(id));
+    }
 }

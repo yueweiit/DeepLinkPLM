@@ -22,7 +22,11 @@ const emit=defineEmits<{close:[];saved:[result:SelectionReceiptResult];busy:[val
 const user=useUserStore(),actor=String(user.profile?.userId||''),actorChanged=ref(false)
 const router=useRouter(),busy=ref(false),loading=ref(true),error=ref(''),unknown=ref(false),phase=ref<'edit'|'saved'>('edit'),result=ref<SelectionReceiptResult>(),preview=ref<SelectionReceiptPreview>(),showIssues=ref(false)
 const shared=reactive({date:'',location:'',ownerUserId:user.profile?.userId as number|undefined,ownerName:user.profile?.userName||''}),lines=ref<SelectionReceiptInputRow[]>([]),metadata=ref(new Map<string,SelectionReceiptPreviewRow>()),requestId=ref<string>(newRequestId())
+const page=ref(1),pageSize=50
+const visibleLines=computed(()=>lines.value.slice((page.value-1)*pageSize,page.value*pageSize))
+watch(()=>lines.value.length,count=>{page.value=Math.min(page.value,Math.max(1,Math.ceil(count/pageSize)))})
 type BulkSpec={id:string;colorName:string;qty?:number}
+type BulkValues=Pick<BulkSpec,'colorName'|'qty'>
 const blankBulkSpec=():BulkSpec=>({id:newRequestId(),colorName:''})
 const bulkSpecs=ref<BulkSpec[]>([blankBulkSpec()]),checkedLines=ref(new Set<string>()),bulkPhoneIds=ref<number[]>([])
 const hasBulkValues=computed(()=>bulkPhoneIds.value.length>0||bulkSpecs.value.some(spec=>spec.colorName.trim()||spec.qty!=null))
@@ -86,39 +90,49 @@ async function applyBulk(){
  }
  ElMessage.success(uiText('已应用到{value0}款型号，共{value1}条收样规格',{value0:(groups.size),value1:(plan.length)}))
 }
-async function applyBulkModels(targets:SelectionReceiptInputRow[],specs:BulkSpec[]){
- if(bulkPhoneProblems.value.length){ElMessage.warning(uiText('部分款式不包含所选实收型号，请调整勾选款式或型号'));return}
+async function selectAllStyleModels(){
+ if(bulkDisabled.value||String(user.profile?.userId||'')!==actor)return
+ const targets=selectedBulkLines.value
+ if(!targets.length){ElMessage.warning(uiText('请先勾选要填写的收样规格'));return}
+ await applyBulkModels(targets,[],true)
+}
+async function applyBulkModels(targets:SelectionReceiptInputRow[],specs:BulkValues[],allStyleModels=false){
+ if(!allStyleModels&&bulkPhoneProblems.value.length){ElMessage.warning(uiText('部分款式不包含所选实收型号，请调整勾选款式或型号'));return}
  if(specs.length>1&&specs.some(spec=>!spec.colorName)){ElMessage.warning(uiText('多种颜色请逐行填写颜色名称'));return}
  if(new Set(specs.filter(spec=>spec.colorName).map(spec=>colorKey(spec.colorName))).size!==specs.filter(spec=>spec.colorName).length){ElMessage.warning(uiText('批量颜色重复，请合并为一行'));return}
  const styles=new Map<string,SelectionReceiptInputRow[]>()
  for(const line of targets){const key=JSON.stringify([line.rowId,line.rowVersion]);if(!styles.has(key))styles.set(key,[]);styles.get(key)!.push(line)}
- const reserved=new Set<string>(),plan:{line?:SelectionReceiptInputRow;anchor:SelectionReceiptInputRow;phoneId:number;spec?:BulkSpec}[]=[]
+ const reserved=new Set<string>(),plan:{line?:SelectionReceiptInputRow;anchor:SelectionReceiptInputRow;phoneId:number;spec?:BulkValues}[]=[]
  for(const selected of styles.values()){
   const anchor=selected[0]!,sourceLines=lines.value.filter(line=>line.rowId===anchor.rowId&&line.rowVersion===anchor.rowVersion)
-  for(const phoneId of [...new Set(bulkPhoneIds.value)]){
+  const styleSpecs:BulkValues[]=allStyleModels?(info(anchor)?.sampleColors||[]).map(colorName=>({colorName})):specs
+  const phoneIds=allStyleModels?[...new Set((info(anchor)?.phones||[]).filter(phone=>!unavailablePhone(phone)).map(phone=>phone.phoneModelId))]:[...new Set(bulkPhoneIds.value)]
+  if(allStyleModels&&!phoneIds.length){ElMessage.warning(uiText('所选款式暂无可用型号，请先核对型号资料'));return}
+  for(const phoneId of phoneIds){
    const scoped=sourceLines.filter(line=>line.phoneModelId===phoneId),checked=scoped.filter(line=>checkedLines.value.has(line.clientRowId))
-   if(!specs.length||specs.length===1&&!specs[0]!.colorName){
+   if(!styleSpecs.length||styleSpecs.length===1&&!styleSpecs[0]!.colorName){
     if(scoped.length){
-     if(!specs.length)continue
+     if(!styleSpecs.length)continue
      if(!checked.length){ElMessage.warning(uiText('该款该型号已有未勾选规格，请勾选后应用'));return}
-     for(const line of checked){reserved.add(line.clientRowId);plan.push({line,anchor,phoneId,spec:specs[0]})}
+     for(const line of checked){reserved.add(line.clientRowId);plan.push({line,anchor,phoneId,spec:styleSpecs[0]})}
     }else{
      const blank=selected.find(line=>!line.phoneModelId&&!reserved.has(line.clientRowId))
      if(blank)reserved.add(blank.clientRowId)
-     plan.push({line:blank,anchor,phoneId,spec:specs[0]})
+     plan.push({line:blank,anchor,phoneId,spec:styleSpecs[0]})
     }
     continue
    }
-   const missing:BulkSpec[]=[]
-   for(const spec of specs){
+   const missing:BulkValues[]=[]
+   for(const spec of styleSpecs){
     const matches=scoped.filter(line=>colorKey(colorValue(line))===colorKey(spec.colorName))
+    if(allStyleModels&&matches.length)continue
     if(matches.some(line=>!checkedLines.value.has(line.clientRowId))){ElMessage.warning(uiText('该款已有未勾选的同色规格，请勾选后应用'));return}
     if(matches.length>1){ElMessage.warning(uiText('该款有多条同名颜色规格，请先逐条核对'));return}
     const line=matches[0]
     if(line){reserved.add(line.clientRowId);plan.push({line,anchor,phoneId,spec})}else missing.push(spec)
    }
    for(const spec of missing){
-    const blank=selected.find(line=>!reserved.has(line.clientRowId)&&(!line.phoneModelId||line.phoneModelId===phoneId)&&!line.colorId&&!colorValue(line).trim())
+    const blank=selected.find(line=>!reserved.has(line.clientRowId)&&(!line.phoneModelId||line.phoneModelId===phoneId)&&!line.colorId&&(!colorValue(line).trim()||allStyleModels&&!line.phoneModelId&&colorKey(colorValue(line))===colorKey(spec.colorName)))
     if(blank)reserved.add(blank.clientRowId)
     plan.push({line:blank,anchor,phoneId,spec})
    }
@@ -133,8 +147,9 @@ async function applyBulkModels(targets:SelectionReceiptInputRow[],specs:BulkSpec
   if(item.spec?.colorName){if(item.spec.colorName===colorValue(line).trim())line.colorName=item.spec.colorName;else colorInput(line,item.spec.colorName)}
   if(item.spec?.qty!=null)line.qty=item.spec.qty
  }
+ if(allStyleModels)bulkPhoneIds.value=[]
  if(phonesChanged){await options();preview.value=undefined}
- ElMessage.success(uiText('实收型号已应用，已有规格保留，可继续逐条调整'))
+ ElMessage.success(uiText(allStyleModels?'已按各款型号全选，已有规格保留，可继续填写颜色和数量':'实收型号已应用，已有规格保留，可继续逐条调整'))
 }
 const identityOptions=ref(new Map<string,SampleIdentity[]>()),exactIdentityIds=ref(new Map<string,Set<number>>()),identityLoading=ref(new Set<string>()),identityReview=ref(new Map<string,string>()),printOpen=ref(false)
 const printLabels=computed<SampleLabel[]>(()=>[...new Map((result.value?.batches||[]).filter(b=>b.sampleIdentityId&&b.sampleCode).map(b=>[b.sampleIdentityId,{sampleIdentityId:b.sampleIdentityId!,sampleCode:b.sampleCode!,name:b.name,supplierName:b.supplierName,phoneName:b.phoneName,colorName:b.colorName}])).values()])
@@ -173,17 +188,27 @@ function invalidate(){if(initializing||unknown.value||actorChanged.value||phase.
 watch([shared,lines],invalidate,{deep:true})
 function acceptOptions(data:SelectionReceiptPreview){preview.value=data;for(const item of data.rows)metadata.value.set(item.clientRowId,{...item,phones:item.phones||[],colors:item.colors||[],refs:item.refs||[],messages:item.messages||[]})}
 async function options(){const seq=++sequence;loading.value=true;error.value='';try{const data=await previewSelectionReceipts(props.id,payload());if(seq!==sequence)return;acceptOptions(data);for(const line of lines.value){const phones=info(line)?.phones||[];if(!line.phoneModelId&&phones.length===1)line.phoneModelId=phones[0].phoneModelId}}catch(e){if(seq===sequence)error.value=partnerError(e)}finally{if(seq===sequence)loading.value=false}}
-async function initialize(){if(!actor){loading.value=false;initializing=false;actorChanged.value=true;error.value='登录身份尚未就绪，请重新进入收样。';return}lines.value=props.rows.map(row=>({clientRowId:newRequestId(),rowId:row.rowId,rowVersion:row.rowVersion||0}));selectInitialLines();try{const stored=sessionStorage.getItem(pendingKey);if(stored){const pending=JSON.parse(stored) as {actor:string;input:SelectionReceiptInput;metadata:SelectionReceiptPreviewRow[]};if(pending.actor!==actor)throw new Error('收样身份不符');pendingPayload=pending.input;requestId.value=pending.input.requestId;Object.assign(shared,{date:pending.input.date,location:pending.input.location,ownerUserId:pending.input.ownerUserId,ownerName:pending.input.ownerName});lines.value=pending.input.rows;selectInitialLines();metadata.value=new Map(pending.metadata.map(row=>[row.clientRowId,row]));unknown.value=true;phase.value='edit';loading.value=false;error.value='上次保存结果尚未核对，请先核对本次保存结果。';emit('busy',true);initializing=false;return}}catch{clearPending()}await options();initializing=false;preview.value=undefined;for(const line of lines.value)if(line.phoneModelId&&line.colorId)void identitiesFor(line)}
+async function initialize(){if(!actor){loading.value=false;initializing=false;actorChanged.value=true;error.value='登录身份尚未就绪，请重新进入收样。';return}lines.value=props.rows.map(row=>({clientRowId:newRequestId(),rowId:row.rowId,rowVersion:row.rowVersion||0}));selectInitialLines();try{const stored=sessionStorage.getItem(pendingKey);if(stored){const pending=JSON.parse(stored) as {actor:string;input:SelectionReceiptInput;metadata:SelectionReceiptPreviewRow[]};if(pending.actor!==actor)throw new Error('收样身份不符');pendingPayload=pending.input;requestId.value=pending.input.requestId;Object.assign(shared,{date:pending.input.date,location:pending.input.location,ownerUserId:pending.input.ownerUserId,ownerName:pending.input.ownerName});lines.value=pending.input.rows;selectInitialLines();metadata.value=new Map(pending.metadata.map(row=>[row.clientRowId,row]));unknown.value=true;phase.value='edit';loading.value=false;error.value='上次保存结果尚未核对，请先核对本次保存结果。';emit('busy',true);initializing=false;return}}catch{clearPending()}await options();prefillColors();selectInitialLines();initializing=false;preview.value=undefined;for(const line of lines.value)if(line.phoneModelId&&line.colorId)void identitiesFor(line)}
 watch(()=>user.profile?.userId,value=>{if(String(value||'')!==actor){actorChanged.value=true;unknown.value=false;lines.value=[];checkedLines.value.clear();bulkSpecs.value=[blankBulkSpec()];bulkPhoneIds.value=[];metadata.value=new Map();Object.assign(shared,{date:'',location:'',ownerUserId:undefined,ownerName:''});error.value='登录账号已改变，请重新进入收样。';emit('busy',false)}})
 void initialize()
 function createLine(line:SelectionReceiptInputRow):SelectionReceiptInputRow{const clientRowId=newRequestId(),source=info(line);if(source)metadata.value.set(clientRowId,{...source,clientRowId,messages:[],canSave:false});return{clientRowId,rowId:line.rowId,rowVersion:line.rowVersion,phoneModelId:line.phoneModelId}}
-function addLine(line:SelectionReceiptInputRow){lines.value.push(createLine(line))}
+function prefillColors(){
+ if(!lines.value.some(line=>info(line)?.sampleColors?.length))return
+ const seeded:SelectionReceiptInputRow[]=[]
+ for(const line of lines.value){
+  const colors=info(line)?.sampleColors||[]
+  if(!colors.length){seeded.push(line);continue}
+  for(const [index,colorName] of colors.entries()){const next=index===0?line:createLine(line);next.colorName=colorName;seeded.push(next)}
+ }
+ lines.value=seeded
+}
+function addLine(line:SelectionReceiptInputRow){lines.value.push(createLine(line));page.value=Math.ceil(lines.value.length/pageSize)}
 function removeLine(line:SelectionReceiptInputRow){checkedLines.value.delete(line.clientRowId);lines.value=lines.value.filter(item=>item.clientRowId!==line.clientRowId)}
 async function setPhone(line:SelectionReceiptInputRow,ids:number[]){if(bulkDisabled.value)return;const next=ids[0];if(next===line.phoneModelId)return;const name=colorValue(line);line.phoneModelId=next;line.colorName=name;await phoneChanged(line)}
 async function phoneChanged(line:SelectionReceiptInputRow){line.colorId=undefined;clearColorIdentity(line);await options();preview.value=undefined}
 function persistPending(input:SelectionReceiptInput){pendingPayload=input;try{sessionStorage.setItem(pendingKey,JSON.stringify({actor,input,metadata:[...metadata.value.values()]}))}catch{/* The in-memory request is retained if browser storage is unavailable. */}}
 function isUnknown(e:unknown){const failure=e as {code?:string;response?:{status?:number}};return ['ECONNABORTED','ETIMEDOUT','ERR_NETWORK'].includes(failure?.code||'')||Number(failure?.response?.status)>=500}
-async function save(){if(actorChanged.value||String(user.profile?.userId||'')!==actor){error.value='登录账号已改变，请重新进入收样。';return}if(busy.value||loading.value||!lines.value.length)return;setBusy(true);error.value='';if(lines.value.some(line=>needsIdentityReason(line)&&!line.identityReason?.trim())){error.value='选择其他来源的已有样品码时，请填写同物核对原因';setBusy(false);return}const input=pendingPayload||payload();try{if(!unknown.value){const checked=await previewSelectionReceipts(props.id,input);if(actorChanged.value)return;acceptOptions(checked);showIssues.value=true;if(!checked.canSave)return}persistPending(input);const saved=await saveSelectionReceipts(props.id,input);if(actorChanged.value){clearPending();return}unknown.value=false;clearPending();result.value=saved;phase.value='saved';emit('saved',saved)}catch(e){if(actorChanged.value)return;unknown.value=!!pendingPayload&&isUnknown(e);if(unknown.value)error.value='保存结果待核对。请保持本次资料，点击“核对本次保存结果”，不会另建一笔收样。';else{pendingPayload=undefined;clearPending();error.value=partnerError(e)}}finally{setBusy(false)}}
+async function save(){if(actorChanged.value||String(user.profile?.userId||'')!==actor){error.value='登录账号已改变，请重新进入收样。';return}if(busy.value||loading.value||!lines.value.length)return;setBusy(true);error.value='';if(lines.value.some(line=>needsIdentityReason(line)&&!line.identityReason?.trim())){error.value='选择其他来源的已有样品码时，请填写同物核对原因';setBusy(false);return}const input=pendingPayload||payload();try{if(!unknown.value){const checked=await previewSelectionReceipts(props.id,input);if(actorChanged.value)return;acceptOptions(checked);showIssues.value=true;if(!checked.canSave){const firstIssue=lines.value.findIndex(line=>info(line)?.messages.length);if(firstIssue>=0)page.value=Math.floor(firstIssue/pageSize)+1;return}}persistPending(input);const saved=await saveSelectionReceipts(props.id,input);if(actorChanged.value){clearPending();return}unknown.value=false;clearPending();result.value=saved;phase.value='saved';emit('saved',saved)}catch(e){if(actorChanged.value)return;unknown.value=!!pendingPayload&&isUnknown(e);if(unknown.value)error.value='保存结果待核对。请保持本次资料，点击“核对本次保存结果”，不会另建一笔收样。';else{pendingPayload=undefined;clearPending();error.value=partnerError(e)}}finally{setBusy(false)}}
 
 function close(){if(actorChanged.value){emit('close');return}if(busy.value)return;if(unknown.value){ElMessage.warning(uiText('请先核对本次保存结果，避免重复登记。'));return}emit('close')}
 function viewBatch(id:number){void router.push({path:'/samples',query:{id,from:props.from}});emit('close')}
@@ -204,7 +229,7 @@ onBeforeUnmount(()=>{sequence++;emit('busy',false)})
    <div v-if="showIssues&&preview?.messages?.length" class="receipt-errors" role="alert"><p v-for="message in preview.messages" :key="message">{{message}}</p></div>
    <div v-if="showBulk" class="receipt-bulk">
     <div class="receipt-bulk-scope"><el-checkbox :model-value="allBulkChecked" :indeterminate="someBulkChecked" :disabled="bulkDisabled" :aria-label='uiText("全选本次收样规格")' @change="checkAllBulk(Boolean($event))">{{ uiText("全选") }}</el-checkbox><span>{{ uiText("已勾选 ") }}{{selectedBulkLines.length}}{{ uiText(" 条") }}</span></div>
-    <div class="receipt-bulk-inputs"><label class="receipt-bulk-model">{{ uiText("实收型号（可多选）") }}<PhoneModelMultiSelect v-model="bulkPhoneIds" :members="bulkPhones" :allowed-ids="bulkPhones.map(phone=>phone.phoneModelId)" :disabled="bulkDisabled" :aria-label='uiText("批量实收型号")' :placeholder='uiText("选择本次实际收到的型号")'/></label><div v-if="bulkPhoneProblems.length" class="receipt-errors" role="alert"><p>{{ uiText("以下款式不包含所选型号，尚未应用：") }}</p><p v-for="problem in bulkPhoneProblems" :key="problem">{{problem}}</p></div><div class="receipt-bulk-specs">
+    <div class="receipt-bulk-inputs"><div class="receipt-bulk-model"><div class="receipt-model-heading"><span>{{ uiText("实收型号（可多选）") }}</span><el-button size="small" :disabled="bulkDisabled||!selectedBulkLines.length" @click="selectAllStyleModels">{{ uiText("选择各款全部型号") }}</el-button></div><PhoneModelMultiSelect v-model="bulkPhoneIds" :members="bulkPhones" :allowed-ids="bulkPhones.map(phone=>phone.phoneModelId)" :disabled="bulkDisabled" :aria-label='uiText("批量实收型号")' :placeholder='uiText("选择本次实际收到的型号")'/></div><details v-if="bulkPhoneProblems.length" class="receipt-errors receipt-bulk-issues"><summary>{{ uiText("{value0}款的型号范围不同，查看说明",{value0:bulkPhoneProblems.length}) }}</summary><p>{{ uiText("以下款式不包含所选型号，尚未应用：") }}</p><p v-for="problem in bulkPhoneProblems" :key="problem">{{problem}}</p></details><div class="receipt-bulk-specs">
      <div v-for="(spec,index) in bulkSpecs" :key="spec.id" class="receipt-bulk-line">
       <label class="receipt-bulk-color">{{ uiText("颜色") }}<el-input v-model="spec.colorName" size="small" clearable :placeholder='uiText("如：黑色")' :maxlength="255" :aria-label="uiText('批量实收颜色')+(index?index+1:'')" :disabled="bulkDisabled"/></label>
       <label class="receipt-bulk-qty">{{ uiText("每条数量") }}<el-input-number v-model="spec.qty" :key="spec.id+':bulk-qty:'+bulkDisabled" size="small" :min="1" :max="Number.MAX_SAFE_INTEGER" :precision="0" :controls="false" :placeholder='uiText("选填")' :aria-label="uiText('批量实收数量')+(index?index+1:'')" :disabled="bulkDisabled"/></label>
@@ -216,7 +241,7 @@ onBeforeUnmount(()=>{sequence++;emit('busy',false)})
    </div>
    <div class="receipt-table" role="table" :aria-label='uiText("本次实际收样")' v-loading="loading">
     <div class="receipt-head" role="row"><span role="columnheader">{{ uiText("图片") }}</span><span role="columnheader">{{ uiText("款式") }}</span><span role="columnheader">{{ uiText("实收型号") }}</span><span role="columnheader">{{ uiText("实收颜色") }}</span><span role="columnheader">{{ uiText("实收数量") }}</span><span role="columnheader">{{ uiText("操作") }}</span></div>
-    <article v-for="line in lines" :key="line.clientRowId" class="receipt-row" role="row">
+    <article v-for="line in visibleLines" :key="line.clientRowId" class="receipt-row" role="row">
      <div class="receipt-image" role="cell"><PartnerPhoto v-for="file in photos(line).slice(0,1)" :key="file.id" :id="file.id"/><span v-if="!photos(line).length" class="receipt-placeholder">{{ uiText("暂无图片") }}</span></div>
      <div class="receipt-style" role="cell"><span>{{styleLabel(line)}}</span><el-checkbox v-if="showBulk" class="receipt-row-check" :model-value="checkedLines.has(line.clientRowId)" :aria-label="uiText('勾选{value0}收样规格',{value0:(styleName(line))})" :disabled="bulkDisabled" @change="checkBulkLine(line.clientRowId,Boolean($event))"><strong>{{styleName(line)}}</strong></el-checkbox><strong v-else>{{styleName(line)}}</strong></div>
      <div class="receipt-model" role="cell"><span class="receipt-label">{{ uiText("实收型号") }}</span><strong v-if="info(line)?.phones.length===1" class="receipt-phone-value">{{phoneLabel(line)}}</strong><PhoneModelMultiSelect v-show="info(line)?.phones.length!==1" :model-value="line.phoneModelId?[line.phoneModelId]:[]" :members="info(line)?.phones||[]" :allowed-ids="(info(line)?.phones||[]).map(phone=>phone.phoneModelId)" :multiple="false" :placeholder='uiText("选择已选型号")' :aria-label="uiText('{value0}实收型号',{value0:(styleName(line))})" :disabled="busy||loading||unknown" @update:model-value="ids=>setPhone(line,ids)"/></div>
@@ -227,6 +252,7 @@ onBeforeUnmount(()=>{sequence++;emit('busy',false)})
      <div v-if="showIssues&&info(line)?.messages.length" class="receipt-row-errors" role="alert"><p v-for="message in info(line)?.messages" :key="message">{{message}}</p></div>
     </article>
    </div>
+   <el-pagination v-if="lines.length>pageSize" v-model:current-page="page" class="receipt-pagination" :page-size="pageSize" :total="lines.length" :pager-count="5" layout="total,prev,pager,next" :disabled="busy||loading||actorChanged" :aria-label="uiText('收样规格分页')"/>
    <p class="receipt-summary">{{ uiText("本次 ") }}{{lines.length}}{{ uiText(" 条实收规格，合计 ") }}{{totalQty}}{{ uiText(" 件。保存后生成各自的真实样品批次号。") }}</p>
   </section>
   <section v-if="phase==='saved'&&!actorChanged" class="receipt-saved">
@@ -240,6 +266,7 @@ onBeforeUnmount(()=>{sequence++;emit('busy',false)})
 </template>
 
 <style scoped>
+.receipt-model-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px 8px}.receipt-bulk-issues>summary{cursor:pointer;font-size:12px;line-height:1.6}.receipt-pagination{margin-top:8px;min-width:0;flex-wrap:wrap}
 :global(.selection-receipt-dialog){display:flex;flex-direction:column;max-height:calc(100dvh - 40px);margin-top:20px;margin-bottom:20px;box-sizing:border-box}
 :global(.selection-receipt-dialog>.el-dialog__header),:global(.selection-receipt-dialog>.el-dialog__footer){flex:none}
 :global(.selection-receipt-dialog>.el-dialog__body){min-height:0;overflow-y:auto;overscroll-behavior:contain;container-type:inline-size}

@@ -1,5 +1,5 @@
 import { DOMWrapper, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import ElementPlus, { ElCheckboxGroup, ElDialog, ElInputNumber, ElMessageBox, ElRadioGroup, ElTag } from 'element-plus'
+import ElementPlus, {  ElDialog, ElInputNumber, ElMessageBox, ElRadioGroup, ElTag } from 'element-plus'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CatalogStyle } from '@/types/partnerCatalog'
 const api = vi.hoisted(() => ({ selectionPage: vi.fn(), addCatalogSelection: vi.fn(), previewCatalogSelection: vi.fn() }))
@@ -9,6 +9,7 @@ vi.mock('@/api/modules/partner', () => ({ newRequestId: () => crypto.randomUUID(
 vi.mock('@/components/PhoneModelMultiSelect/index.vue', () => ({ default: { name: 'PhoneModelMultiSelect', props: ['modelValue', 'members', 'allowedIds', 'disabled'], emits: ['update:modelValue','selected'], template: '<div class="real-master-selector-contract"/>' } }))
 vi.mock('../PartnerPhoto.vue', () => ({ default: { props: ['id'], template: '<span>本款图片</span>' } }))
 import Dialog from '../catalog/CatalogSelectionDialog.vue'
+import SampleColorSelect from '../selection/SampleColorSelect.vue'
 let wrapper: VueWrapper
 const identity = { sourceKind: 'quote' as const, recordId: 72, rowId: 'stable-source', rowVersion: 5, recordVersion: 8 }
 const source = (overrides: Partial<CatalogStyle> = {}): CatalogStyle => ({ ...identity, sourceCode: 'SQ-72', sourceName: '供应商全量资料', supplierCode: 'SUP-REAL', supplierName: '供方真实名', name: '真实磁吸款', phoneModelIds: [11, 17, 18], phones: [11, 17, 18].map(phoneModelId => ({ phoneModelId, brandId: 1, brandName: 'Apple', modelName: `iPhone ${phoneModelId}`, phoneModelCode: String(phoneModelId).padStart(4, '0') })) as CatalogStyle['phones'], refs: [], fileDetails: [], ...overrides })
@@ -100,14 +101,14 @@ describe('explicit source subset to my selection', () => {
   })
   it('restores the same temporary model and colour choices when style-only mode is turned off', async () => {
     await start([source({ pairings: [{ phoneModelId: 18, colorId: 4, state: 'available', colorSnapshot: { id: 4, name: '原黑色' } }] })])
-    await chooseModels([18]); modelRow().getComponent(ElCheckboxGroup).vm.$emit('update:modelValue', ['18:4']); await flushPromises()
+    await chooseModels([18]); modelRow().getComponent(SampleColorSelect).vm.$emit('update:modelValue', ['原黑色']); await flushPromises()
     await chooseStyleOnly(); await modelRow().get('.selection-style-text input').setValue('暂时保留的选品原文')
-    expect((wrapper.vm as unknown as { selectedItems: unknown[] }).selectedItems).toEqual([{ ...identity, phoneModelIds: [], selectionIntent: 'style', selectionModelText: '暂时保留的选品原文' }])
+    expect((wrapper.vm as unknown as { selectedItems: unknown[] }).selectedItems).toEqual([{ ...identity, phoneModelIds: [], selectionIntent: 'style', selectionModelText: '暂时保留的选品原文', sampleColors:['原黑色'] }])
     expect(modelRow().get('header small').text()).toContain('本次选 0 个')
     await chooseStyleOnly(false)
-    expect(rowPicker().props('modelValue')).toEqual([18]); expect(modelRow().getComponent(ElCheckboxGroup).props('modelValue')).toEqual(['18:4'])
+    expect(rowPicker().props('modelValue')).toEqual([18]); expect(modelRow().getComponent(SampleColorSelect).props('modelValue')).toEqual(['原黑色'])
     await click('保存选样')
-    expect(api.addCatalogSelection.mock.calls[0][0].items).toEqual([{ ...identity, phoneModelIds: [18], selectedPairs: [{ phoneModelId: 18, colorId: 4 }] }])
+    expect(api.addCatalogSelection.mock.calls[0][0].items).toEqual([{ ...identity, phoneModelIds: [18], sampleColors:['原黑色'] }])
   })
   it('keeps a style-only exception through batch application and leaves it only on explicit restoration or clear', async () => {
     await start([source(), source({ rowId: 'second' })]); await chooseStyleOnly()
@@ -238,7 +239,7 @@ describe('explicit source subset to my selection', () => {
     expect(rowPicker().props('modelValue')).toEqual([17]); expect(rowPicker(1).props('modelValue')).toEqual([]); expect(rowPicker(2).props('modelValue')).toEqual([])
     expect(rowPicker(2).props('disabled')).toBe(true); expect(modelRow(2).text()).toContain('请先核对来源型号表')
     expect(modelRow(1).text()).toContain('不代表已确认可供'); expect(button('保存选样').attributes('disabled')).toBeDefined()
-    expect(wrapper.get('.selection-total').text()).toContain('已选 1 款'); expect(wrapper.getComponent(ElCheckboxGroup).props('modelValue')).toEqual([])
+    expect(wrapper.get('.selection-total').text()).toContain('已选 1 款'); expect(modelRow().getComponent(SampleColorSelect).props('modelValue')).toEqual([])
     await clickRow('本次不选', 1); await clickRow('本次不选', 2)
     await flushPromises(); await click('保存选样')
     expect(api.addCatalogSelection.mock.calls[0][0].items).toEqual([{ ...identity, phoneModelIds: [17] }]); expect(actual.phoneModelIds).toEqual([11, 17, 18])
@@ -324,27 +325,25 @@ describe('explicit source subset to my selection', () => {
     await chooseModels([18]);await flushPromises();await click('保存选样')
     expect(api.addCatalogSelection.mock.calls[0][0].items).toEqual([{...identity,phoneModelIds:[18]}])
   })
-  it('only offers named real supply pairs for chosen phones and never forms a color cross product', async () => {
+  it('offers colour names as suggestions and saves only explicitly selected names, without making supply pairs', async () => {
     await start([source({ color: '黑／蓝', pairings: [{ phoneModelId: 18, colorId: 4, state: 'available', colorSnapshot: { id: 4, name: '供方原黑' } }, { phoneModelId: 17, colorId: 5, state: 'unavailable', colorSnapshot: { id: 5, name: '明确不供蓝' } }, { phoneModelId: 17, colorId: 6, state: 'available' }] })]); await chooseModels([18])
-    expect(wrapper.text()).toContain('供方原黑'); expect(wrapper.text()).not.toContain('明确不供蓝'); expect(wrapper.text()).not.toContain('颜色 #')
-    wrapper.getComponent(ElCheckboxGroup).vm.$emit('update:modelValue', ['18:4']); await flushPromises(); await flushPromises(); await click('保存选样')
-    expect(api.previewCatalogSelection.mock.calls[0][0].items[0]).toMatchObject({ phoneModelIds: [18], selectedPairs: [{ phoneModelId: 18, colorId: 4 }] })
+    const colours=modelRow().getComponent(SampleColorSelect)
+    expect(colours.props('options')).toContain('供方原黑');expect(colours.props('options')).not.toContain('明确不供蓝');expect(wrapper.text()).not.toContain('颜色 #')
+    colours.vm.$emit('update:modelValue',['供方原黑']);await flushPromises();await click('保存选样')
+    expect(api.previewCatalogSelection.mock.calls[0][0].items[0]).toMatchObject({phoneModelIds:[18],sampleColors:['供方原黑']})
+    expect(api.previewCatalogSelection.mock.calls[0][0].items[0]).not.toHaveProperty('selectedPairs')
   })
-  it('preserves an individual colour choice during batch changes and drops it only on explicit restoration without reviving it later', async () => {
-    await start([source({ pairings: [{ phoneModelId: 17, colorId: 4, state: 'available', colorSnapshot: { id: 4, name: '真实供方黑' } }] }), source({ rowId: 'second' })])
-    await chooseBatchModels([17]); await applyBatch(); await openRow()
-    modelRow().getComponent(ElCheckboxGroup).vm.$emit('update:modelValue', ['17:4']); await flushPromises()
-    await chooseBatchModels([18]); await applyBatch()
-    expect(rowPicker().props('modelValue')).toEqual([17]); expect(rowPicker(1).props('modelValue')).toEqual([18]); expect(modelRow().text()).toContain('已单独调整')
-    expect(modelRow().getComponent(ElCheckboxGroup).props('modelValue')).toEqual(['17:4'])
-    await flushPromises(); await flushPromises()
-    expect((wrapper.vm as unknown as {selectedItems:unknown[]}).selectedItems).toEqual([{ ...identity, phoneModelIds: [17], selectedPairs: [{ phoneModelId: 17, colorId: 4 }] }, { ...identity, rowId: 'second', phoneModelIds: [18] }])
-    await flushPromises(); await clickRow('恢复统一选择')
-    expect(rowPicker().props('modelValue')).toEqual([18]); expect(modelRow().findComponent(ElCheckboxGroup).exists()).toBe(false)
-    await chooseBatchModels([17]); await applyBatch()
-    expect(modelRow().getComponent(ElCheckboxGroup).props('modelValue')).toEqual([])
+  it('preserves a colour exception independently of model batch changes and only clears it explicitly', async () => {
+    await start([source(),source({rowId:'second'})]);await chooseBatchModels([17]);await applyBatch()
+    modelRow().getComponent(SampleColorSelect).vm.$emit('update:modelValue',['真实供方黑']);await flushPromises()
+    await chooseBatchModels([18]);await applyBatch()
+    expect(rowPicker().props('modelValue')).toEqual([18]);expect(rowPicker(1).props('modelValue')).toEqual([18])
+    expect(modelRow().getComponent(SampleColorSelect).props('modelValue')).toEqual(['真实供方黑'])
+    await modelRow().get('.selection-row-colors').findAll('button').find(button=>button.text()==='随统一颜色')!.trigger('click');await flushPromises()
+    await chooseBatchModels([17]);await applyBatch()
+    expect(modelRow().getComponent(SampleColorSelect).props('modelValue')).toEqual([])
     await click('保存选样')
-    expect(api.addCatalogSelection.mock.calls[0][0].items).toEqual([{ ...identity, phoneModelIds: [17] }, { ...identity, rowId: 'second', phoneModelIds: [17] }])
+    expect(api.addCatalogSelection.mock.calls[0][0].items).toEqual([{...identity,phoneModelIds:[17],sampleColors:[]},{...identity,rowId:'second',phoneModelIds:[17]}])
   })
   it('keeps failed input and retries the identical request id and preview token', async () => {
     api.addCatalogSelection.mockRejectedValueOnce({code:'ECONNABORTED'}).mockResolvedValue(result)
@@ -373,4 +372,45 @@ describe('explicit source subset to my selection', () => {
   it('revalidates an explicit business error returned as HTTP200 without losing planned quantity or workbench context',async()=>{api.previewCatalogSelection.mockResolvedValueOnce({canAdd:true,previewToken:'before-conflict',items:[],messages:[]}).mockResolvedValue({canAdd:true,previewToken:'after-conflict',items:[],messages:[]});api.addCatalogSelection.mockRejectedValueOnce(new Error('来源或目标已变化，请重新核对')).mockResolvedValue(result);await start();await wrapper.setProps({targetSelectionId:77,targetVersion:8});await chooseModels([18]);modelRow().get('.selection-row-quantity').getComponent(ElInputNumber).vm.$emit('update:modelValue',2);await flushPromises();await click('保存选样');expect(wrapper.text()).toContain('来源或目标已变化');expect(rowPicker().props('modelValue')).toEqual([18]);expect(modelRow().getComponent(ElInputNumber).props('modelValue')).toBe(2);await click('保存选样');expect(api.previewCatalogSelection).toHaveBeenCalledTimes(2);expect(api.addCatalogSelection.mock.calls.map(call=>call[0].previewToken)).toEqual(['before-conflict','after-conflict']);expect(api.addCatalogSelection.mock.calls[1][0]).toMatchObject({targetSelectionId:77,targetVersion:8,targetMode:'supplier_directory',items:[expect.objectContaining({phoneModelIds:[18],sampleQty:2})]});expect(wrapper.emitted('added')).toHaveLength(1)})
   it('refuses to reconcile a pending command under a different supplier or workbench context',async()=>{api.addCatalogSelection.mockRejectedValueOnce({code:'ECONNABORTED'}).mockResolvedValue(result);await start();await wrapper.setProps({targetSelectionId:77,targetVersion:8});await chooseModels([18]);await click('保存选样');await wrapper.setProps({supplierCode:'OTHER',targetSelectionId:88,targetVersion:9,items:[source({supplierCode:'OTHER',name:'另一家供方款'})]});await click('核对保存结果');expect(wrapper.text()).toContain('待核对的保存属于原供应商或原选品目录');expect(api.addCatalogSelection).toHaveBeenCalledTimes(1);expect(api.previewCatalogSelection).toHaveBeenCalledTimes(1);expect(wrapper.emitted('added')).toBeUndefined();await wrapper.setProps({supplierCode:'SUP-REAL',targetSelectionId:77,targetVersion:8,items:[source()]});await click('核对保存结果');expect(api.addCatalogSelection.mock.calls[1][0]).toEqual(api.addCatalogSelection.mock.calls[0][0]);expect(wrapper.emitted('added')).toHaveLength(1)})
 
+})
+
+
+describe('selected sample colours follow the selection draft',()=>{
+  it('keeps supplier suggestions unselected and saves multiple explicit colours even before the phone is known',async()=>{
+    const row=source({color:'黑色、白色',supplierColors:[{id:4,name:'烟灰'}]})
+    await start([row]);await chooseStyleOnly()
+    const picker=modelRow().getComponent(SampleColorSelect)
+    expect(picker.props('modelValue')).toEqual([])
+    expect(picker.props('options')).toEqual(['烟灰','黑色','白色'])
+    expect(modelRow().get('.selection-row-colors').isVisible()).toBe(true)
+    picker.vm.$emit('update:modelValue',['黑色','白色']);await flushPromises();await click('保存选样')
+    expect(api.addCatalogSelection.mock.calls[0][0].items).toEqual([{...identity,phoneModelIds:[],selectionIntent:'style',sampleColors:['黑色','白色']}])
+    expect(row.color).toBe('黑色、白色');expect(row.supplierColors).toEqual([{id:4,name:'烟灰'}])
+  })
+  it('applies colours to the selected styles, preserves per-style exceptions and does not multiply the planned total',async()=>{
+    await start([source(),source({rowId:'second'}),source({rowId:'third'})]);await chooseStyleOnly(true,0);await chooseStyleOnly(true,1);await chooseStyleOnly(true,2)
+    modelRow(1).getComponent(SampleColorSelect).vm.$emit('update:modelValue',['透明']);await flushPromises()
+    const common=wrapper.get('.selection-colors-batch').getComponent(SampleColorSelect)
+    common.vm.$emit('update:modelValue',['黑色','白色']);await flushPromises();await click('应用颜色')
+    expect(modelRow().getComponent(SampleColorSelect).props('modelValue')).toEqual(['黑色','白色'])
+    expect(modelRow(1).getComponent(SampleColorSelect).props('modelValue')).toEqual(['透明'])
+    expect(modelRow(2).getComponent(SampleColorSelect).props('modelValue')).toEqual(['黑色','白色'])
+    modelRow().get('.selection-row-quantity').getComponent(ElInputNumber).vm.$emit('update:modelValue',2);await flushPromises()
+    expect(wrapper.get('.selection-total').text()).toContain('拟拿样合计 2 件')
+    await click('保存选样')
+    expect(api.addCatalogSelection.mock.calls[0][0].items.map((item:{sampleColors:string[]})=>item.sampleColors)).toEqual([['黑色','白色'],['透明'],['黑色','白色']])
+  })
+  it('retains entered colours when toggling phone intent, cancelling close and replaying an unknown save',async()=>{
+    vi.spyOn(ElMessageBox,'confirm').mockRejectedValue('cancel')
+    await start();await chooseStyleOnly()
+    modelRow().getComponent(SampleColorSelect).vm.$emit('update:modelValue',['黑色','白色']);await flushPromises()
+    await chooseStyleOnly(false);await chooseModels([18]);await click('取消')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    api.addCatalogSelection.mockRejectedValueOnce(Object.assign(new Error('timeout'),{code:'ETIMEDOUT'}))
+    await click('保存选样');const first=structuredClone(api.addCatalogSelection.mock.calls[0][0])
+    expect(modelRow().getComponent(SampleColorSelect).props('disabled')).toBe(true)
+    await click('核对保存结果')
+    expect(api.addCatalogSelection.mock.calls[1][0]).toEqual(first)
+    expect(first.items[0].sampleColors).toEqual(['黑色','白色'])
+  })
 })

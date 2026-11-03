@@ -254,6 +254,7 @@ public class PartnerSelectionService {
   String curr=text(input.getOrDefault("currency",previous.get("currency"))).toUpperCase(Locale.ROOT);row.put("currency",curr.isEmpty()?"":currency(curr));
   row.putAll(PartnerCatalogFields.normalize(previous,input,previous.isEmpty()));
   row.put("priceOptions",priceOptions(input.getOrDefault("priceOptions",previous.get("priceOptions"))));
+  row.put("sampleColors",sampleColors(input.getOrDefault("sampleColors",previous.get("sampleColors"))));
   String quantity=text(input.getOrDefault("sampleQty",previous.get("sampleQty")));row.put("sampleQty",quantity.isEmpty()?"":qty(quantity,true));
   String development=text(input.getOrDefault("developmentStatus",previous.getOrDefault("developmentStatus","unknown")));require(DEVELOPMENT.contains(development),"开发优先状态无效");row.put("developmentStatus",development);
   String developed=text(input.getOrDefault("developedOn",previous.get("developedOn")));row.put("developedOn",developed.isEmpty()?"":date(developed));
@@ -323,7 +324,16 @@ public class PartnerSelectionService {
   boolean direct=directDownstream(row);String rid=text(row.get("rowId"));
   require(!direct&&!blocked.contains(rid),"这条选样已有真实收样或后续业务记录，不能修改或取消原事实；可增选其他型号或登记再次收样");
  }
- private void requireDraftChangeAllowed(Map<String,Object> previous,Map<String,Object> changes,Set<String> blocked){if(previous.isEmpty()||confirmed(previous))return;var fields=new HashSet<>(TEXT_FIELDS);fields.addAll(List.of("selected","discarded","phoneModelIds","selectedPairs","supplierColorIds","newSupplierColors","sampleQty","pairings","rangeRefs","refs","targetSpecId"));if(changes.entrySet().stream().anyMatch(e->fields.contains(e.getKey())&&!signature(store.json,e.getValue()).equals(signature(store.json,previous.get(e.getKey())))))requireNoDownstream(previous,blocked);}
+ static List<String> sampleColors(Object input){
+  if(input==null)return List.of();
+  require(input instanceof List<?>,"选样颜色请逐个填写");var values=(List<?>)input;
+  require(values.size()<=100,"每款选样颜色不能超过100种");var result=new LinkedHashMap<String,String>();
+  for(var value:values){require(value instanceof String,"选样颜色请填写名称");String name=bounded(value,255,"选样颜色").strip();
+   require(!name.isEmpty()&&name.codePoints().noneMatch(Character::isISOControl),"选样颜色每项只填写一个有效名称");result.putIfAbsent(PartnerReceiptColors.fold(name),name);
+  }
+  return new ArrayList<>(result.values());
+ }
+ private void requireDraftChangeAllowed(Map<String,Object> previous,Map<String,Object> changes,Set<String> blocked){if(previous.isEmpty()||confirmed(previous))return;var fields=new HashSet<>(TEXT_FIELDS);fields.addAll(List.of("selected","discarded","phoneModelIds","selectedPairs","supplierColorIds","newSupplierColors","sampleColors","sampleQty","pairings","rangeRefs","refs","targetSpecId"));if(changes.entrySet().stream().anyMatch(e->fields.contains(e.getKey())&&!signature(store.json,e.getValue()).equals(signature(store.json,previous.get(e.getKey())))))requireNoDownstream(previous,blocked);}
  private Set<String> downstreamRows(List<String> rows,Long selection){var found=new HashSet<String>();for(var chunk:chunks(rows)){var args=new ArrayList<Object>(chunk);String filter="";if(selection!=null){filter=" and x.basis->>'selectionId'=?";args.add(Long.toString(selection));}String kinds="r.kind in ('sample','inspection','listing','product')";
   found.addAll(store.jdbc.queryForList("with docs as (select r.data from plm_partner_record r where "+kinds+" union all select v.data from plm_partner_revision v join plm_partner_record r on r.record_id=v.record_id where "+kinds+" union all select e.data from plm_partner_event e join plm_partner_record r on r.record_id=e.record_id where "+kinds+") select distinct x.basis->>'selectionRowId' from docs d cross join lateral (values(d.data),(d.data->'sourceSnapshot'),(d.data->'before'),(d.data->'after')) x(basis) where x.basis->>'selectionRowId' in ("+marks(chunk.size())+")"+filter,String.class,args.toArray()));}return found;}
  private static boolean directDownstream(Map<String,Object> row){return number(row.get("productId"))>0||number(row.get("specId"))>0||!scopeIds(row.get("specIds")).isEmpty()||!maps(row.get("specLinks")).isEmpty();}

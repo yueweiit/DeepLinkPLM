@@ -129,4 +129,16 @@ class PartnerSelectionServiceTest {
   service.validateConfirmation(later);noProductWrites();
  }
 
+
+ @Test void sampleColourIntentSurvivesEditingAndExplicitClearingWithoutCreatingColoursOrStock(){
+  var original=row(values("name","选色款","supplierCode","S1","sampleColors",List.of(" 黑色 ","白色","黑色")));
+  assertEquals(List.of("黑色","白色"),original.get("sampleColors"));assertTrue(maps(original.get("selectedPairs")).isEmpty());
+  var edited=service.canonicalRow(9,original,values("rowId",original.get("rowId"),"notes","只改备注"));assertEquals(original.get("sampleColors"),edited.get("sampleColors"));
+  assertEquals(List.of(),service.canonicalRow(9,edited,values("rowId",edited.get("rowId"),"sampleColors",List.of())).get("sampleColors"));
+  original.put("confirmed",true);assertThrows(BusinessException.class,()->service.canonicalRow(9,original,values("rowId",original.get("rowId"),"sampleColors",List.of("透明"))));noProductWrites();
+ }
+ @Test void sampleColourInputRejectsInvalidShapesAndControlCharacters(){
+  for(Object invalid:List.of("黑色",List.of(1),List.of(""),List.of("黑色\n白色"),List.of("色".repeat(256))))assertThrows(BusinessException.class,()->row(values("sampleColors",invalid)));
+  assertEquals(List.of("Black"),row(values("sampleColors",List.of("Black","black"))).get("sampleColors"));noProductWrites();
+ }
 }

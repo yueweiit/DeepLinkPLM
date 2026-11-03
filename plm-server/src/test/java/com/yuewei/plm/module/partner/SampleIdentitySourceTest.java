@@ -20,4 +20,18 @@ class SampleIdentitySourceTest {
   when(catalogue.receiptSnapshot(5L,"source-row",false)).thenReturn(source);when(supplier.requireSupplier("SUP-A")).thenReturn(Map.of("status","active","needsReview",false));
   var result=samples.identitySource(Map.of("sourceType","catalog","selectionId",5L,"selectionRowId","source-row","phoneModelId",12L,"colorId",3L));assertThat(result).containsEntry("catalogStyleId",7L).containsEntry("phoneModelId",12L).containsEntry("colorId",3L);assertThat(result).doesNotContainKeys("custodian","receivedQty","receivedDate","location");verifyNoInteractions(jdbc);
  }
+
+ @Test void receiptOptionsExposeTheAuthoritativeSelectedColoursBeforeAnyReceiptFactsAreFilled(){
+  var jdbc=mock(JdbcTemplate.class);var access=mock(PilotAccessService.class);when(access.actor()).thenReturn(new CurrentUser(1L,"qa","工程",false));var store=spy(new PartnerStore(jdbc,new ObjectMapper(),access,mock(OperationLogService.class)));
+  var samples=new PartnerSampleService(store,mock(PartnerProductService.class),mock(PartnerMaterialService.class));var catalogue=mock(PartnerCatalogStyles.class);ReflectionTestUtils.setField(samples,"catalogStyles",catalogue);
+  String rowId="c91d7046-187f-46ba-969c-793e2f0caf23";
+  doReturn(Map.of("id",5L,"version",7L,"purpose","my_selection")).when(store).load(5L,"selection",false);
+  when(jdbc.queryForList(startsWith("select row_id::text,row_version,sort_order,data::text,confirmed"),eq(5L),eq(rowId))).thenReturn(List.of(Map.of("row_id",rowId,"row_version",2L,"sort_order",0,"data","{}","confirmed",true)));
+  var source=Map.<String,Object>of("name","选样款","sampleColors",List.of("黑色","白色"),"phones",List.of(Map.of("phoneModelId",12L,"displayName","Phone A")),"receiptColorMode","at_receipt","selectedPairs",List.of());
+  when(catalogue.receiptSnapshot(5L,rowId,false)).thenReturn(source);
+  var result=samples.receiptPreview(5L,Map.of("version",7L,"rows",List.of(Map.of("clientRowId","local-line","rowId",rowId,"rowVersion",2L,"sampleColors",List.of("不能冒充源选色")))));
+  var row=com.yuewei.plm.module.partner.PartnerValues.maps(result.get("rows")).get(0);
+  assertThat(row).containsEntry("sampleColors",List.of("黑色","白色")).containsEntry("qty","");assertThat(result.get("canSave")).isEqualTo(false);
+  verify(store,never()).create(anyString(),anyString());
+ }
 }

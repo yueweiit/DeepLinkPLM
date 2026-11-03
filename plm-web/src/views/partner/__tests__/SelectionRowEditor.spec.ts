@@ -1,7 +1,8 @@
 import {flushPromises,mount,type VueWrapper} from '@vue/test-utils'
-import ElementPlus,{ElCheckbox,ElForm,ElInputNumber,ElOption,ElPagination} from 'element-plus'
+import ElementPlus,{ElCheckbox,ElForm,ElInputNumber,ElSelect,ElOption,ElPagination} from 'element-plus'
 import {reactive} from 'vue'
 import {afterEach,describe,expect,it,vi} from 'vitest'
+import SampleColorSelect from '../selection/SampleColorSelect.vue'
 import Editor from '../selection/SelectionRowEditor.vue'
 import {newSelectionRow} from '@/utils/partnerSelections'
 import type {SelectionRow} from '@/types/partnerSelections'
@@ -101,5 +102,21 @@ describe('unified catalog fields through the existing row editor',()=>{
   const row=reactive({...newSelectionRow(),confirmed:true,priceOptions:[{label:'原配置',unitPrice:'9.00',currency:'CNY'}]});await startEditor(row,[],[],false,true)
   expect(wrapper.get('[aria-label="报价1适用配置"]').element).toHaveProperty('value','原配置');expect(wrapper.findAll('button').find(button=>button.text()==='移除此报价')!.attributes('disabled')).toBeDefined()
   const vm=wrapper.getComponent(Editor).vm as unknown as {addPriceOption:()=>void;removePriceOption:(index:number)=>void};vm.addPriceOption();vm.removePriceOption(0);expect(row.priceOptions).toEqual([{label:'原配置',unitPrice:'9.00',currency:'CNY'}])
+ })
+})
+
+
+describe('sample colour edit entry',()=>{
+ it('edits the same planned colours after reopening, keeps supplier text and hides this field in the supplier source editor',async()=>{
+  const row=reactive({...newSelectionRow(),sampleColors:['黑色','白色'],color:'供方有黑、白、蓝色'})
+  await startEditor(row)
+  const picker=wrapper.getComponent(SampleColorSelect)
+  expect(picker.props('modelValue')).toEqual(['黑色','白色'])
+  picker.getComponent(ElSelect).vm.$emit('update:modelValue',[' 透明 ','透明']);await flushPromises()
+  expect(row.sampleColors).toEqual(['透明']);expect(row.color).toBe('供方有黑、白、蓝色')
+  wrapper.unmount();await startEditor(row,[],[],false)
+  expect(wrapper.getComponent(SampleColorSelect).props('modelValue')).toEqual(['透明']);expect(wrapper.getComponent(SampleColorSelect).props('disabled')).toBe(true)
+  wrapper.unmount();await startEditor(row,[],[],true,true,'catalog')
+  expect(wrapper.findComponent(SampleColorSelect).exists()).toBe(false)
  })
 })

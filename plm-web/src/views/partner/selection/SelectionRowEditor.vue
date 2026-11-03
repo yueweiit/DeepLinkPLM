@@ -4,12 +4,13 @@ import { t as uiText } from '@/locales'
 import {computed,ref,watch} from 'vue'
 import PhoneModelMultiSelect from '@/components/PhoneModelMultiSelect/index.vue'
 import PartnerPhoto from '../PartnerPhoto.vue'
+import SampleColorSelect from './SampleColorSelect.vue'
 import SupplierRangePanel from '@/views/supplier/SupplierRangePanel.vue'
 import SupplierColorPanel from '@/views/supplier/SupplierColorPanel.vue'
 import SupplierColorSelect from '@/views/supplier/SupplierColorSelect.vue'
 import type {PartnerFile} from '@/types/partner'
 import type {SelectionRow,SelectionRangeSnapshot} from '@/types/partnerSelections'
-import {changeSelectionSupplier,developmentLabels,pairCoverage,selectionRowFiles} from '@/utils/partnerSelections'
+import {changeSelectionSupplier,developmentLabels,pairCoverage,selectionRowFiles,sampleColorOptions as colorOptions} from '@/utils/partnerSelections'
 import {resolveSupplierRanges,supplierColors,supplierRanges,type SupplierColor,type SupplierRange} from '@/api/modules/supplierRanges'
 import {partnerError} from '@/utils/partnerError'
 const props=defineProps<{row:SelectionRow;files:PartnerFile[];libraryFiles?:PartnerFile[];libraryLoading?:boolean;suppliers:{code:string;name:string;shortCode?:string}[];canWrite:boolean;canReadCost:boolean;fixedSupplier?:boolean;context?:'selection'|'catalog'}>()
@@ -17,6 +18,7 @@ const emit=defineEmits<{'library-open':[];'phone-model-confirm':[number[]]}>()
 const modelRanges=ref<SupplierRange[]>([]),colorRanges=ref<SupplierRange[]>([]),colors=ref<SupplierColor[]>([]),scopeOpen=ref(false),error=ref(''),scopeResult=ref(''),pairPhones=ref<number[]>([]),pairColor=ref<number>(),pairState=ref<'available'|'unavailable'|'unverified'>('unverified'),pairEvidence=ref('')
 const libraryOpen=ref(false),libraryKeyword=ref(''),libraryPage=ref(1),librarySize=6
 const colorOpen=ref(false)
+const sampleColorOptions=computed(()=>colorOptions(props.row))
 const rangeBusy=ref(false)
 const fileMetadata=computed(()=>[...new Map([...(props.libraryFiles||[]),...props.files,...(props.row.fileDetails||[])].map(file=>[file.id,file])).values()])
 const adoptedFiles=computed(()=>selectionRowFiles(props.row,fileMetadata.value))
@@ -94,6 +96,7 @@ const colorName=(id:number)=>props.row.pairings.find(pair=>pair.colorId===id&&pa
     <el-form-item v-if="context==='catalog'" class="full-width" :label='uiText("型号原文")'><el-input v-model="row.modelText" type="textarea" autosize/><el-checkbox class="phone-scope-declaration" :model-value="row.phoneScopeDeclaration==='not_provided'" :disabled="!canWrite||hasPhoneScopeEvidence&&row.phoneScopeDeclaration!=='not_provided'" @change="setPhoneScopeDeclaration(Boolean($event))">{{ uiText("已核对原件，供应商确实未注明型号") }}</el-checkbox></el-form-item>
     <details v-else class="full-width model-original"><summary>{{ uiText("型号原文") }}</summary><el-input v-model="row.modelText" type="textarea" :autosize="{minRows:2,maxRows:5}" :aria-label='uiText("型号原文")'/></details>
     <el-form-item class="full-width" :label='uiText("本次所选型号")'><PhoneModelMultiSelect v-model="row.phoneModelIds" :members="row.sourcePhones||row.phones" :allowed-ids="row.sourcePhoneModelIds" :disabled="!canWrite" @confirm="emit('phone-model-confirm',$event)"/><small v-if="row.sourcePhoneModelIds">{{row.catalogSourceSnapshot?.phoneScopeMode==='unspecified'?uiText('供应商未注明型号；本行可调整此前选择，新增请用增选规格。'):uiText('仅从本款供应商来源范围内选择；不修改供应商原始资料。')}}</small></el-form-item>
+    <el-form-item v-if="context!=='catalog'" class="full-width" :label="uiText('本次选样颜色')"><SampleColorSelect v-model="row.sampleColors" :options="sampleColorOptions" :disabled="!canWrite" :label="uiText('本次选样颜色')"/></el-form-item>
     <template v-if="canReadCost">
      <el-form-item :label='uiText("数值单价")'><el-input v-model="row.unitPrice" inputmode="decimal" :placeholder='uiText("明确数值；复杂报价填原文")'/></el-form-item>
      <el-form-item :label='uiText("币种")'><el-select v-model="row.currency" clearable filterable allow-create :placeholder='uiText("按来源依据")' @change="row.currencySource=row.currency?'explicit':'historical_unknown'"><el-option v-for="currency in ['CNY','USD','MXN','EUR','HKD']" :key="currency" :value="currency" :label="currency"/></el-select><small v-if="row.currencySource==='business_default'">{{ uiText("供应商报价业务默认CNY；原始记录另保留。") }}</small></el-form-item><el-form-item :label='uiText("计价单位")'><el-input v-model="row.priceUnit" :placeholder='uiText("件、套等")'/></el-form-item>

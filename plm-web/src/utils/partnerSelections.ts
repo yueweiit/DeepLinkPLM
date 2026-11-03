@@ -1,5 +1,11 @@
 import type { SelectionRow } from '@/types/partnerSelections'
 import type { PartnerFile } from '@/types/partner'
+/** Suggestions only: selecting a name never asserts supplier availability or allocates a colour ID. */
+export function sampleColorOptions(row:{color?:string;supplierColors?:{name:string}[];pairings?:SelectionRow['pairings']}){
+ const names=[...(row.supplierColors||[]).map(color=>color.name),...(row.pairings||[]).filter(pair=>pair.state!=='unavailable').map(pair=>pair.colorSnapshot?.name||''),...(row.color||'').split(/[、，,;；\r\n]+/)]
+ const seen=new Set<string>()
+ return names.map(name=>name.trim()).filter(name=>{const key=name.toLowerCase();if(!name||name.length>255||seen.has(key))return false;seen.add(key);return true})
+}
 export const developmentLabels={unknown:'开发先后待核对',claimed:'供方声明',preferred:'工程确认优先',alternative:'其他供方',disputed:'存在争议'} as const
 export const cloneSelection=<T,>(value:T):T=>JSON.parse(JSON.stringify(value))
 export const frozenSelectionRow=(row:SelectionRow)=>!!(row.confirmed||row.confirmedAt||row.productId||row.specId)
@@ -7,7 +13,7 @@ export const restrictedSelectionWriteFields=['unitPrice','currency','priceNote',
 /** Row refs alone define adoption; recent sheet files are only authorized metadata. */
 export function selectionRowFiles(row:SelectionRow,availableFiles:PartnerFile[]=[]){const files=new Map([...availableFiles,...(row.fileDetails||[])].map(file=>[file.id,file]));return row.refs.map(ref=>({ref,file:files.get(ref.id)}))}
 export function newSelectionRow():SelectionRow{return {rowId:crypto.randomUUID(),rowVersion:0,selected:false,name:'',series:'',supplierCode:'',supplierItemCode:'',material:'',specification:'',color:'',modelText:'',phoneModelIds:[],availablePhoneModelIds:[],unavailablePhoneModelIds:[],supplyScopeNote:'',currency:'',priceNote:'',moq:'',packaging:'',notes:'',sourcePosition:'',sameStyleKey:'',developmentStatus:'unknown',developedOn:'',developmentEvidence:'',refs:[],rangeRefs:[],pairings:[],selectedPairs:[]}}
-export function changeSelectionSupplier(row:SelectionRow,code:string){if(row.supplierCode===code)return;row.supplierCode=code;row.availablePhoneModelIds=[];row.unavailablePhoneModelIds=[];row.availablePhones=[];row.unavailablePhones=[];row.supplyScopeNote='';row.rangeRefs=[];row.rangeSnapshots=[];row.rangeVersionAcknowledgements=[];row.targetColorMappingAcknowledged=false;row.pairings=[];row.selectedPairs=[];row.supplierColorIds=[];row.newSupplierColors=[]}
+export function changeSelectionSupplier(row:SelectionRow,code:string){if(row.supplierCode===code)return;row.supplierCode=code;row.availablePhoneModelIds=[];row.unavailablePhoneModelIds=[];row.availablePhones=[];row.unavailablePhones=[];row.supplyScopeNote='';row.rangeRefs=[];row.rangeSnapshots=[];row.rangeVersionAcknowledgements=[];row.targetColorMappingAcknowledged=false;row.pairings=[];row.selectedPairs=[];row.sampleColors=[];row.supplierColorIds=[];row.newSupplierColors=[]}
 export const pasteColumns=['name','series','supplierCode','supplierItemCode','material','specification','color','modelText','unitPrice','currency','priceNote','moq','packaging','sampleQty','notes','sourcePosition','priceUnit','moqQuantity','moqUnit','moqScope','moqNote'] as const
 export type PasteColumn=typeof pasteColumns[number]
 export const pasteLabels:Record<PasteColumn,string>={name:'款式名称',series:'系列',supplierCode:'供应商编码',supplierItemCode:'供方款号',material:'材质',specification:'规格',color:'颜色',modelText:'型号原文',unitPrice:'单价',currency:'币种',priceNote:'报价说明',moq:'起订条件',packaging:'包装',sampleQty:'拟拿样数量',notes:'备注',sourcePosition:'来源位置',priceUnit:'计价单位',moqQuantity:'起订数量',moqUnit:'起订单位',moqScope:'起订口径',moqNote:'起订补充'}
