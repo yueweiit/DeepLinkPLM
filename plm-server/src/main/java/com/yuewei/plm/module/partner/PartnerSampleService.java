@@ -64,8 +64,9 @@ public class PartnerSampleService {
   for(var row:requested){var out=new LinkedHashMap<String,Object>();for(String key:List.of("clientRowId","rowId","rowVersion","phoneModelId","colorId","qty"))out.put(key,row.getOrDefault(key,""));var messages=new ArrayList<String>();
    try{String client=required(row.get("clientRowId"),"收样行标识");require(client.length()<=80&&seen.add(client),"收样行标识无效或重复");String rowId=required(row.get("rowId"),"来源选样行");require(PartnerSelectionService.validRowId(rowId),"来源选样行标识无效");var selected=selectedRows.computeIfAbsent(rowId,key->new PartnerSelectionRows(store).find(selection,key,lock));require(!selected.isEmpty(),"来源选样行不属于本次资料");require(number(row.get("rowVersion"))==number(selected.get("rowVersion")),"选样资料已更新，请刷新后重新核对");
     boolean draft=!PartnerSelectionService.confirmed(selected);out.put("requiresFreeze",draft);if(draft&&checkedDrafts.add(rowId))selections.validateReceiptDraft(selected);var snapshot=sourceRows.computeIfAbsent(rowId,key->catalogStyles.receiptSnapshot(selection,key,lock,scope));for(String key:List.of("name","catalogStyleId","catalogStyleCode","catalogStyleLabel","supplierCode","phones","refs","sourceScopeToken"))out.put(key,snapshot.getOrDefault(key,key.equals("phones")||key.equals("refs")?List.of():""));if(lock)PartnerCatalogScopes.requireToken(snapshot,row);
+    out.put("receiptPhoneScopeMode",snapshot.getOrDefault("receiptPhoneScopeMode","supplier"));if("unspecified".equals(text(snapshot.get("receiptPhoneScopeMode"))))out.put("phones",List.of());
     out.put("sampleColors",snapshot.getOrDefault("sampleColors",List.of()));
-    long phone=number(row.get("phoneModelId"));var choices=PartnerReceiptColors.choices(snapshot,phone);boolean atReceipt=PartnerReceiptColors.atReceipt(snapshot);
+    long phone=number(row.get("phoneModelId"));adoptReceiptPhone(snapshot,phone,scope);var choices=PartnerReceiptColors.choices(snapshot,phone);boolean atReceipt=PartnerReceiptColors.atReceipt(snapshot);
     out.put("phoneName",phoneName(snapshot,phone));out.put("colors",choices);out.put("colorName",text(row.get("colorName")));
     out.put("receiptColorMode",atReceipt?"at_receipt":"selected_pairs");
     out.put("sourceColors",atReceipt?snapshot.getOrDefault("sourceColors",List.of()):phone>0?choices.stream().map(color->text(color.get("name"))).distinct().toList():List.of());
@@ -78,6 +79,11 @@ public class PartnerSampleService {
   }return Map.of("id",selection,"version",head.get("version"),"canSave",valid,"messages",common,"rows",reports);
  }
  private static Map<String,Object> receiptCommand(long selection,Map<String,Object> input,Map<String,Object> row,Custodian keeper){var command=new LinkedHashMap<String,Object>();for(String key:List.of("date","location","locationId","locationCode","locationParts"))if(input.containsKey(key))command.put(key,input.get(key));command.put("site","CN");command.put("ownerName",keeper.name());if(keeper.userId()!=null)command.put("ownerUserId",keeper.userId());for(String key:List.of("phoneModelId","colorId","colorName","qty","sampleIdentityId","identityReason","sourceScopeToken"))command.put(key,row.get(key));command.put("person",keeper.name());command.put("sourceType","catalog");command.put("selectionId",selection);command.put("selectionRowId",row.get("rowId"));return command;}
+ private static void adoptReceiptPhone(Map<String,Object> snapshot,long phone,PartnerCatalogPhoneResolver.ResolutionScope scope){
+  if(phone<=0||!"unspecified".equals(text(snapshot.get("receiptPhoneScopeMode"))))return;
+  require(scope!=null,"手机型号资料尚未就绪，请重新读取");var member=scope.receiptPhone(phone);
+  var ids=new ArrayList<>(PartnerSelectionService.scopeIds(snapshot.get("phoneModelIds")));if(ids.contains(phone))return;ids.add(phone);var phones=new ArrayList<>(maps(snapshot.get("phones")));phones.add(member);snapshot.put("phoneModelIds",ids);snapshot.put("phones",phones);
+ }
  private void adoptReceiptColor(Map<String,Object> snapshot,PartnerReceiptColors.Resolution color){
   if(!PartnerReceiptColors.atReceipt(snapshot)||maps(snapshot.get("receiptColors")).stream().anyMatch(c->number(c.get("id"))==color.id()))return;
   var saved=store.jdbc.queryForList("select color_id as id,name,code,supplier_color_code as \"supplierColorCode\",style_key as \"styleKey\",config_key as \"configKey\",version from plm_supplier_color where color_id=? and supplier_code=? and status='active'",color.id(),snapshot.get("supplierCode"));require(saved.size()==1,"本次实收颜色尚未保存，请重新核对");
@@ -96,8 +102,9 @@ public class PartnerSampleService {
   if(pending){required(input.get("provenance"),"来源待核对说明");d.put("name",required(input.get("name"),"样品名称"));d.put("specName",text(input.get("specName")));snapshot.put("pending",true);snapshot.put("provenance",input.get("provenance"));}
   else if(type.equals("catalog")){
    store.access.requireEngineeringMaintenance();snapshot=new LinkedHashMap<>(receiptSnapshot==null?catalogStyles.selectedSnapshot(number(input.get("selectionId")),required(input.get("selectionRowId"),"来源选样行"),false,selections.phoneScope()):receiptSnapshot);
+   if("unspecified".equals(text(snapshot.get("receiptPhoneScopeMode")))&&!PartnerSelectionService.scopeIds(snapshot.get("phoneModelIds")).contains(number(input.get("phoneModelId"))))adoptReceiptPhone(snapshot,number(input.get("phoneModelId")),selections.phoneScope());
    var supplier=requireCatalogSupplier(snapshot);
-   d.put("supplierName",text(supplier.get("supplierName")));snapshot.put("supplierName",text(supplier.get("supplierName")));var pair=PartnerCatalogSampleRules.pair(snapshot,number(input.get("phoneModelId")),number(input.get("colorId")));snapshot.put("receivedPair",pair);
+   d.put("supplierName",text(supplier.get("supplierName")));snapshot.put("supplierName",text(supplier.get("supplierName")));var pair=PartnerCatalogSampleRules.pair(snapshot,number(input.get("phoneModelId")),number(input.get("colorId")));snapshot.put("receivedPair",pair);if("unspecified".equals(text(snapshot.get("receiptPhoneScopeMode")))){snapshot.put("phoneModelIds",pair.get("phoneModelIds"));snapshot.put("phones",pair.get("phones"));}
    for(String field:List.of("catalogStyleId","catalogStyleCode","catalogStyleLabel","selectionId","selectionRowId","supplierCode","name"))d.put(field,snapshot.get(field));
    for(String field:List.of("phoneModelId","colorId","colorName","catalogSpecKey","catalogConfigurationKey","specName","phoneModelIds","phones"))d.put(field,pair.get(field));
    d.put("qualityBasis",PartnerCatalogSampleRules.qualityBasis(store.json,snapshot,pair));if(!typeOnly)d.put("custodian",required(input.get("person"),"实际保管人"));

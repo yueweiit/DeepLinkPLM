@@ -547,3 +547,34 @@ describe('native quantity control display',()=>{
   await click('保存实际收样');expect(api.save.mock.calls[0][1].rows.map((row:SelectionReceiptInput['rows'][number])=>row.qty)).toEqual([3,2]);
  })
 })
+
+
+describe('explicitly unspecified supplier models at actual receipt',()=>{
+ function scopeModes(modes:Record<string,'supplier'|'unspecified'|undefined>,phones:Record<string,number[]>={}){
+  api.preview.mockImplementation(async(_id,input:SelectionReceiptInput)=>({...response(input),rows:response(input).rows.map(row=>({...row,receiptPhoneScopeMode:modes[row.rowId],receiptColorMode:'at_receipt',phones:(phones[row.rowId]||[]).map(phoneModelId=>({phoneModelId,modelName:`型号${phoneModelId}`})),sampleColors:['黑色']}))}));
+ }
+ it('opens the existing library only for an authoritative unspecified mode and never automatically selects its hydrated phone',async()=>{
+  scopeModes({'row-1':'unspecified'},{'row-1':[18]});await start([style(1),style(2)]);
+  expect(models()[0].props()).toMatchObject({modelValue:[],multiple:false});expect(models()[0].props('allowedIds')).toBeUndefined();expect(models()[1].props('allowedIds')).toEqual([]);expect(bulkModel().props('allowedIds')).toBeUndefined();
+  expect(actualQuantities().map(input=>input.props('modelValue'))).toEqual([2,2]);expect(wrapper.getComponent(SampleLocationInput).props('modelValue')).toBe('CN');expect(wrapper.getComponent(SampleCustodianSelect).props('modelValue')).toBe(71);
+  expect(document.body.textContent).toContain('供应商未注明型号，请按实物选择');expect(api.save).not.toHaveBeenCalled();
+ })
+ it('refuses per-style all-model expansion when any checked source is unspecified, even with hydrated library choices',async()=>{
+  scopeModes({'row-1':'supplier','row-2':'unspecified'},{'row-1':[18,17],'row-2':[18,17,16]});await start();const before=models().map(model=>model.props('modelValue')),reads=api.preview.mock.calls.length;
+  await click('选择各款全部型号');expect(models().map(model=>model.props('modelValue'))).toEqual(before);expect(document.querySelectorAll('.receipt-row')).toHaveLength(2);expect(api.preview).toHaveBeenCalledTimes(reads);expect(document.body.textContent).toContain('不能按供方全选');expect(api.save).not.toHaveBeenCalled();
+ })
+ it('allows explicit batch model choices for unspecified styles while keeping known supplier membership checks',async()=>{
+  scopeModes({'row-1':'supplier','row-2':'unspecified'},{'row-1':[18]});await start();bulkModel().vm.$emit('update:modelValue',[18,17]);await flushPromises();
+  expect(document.body.textContent).toContain('款式1：');expect(document.body.textContent).not.toContain('款式2：');await applyBulk();expect(models().map(model=>model.props('modelValue'))).toEqual([[18],[]]);
+  bulkModel().vm.$emit('update:modelValue',[18]);await flushPromises();await applyBulk();await click('保存实际收样');const input=api.save.mock.calls[0][1] as SelectionReceiptInput;
+  expect(input.rows.map(row=>[row.rowId,row.phoneModelId,row.colorName,row.qty])).toEqual([['row-1',18,'黑色',2],['row-2',18,'黑色',2]]);expect(input.rows.every(row=>row.sourceScopeToken===`scope-${row.rowId}`)).toBe(true);expect(api.save).toHaveBeenCalledTimes(1);
+ })
+ it('keeps a manually chosen library model and actual inputs after a source-lock conflict without creating an uncertain replay',async()=>{
+  scopeModes({'row-1':'unspecified'});api.save.mockRejectedValueOnce(Object.assign(new Error('目录来源正在更新，请保留输入后重试'),{response:{status:409}}));await start([style(1)]);models()[0].vm.$emit('update:modelValue',[17]);await flushPromises();actualQuantities()[0].vm.$emit('update:modelValue',5);await click('保存实际收样');
+  expect(models()[0].props('modelValue')).toEqual([17]);expect(actualQuantities()[0].props('modelValue')).toBe(5);expect(document.body.textContent).toContain('目录来源正在更新');expect(document.body.textContent).not.toContain('保存结果待核对');expect(sessionStorage.getItem('plm:selection-receipt:71:7')).toBeNull();await click('保存实际收样');expect(api.save.mock.calls[1][1]).toEqual(api.save.mock.calls[0][1]);
+ })
+ it('replays an uncertain unspecified request exactly while all library and all-model actions stay locked',async()=>{
+  scopeModes({'row-1':'unspecified'});api.save.mockRejectedValueOnce({code:'ECONNABORTED'});await start([style(1)]);models()[0].vm.$emit('update:modelValue',[17]);await flushPromises();await click('保存实际收样');const first=JSON.parse(JSON.stringify(api.save.mock.calls[0][1]));wrapper.unmount();await start([style(1)]);
+  expect(models()[0].props('disabled')).toBe(true);expect(models()[0].props('modelValue')).toEqual([17]);models()[0].vm.$emit('update:modelValue',[18]);await flushPromises();expect(models()[0].props('modelValue')).toEqual([17]);expect(api.save).toHaveBeenCalledTimes(1);await click('核对本次保存结果');expect(api.save.mock.calls[1][1]).toEqual(first);
+ })
+})

@@ -4,6 +4,12 @@ import dynamic from './es-dynamic.json'
 export default {
   ...ui,
   ...dynamic,
+  '手机型号资料尚未就绪，请重新读取': 'Los datos de modelos de teléfono aún no están disponibles. Vuelva a cargarlos.',
+  '手机型号成员不存在': 'El modelo de teléfono no existe.',
+  '新增关联只能使用启用的品牌和手机型号': 'Solo se pueden añadir vínculos con marcas y modelos de teléfono activos.',
+  '供应商明确未提供型号范围，请按实际收到的样品选择真实型号': 'El proveedor indicó expresamente que no proporcionó una gama de modelos. Seleccione los modelos reales según las muestras recibidas.',
+  '供应商未注明型号，请手动选择实际收到的手机型号，不能按供方全选': 'El proveedor no indicó modelos. Seleccione manualmente los modelos recibidos; no se puede seleccionar toda la gama del proveedor.',
+  '供应商未注明型号，请按实物选择；不会视为该款全部可供': 'El proveedor no indicó modelos. Selecciónelos según las muestras físicas; esto no confirma la disponibilidad de toda la gama del estilo.',
   '加入选品目录': 'Añadir al catálogo de selección',
   '当前供方型号': 'Modelos actuales del proveedor',
   '目录来源待核对，请核实原款式来源后再登记收样': 'La fuente del catálogo está pendiente de verificación. Compruebe el origen del estilo antes de registrar la recepción.',

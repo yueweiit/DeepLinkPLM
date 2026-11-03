@@ -7,6 +7,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import static com.yuewei.plm.module.partner.PartnerValues.require;
 
 /** Read projection only: source model text reuses standard member identities, never allocates codes. */
 @Service
@@ -301,6 +302,11 @@ public class PartnerCatalogPhoneResolver {
             return !components.isEmpty() && components.stream().allMatch(component -> component.suffix().equals("mini"));
         }
 
+        Map<String,Object> receiptPhone(long id) {
+            require(byId.containsKey(id), "手机型号成员不存在");
+            require(availablePhone(id), "新增关联只能使用启用的品牌和手机型号");
+            return projection(byId.get(id));
+        }
         boolean availablePhone(long id) {var phone=byId.get(id);return phone!=null&&enabled(phone,brand(number(phone.get("brandId"))));}
         private Map<String, Object> brand(Long id) {
             return byBrand.get(id);
