@@ -41,6 +41,10 @@ class SampleIdentityQueryTest {
  @Test void supplierShortNameSearchAndGroupExpansionFilterBeforePagination(){
   var grouped=query.page(Map.of("groupBy","style","keyword","pj"));String key=text(maps(grouped.get("content")).get(0).get("groupKey"));var detail=query.page(Map.of("groupKey",key,"page","2","size","1"));assertThat(detail).containsEntry("totalElements",2L);assertThat(maps(detail.get("content"))).hasSize(1);assertThat(query.options(Map.of("keyword","PJ")).toString()).contains("历史停用供方","SUP-A");
  }
+ @Test void currentSupplierCodesAndOriginalSyCodesSearchTheSameRowsBeforePagination(){
+  for(String keyword:List.of("SY-PJ-1","SY-1")){var result=query.page(Map.of("keyword",keyword,"size","1"));assertThat(result).containsEntry("totalElements",1L);assertThat(maps(result.get("content"))).singleElement().satisfies(row->assertThat(row).containsEntry("sampleCode","SY-PJ-1").containsEntry("code","SY-1").containsEntry("originalSampleCode","SY-1"));}
+  assertThat(sql.stream().filter(s->s.contains("from plm_supplier_profile")).count()).isEqualTo(2);verify(jdbc,never()).update(anyString(),any(Object[].class));
+ }
  @Test void supplierRenameUsesCurrentProfileForDisplayAndOptionsWhileMainSearchRetainsTheRecordedName(){
   recordedSupplierName="历史旧供方";currentSupplierName="当前新供方";
   for(String keyword:List.of("当前新供方","PJ","历史旧供方")){var result=query.page(Map.of("groupBy","style","keyword",keyword));assertThat(result).containsEntry("totalElements",1L);assertThat(maps(result.get("content")).get(0)).containsEntry("supplierCode","SUP-A").containsEntry("supplierName","当前新供方");}

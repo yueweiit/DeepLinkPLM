@@ -10,12 +10,12 @@ async function read(samples:SampleLabel[]){const blob=await buildSampleLabelWork
 
 describe('selected sample label Excel export',()=>{
  it('exports one row per selected sample type with the seven requested fields and embedded PNGs in G',async()=>{
-  const {blob,book,sheet}=await read([sample(),{...sample(72),productName:'护盾手机壳',colorName:'白色'}])
+  const {blob,book,sheet}=await read([{...sample(),sampleCode:'SY-MF-000071'},{...sample(72),productName:'护盾手机壳',colorName:'白色'}])
   expect(blob.type).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
   expect(sheet.rowCount).toBe(3);expect(sheet.columnCount).toBe(7)
   expect(sheet.getColumn(1).width).toBeGreaterThanOrEqual(10)
   expect(sheet.getRow(1).values).toEqual([undefined,'序号','编码','手机壳名称','供应商','型号','颜色','二维码'])
-  expect(Array.from({length:6},(_,i)=>sheet.getCell(2,i+1).value)).toEqual([1,'SY-000071','拉丝手机壳','佛山莫凡科技','Apple iPhone 18 Pro Max','黑色'])
+  expect(Array.from({length:6},(_,i)=>sheet.getCell(2,i+1).value)).toEqual([1,'SY-MF-000071','拉丝手机壳','佛山莫凡科技','Apple iPhone 18 Pro Max','黑色'])
   expect(Array.from({length:6},(_,i)=>sheet.getCell(3,i+1).value)).toEqual([2,'SY-000072','护盾手机壳','佛山莫凡科技','Apple iPhone 18 Pro Max','白色'])
   expect(sheet.getImages()).toHaveLength(2)
   for(const image of sheet.getImages()){

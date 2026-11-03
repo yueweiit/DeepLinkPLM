@@ -1,321 +1,110 @@
 <script setup lang="ts">
 import { t as uiText } from '@/locales'
-
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import PhoneModelMultiSelect from '@/components/PhoneModelMultiSelect/index.vue'
-import { unavailablePhone } from '@/components/PhoneModelMultiSelect/selection'
 import { addCatalogSelection, previewCatalogSelection } from '@/api/modules/partnerCatalog'
 import { newRequestId } from '@/api/modules/partner'
 import type { CatalogAddition, CatalogAdditionPreview, CatalogAdditionResult, CatalogSelectionItem, CatalogStyle } from '@/types/partnerCatalog'
-import type { CompatiblePhone } from '@/types/molds'
 import { partnerError } from '@/utils/partnerError'
+import { sampleColorOptions as colorOptions } from '@/utils/partnerSelections'
+import { unavailablePhone } from '@/components/PhoneModelMultiSelect/selection'
 import PartnerPhoto from '../PartnerPhoto.vue'
 import SampleColorSelect from '../selection/SampleColorSelect.vue'
-import { sampleColorOptions as colorOptions } from '@/utils/partnerSelections'
-import { catalogAllowedPhoneIds, catalogIdentity, catalogKey, catalogPhoneFamilies } from './catalogPresentation'
-import { catalogPhoneProgress } from './catalogModelSheet'
+import { catalogAllowedPhoneIds, catalogIdentity, catalogKey } from './catalogPresentation'
 
-const props = defineProps<{ modelValue: boolean; supplierCode: string; supplierName: string; items: CatalogStyle[]; canWrite: boolean; targetSelectionId?:number; targetVersion?:number }>()
-const emit = defineEmits<{ 'update:modelValue': [value: boolean]; added: [result: CatalogAdditionResult]; busy:[value:boolean] }>()
-const busy=ref(false),error=ref(''),requestId=ref(''),unknown=ref(false)
-let pendingCommand:CatalogAddition|undefined
-const chosen = ref<Record<string, number[]>>({}), preview = ref<CatalogAdditionPreview>()
-const reselected=ref<Record<string,boolean>>({})
-const sampleQuantities=ref<Record<string,number|undefined>>({}),quantityAdjusted=ref<Record<string,boolean>>({}),commonSampleQty=ref<number>()
-const sampleColors=ref<Record<string,string[]>>({}),colorsAdjusted=ref<Record<string,boolean>>({}),commonColors=ref<string[]>([])
-const commonColorOptions=computed(()=>[...new Set(props.items.flatMap(colorOptions))])
-const selectedPhones = ref<Record<string, CompatiblePhone[]>>({})
-const styleOnly = ref<Record<string, boolean>>({}), selectionModelTexts = ref<Record<string, string>>({})
-const progressPages = ref<Record<string,number>>({})
-const closing = ref(false)
-const commonModels = ref<number[]>([]), commonPhones = ref<CompatiblePhone[]>([])
-const adjusted = ref<Record<string, boolean>>({}), excluded = ref<Record<string, boolean>>({}), expanded = ref<Record<string, boolean>>({})
-const unmatched = ref<Record<string, number[]>>({}), batchMode = ref<'common' | 'all'>('common'), batchMessage = ref('')
+const props = defineProps<{ modelValue:boolean; supplierCode:string; supplierName:string; items:CatalogStyle[]; canWrite:boolean; targetSelectionId?:number; targetVersion?:number }>()
+const emit = defineEmits<{ 'update:modelValue':[value:boolean]; added:[result:CatalogAdditionResult]; busy:[value:boolean] }>()
+const busy=ref(false),unknown=ref(false),closing=ref(false),error=ref(''),requestId=ref(''),preview=ref<CatalogAdditionPreview>()
+const sampleColors=ref<Record<string,string[]>>({}),excluded=ref(new Set<string>()),commonColors=ref<string[]>([]),reselected=ref<Record<string,boolean>>({})
 const rowElements=new Map<string,HTMLElement>()
-let generation = 0
+let generation=0,pendingCommand:CatalogAddition|undefined
 const sourceContext=computed(()=>JSON.stringify([props.supplierCode,props.targetSelectionId,props.targetVersion,props.items.map(row=>({
  ...catalogIdentity(row),supplierCode:row.supplierCode,catalogStyleId:row.catalogStyleId,phoneScopeMode:row.phoneScopeMode,
  phoneModelIds:[...new Set(row.phoneModelIds)].sort((a,b)=>a-b),unavailablePhoneModelIds:[...new Set(row.unavailablePhoneModelIds||[])].sort((a,b)=>a-b),
  phones:row.phones.map(phone=>[phone.phoneModelId,unavailablePhone(phone)]).sort((a,b)=>Number(a[0])-Number(b[0]))
 })).sort((a,b)=>catalogKey(a).localeCompare(catalogKey(b)))]))
-const allowedModels = catalogAllowedPhoneIds
-const unspecifiedScope = (row?: Pick<CatalogStyle, 'phoneScopeMode'>) => row?.phoneScopeMode === 'unspecified'
-const selectorScope = (row: CatalogStyle) => unspecifiedScope(row) ? undefined : allowedModels(row)
-const modelFamilies = computed(() => Object.fromEntries(props.items.map(row => [catalogKey(row), unspecifiedScope(row) ? [] : catalogPhoneFamilies(row)])))
-const phoneRecord = (row: CatalogStyle, id: number) => selectedPhones.value[catalogKey(row)]?.find(phone => phone.phoneModelId === id) || row.phones.find(phone => phone.phoneModelId === id) || commonPhones.value.find(phone => phone.phoneModelId === id)
-const phoneName = (row: CatalogStyle, id: number, preferred: CompatiblePhone[] = []) => { const member = preferred.find(phone => phone.phoneModelId === id) || phoneRecord(row,id); return member?.modelName || member?.displayName || '型号资料待加载' }
-const phoneList = (row: CatalogStyle | undefined, ids: number[], preferred: CompatiblePhone[] = []) => ids.map(id => row ? phoneName(row, id, preferred) : preferred.find(phone => phone.phoneModelId === id)?.modelName || '型号资料待加载').join('、') || '无'
-function modelAllowed(row: CatalogStyle, id: number) {
-  const member = phoneRecord(row,id)
-  return row.phoneScopeMode !== 'unresolved' && Number.isSafeInteger(id) && id > 0 && !row.unavailablePhoneModelIds?.includes(id) && (!member || !unavailablePhone(member)) && (unspecifiedScope(row) ? !!member : allowedModels(row).includes(id))
-}
-function rememberPhones(row: CatalogStyle, members: CompatiblePhone[]) {
-  if (!props.modelValue || busy.value || unknown.value || !props.canWrite) return
-  selectedPhones.value[catalogKey(row)] = members.filter(phone => chosen.value[catalogKey(row)]?.includes(phone.phoneModelId))
-}
-const sourceRow = (item: CatalogSelectionItem) => props.items.find(row => catalogKey(row) === catalogKey(item))
-const progressPhones = (row:CatalogStyle) => styleOnly.value[catalogKey(row)] ? [] : (chosen.value[catalogKey(row)]||[]).filter(id=>catalogPhoneProgress(row,id).length)
-const progressPage = (row:CatalogStyle) => Math.min(progressPages.value[catalogKey(row)]||1,Math.max(1,Math.ceil(progressPhones(row).length/6)))
-const visibleProgress = (row:CatalogStyle) => progressPhones(row).slice((progressPage(row)-1)*6,progressPage(row)*6)
-const photo = (row: CatalogStyle) => row.fileDetails?.find(file => file.type.startsWith('image/'))
-const batchPhones = computed(() => [...new Map([...props.items.flatMap(row => [...row.phones, ...selectedPhones.value[catalogKey(row)] || []]), ...commonPhones.value].map(phone => [phone.phoneModelId, phone])).values()])
-const batchScope = computed(() => props.items.some(unspecifiedScope) ? undefined : [...new Set(props.items.flatMap(allowedModels))].filter(id => {
-  const member = batchPhones.value.find(phone => phone.phoneModelId === id)
-  return !member || !unavailablePhone(member)
-}))
-const batchFamilies = computed(() => catalogPhoneFamilies({ phones: batchPhones.value, phoneModelIds: [...new Set(props.items.filter(row => !unspecifiedScope(row)).flatMap(allowedModels))], unavailablePhoneModelIds: [] }))
-const selectedItems = computed<CatalogSelectionItem[]>(() => props.items.filter(row => !excluded.value[catalogKey(row)]).map(row => {
-  const key = catalogKey(row), phoneModelIds = chosen.value[key] || []
-  const choiceFields={...(sampleColors.value[key]!==undefined?{sampleColors:sampleColors.value[key]}:{}),...(reselected.value[key]?{reselectCancelled:true}:{})}
-  if (styleOnly.value[key]) return { ...catalogIdentity(row), ...choiceFields, phoneModelIds: [], selectionIntent: 'style', ...(selectionModelTexts.value[key] ? { selectionModelText: selectionModelTexts.value[key] } : {}), ...(sampleQuantities.value[key]!==undefined?{sampleQty:sampleQuantities.value[key]}:{}) }
-  return { ...catalogIdentity(row), ...choiceFields, phoneModelIds, ...(sampleQuantities.value[key]!==undefined?{sampleQty:sampleQuantities.value[key]}:{}) }
-}))
-const selectedStyleCount = computed(() => selectedItems.value.filter(item => item.selectionIntent === 'style' || item.phoneModelIds.length > 0).length)
-const pendingRows = computed(() => props.items.filter(row => !excluded.value[catalogKey(row)] && !styleOnly.value[catalogKey(row)] && !(chosen.value[catalogKey(row)] || []).length))
-const modelsValid = computed(() => props.canWrite && selectedItems.value.length > 0 && selectedItems.value.every(item => item.selectionIntent === 'style' || item.phoneModelIds.length > 0 && item.phoneModelIds.every(id => modelAllowed(sourceRow(item)!,id))))
-const quantitiesValid=computed(()=>selectedItems.value.every(item=>item.sampleQty===undefined||Number.isSafeInteger(item.sampleQty)&&item.sampleQty>=0))
-const plannedTotal=computed(()=>selectedItems.value.reduce((sum,item)=>sum+(item.sampleQty||0),0)),unplannedCount=computed(()=>selectedItems.value.filter(item=>item.sampleQty===undefined).length)
-const validationIssues=computed(()=>preview.value&&!preview.value.canAdd?[...new Set([...(preview.value.messages||[]),...preview.value.items.flatMap(item=>(item.messages||[]).map(message=>`${item.name}：${message}`))])]:[])
-const issueItems=computed(()=>preview.value&&!preview.value.canAdd?preview.value.items.filter(item=>item.messages?.length&&props.items.some(row=>catalogKey(row)===catalogKey(item))):[])
-const reselectItems=computed(()=>preview.value?.items.filter(item=>item.requiresReselect===true&&selectedItems.value.some(selected=>catalogKey(selected)===catalogKey(item)))||[])
-const hasReselected=computed(()=>Object.values(reselected.value).some(Boolean))
-const valid=computed(()=>modelsValid.value&&quantitiesValid.value)
-const hasUnsavedChoice = computed(() => commonColors.value.length>0 || Object.values(sampleColors.value).some(values=>values.length>0) || Object.values(styleOnly.value).some(Boolean) || Object.values(selectionModelTexts.value).some(Boolean) || Object.values(sampleQuantities.value).some(value=>value!==undefined)||commonModels.value.length > 0 || Object.values(adjusted.value).some(Boolean) || Object.values(chosen.value).some(ids => ids.length > 0))
-function payload(): Omit<CatalogAddition, 'requestId' | 'previewToken'> {return {supplierCode:props.supplierCode,targetMode:'supplier_directory',items:selectedItems.value,...(props.targetSelectionId!==undefined?{targetSelectionId:props.targetSelectionId}:{}),...(props.targetVersion!==undefined?{targetVersion:props.targetVersion}:{})}}
-function payloadFingerprint(input:ReturnType<typeof payload>){return JSON.stringify({...input,items:[...input.items].sort((a,b)=>catalogKey(a).localeCompare(catalogKey(b)))})}
-watch(() => props.modelValue, open => {
-  generation++;if(unknown.value&&pendingCommand)return;error.value='';preview.value=undefined;pendingCommand=undefined
-  if (!open) return
-  chosen.value = Object.fromEntries(props.items.map(row => [catalogKey(row), []]))
-  styleOnly.value = {}; selectionModelTexts.value = {}
-  selectedPhones.value = Object.fromEntries(props.items.map(row => [catalogKey(row), []]))
-  progressPages.value = {}
-  commonModels.value = []; commonPhones.value = []; adjusted.value = {}; excluded.value = {}; expanded.value = {}; unmatched.value = {}; batchMode.value = 'common'; batchMessage.value = ''
-  sampleQuantities.value={};quantityAdjusted.value={};commonSampleQty.value=undefined
-  sampleColors.value={};colorsAdjusted.value={};commonColors.value=[]
-  reselected.value={}
-  requestId.value = newRequestId();
-})
-watch([chosen,excluded,sampleQuantities,styleOnly,selectionModelTexts,sampleColors],()=>{if(unknown.value)return;reselected.value={};preview.value=undefined;pendingCommand=undefined;requestId.value=newRequestId();error.value=''},{deep:true})
-watch(reselected,()=>{if(unknown.value)return;preview.value=undefined;pendingCommand=undefined;requestId.value=newRequestId();error.value=''},{deep:true})
+const defaultColors=(row:{color?:string;sampleColors?:string[]})=>row.sampleColors??colorOptions({color:row.color})
+const displayedColors=(row:CatalogStyle)=>sampleColors.value[catalogKey(row)]??defaultColors(row)
+const commonColorOptions=computed(()=>[...new Set(props.items.flatMap(colorOptions))])
+const selectedItems=computed<CatalogSelectionItem[]>(()=>props.items.filter(row=>!excluded.value.has(catalogKey(row))).map(row=>({ ...catalogIdentity(row),phoneModelIds:[],selectionIntent:'style' as const,...(reselected.value[catalogKey(row)]?{reselectCancelled:true}:{}),...(sampleColors.value[catalogKey(row)]!==undefined?{sampleColors:sampleColors.value[catalogKey(row)]}:{}) })))
+const valid=computed(()=>props.canWrite&&selectedItems.value.length>0)
+const hasUnsavedChoice=computed(()=>Object.keys(sampleColors.value).length>0||Object.values(reselected.value).some(Boolean)||excluded.value.size>0||commonColors.value.length>0)
+const validationIssues=computed(()=>preview.value&&!preview.value.canAdd?[...new Set([...(preview.value.messages||[]),...(preview.value.items||[]).flatMap(item=>(item.messages||[]).map(message=>`${item.name}：${message}`))])]:[])
+const issueItems=computed(()=>preview.value&&!preview.value.canAdd?(preview.value.items||[]).filter(item=>item.messages?.length&&props.items.some(row=>catalogKey(row)===catalogKey(item))):[])
+const reselectItems=computed(()=>(preview.value?.items||[]).filter(item=>item.requiresReselect===true&&selectedItems.value.some(selected=>catalogKey(selected)===catalogKey(item))))
+const photo=(row:CatalogStyle)=>row.fileDetails?.find(file=>file.type.startsWith('image/'))
+const suppliedCount=(row:CatalogStyle)=>catalogAllowedPhoneIds(row).filter(id=>{const phone=row.phones.find(phone=>phone.phoneModelId===id);return phone&&!unavailablePhone(phone)}).length
+const incompleteScope=(row:CatalogStyle)=>!!row.phoneMatchIssues?.length||!!row.phoneMatchSummary?.unresolvedCount
+function payload():Omit<CatalogAddition,'requestId'|'previewToken'>{return {supplierCode:props.supplierCode,targetMode:'supplier_directory',items:selectedItems.value,...(props.targetSelectionId!==undefined?{targetSelectionId:props.targetSelectionId}:{}),...(props.targetVersion!==undefined?{targetVersion:props.targetVersion}:{})}}
+watch(()=>props.modelValue,open=>{generation++;if(unknown.value&&pendingCommand)return;error.value='';preview.value=undefined;pendingCommand=undefined;if(!open)return;sampleColors.value={};excluded.value=new Set();commonColors.value=[];reselected.value={};requestId.value=newRequestId()})
+watch([sampleColors,excluded],()=>{if(unknown.value)return;reselected.value={};preview.value=undefined;pendingCommand=undefined;requestId.value=newRequestId();error.value=''},{deep:true})
 watch(sourceContext,()=>{generation++;if(!unknown.value){reselected.value={};preview.value=undefined;pendingCommand=undefined;requestId.value=newRequestId()}})
+watch(reselected,()=>{if(unknown.value)return;preview.value=undefined;pendingCommand=undefined;requestId.value=newRequestId();error.value=''},{deep:true})
 watch([busy,unknown],()=>emit('busy',busy.value||unknown.value),{flush:'sync'})
 onBeforeUnmount(()=>{generation++;emit('busy',false)})
-async function close(done?: () => void) {
-  if(busy.value||closing.value)return
-  if(unknown.value){ElMessage.warning(uiText('请先核对本次保存结果，避免重复提交。'));return}
-  const serial = generation
-  closing.value = true
-  try {
-    if (hasUnsavedChoice.value) await ElMessageBox.confirm(uiText('本次型号、颜色或拟拿样数量还未保存，确定放弃并关闭吗？'), uiText('保留本次选品'), { confirmButtonText: uiText('放弃并关闭'), cancelButtonText: uiText('继续选品'), closeOnClickModal: false })
-    if (serial !== generation || !props.modelValue) return
-    done?.(); emit('update:modelValue', false)
-  } catch { /* Keep every temporary choice when the user continues or dismisses the prompt. */ }
-  finally { closing.value = false }
+function changeColors(row:CatalogStyle,values:string[]){if(busy.value||unknown.value||!props.canWrite)return;sampleColors.value[catalogKey(row)]=[...values]}
+function applyColors(){if(busy.value||unknown.value||!props.canWrite)return;for(const row of props.items)if(!excluded.value.has(catalogKey(row))&&sampleColors.value[catalogKey(row)]===undefined)sampleColors.value[catalogKey(row)]=[...commonColors.value]}
+function toggleStyle(row:CatalogStyle){if(busy.value||unknown.value||!props.canWrite)return;const key=catalogKey(row);if(excluded.value.has(key))excluded.value.delete(key);else excluded.value.add(key)}
+async function close(done?:()=>void){
+ if(busy.value||closing.value)return
+ if(unknown.value){ElMessage.warning(uiText('请先核对本次保存结果，避免重复提交。'));return}
+ const serial=generation;closing.value=true
+ try{if(hasUnsavedChoice.value)await ElMessageBox.confirm(uiText('本次款式或选品颜色调整还未保存，确定放弃并关闭吗？'),uiText('保留本次选品'),{confirmButtonText:uiText('放弃并关闭'),cancelButtonText:uiText('继续选品'),closeOnClickModal:false});if(serial!==generation||!props.modelValue)return;done?.();emit('update:modelValue',false)}catch{/* Keep the entered colours when discard is cancelled. */}finally{closing.value=false}
 }
-function writeModels(row: CatalogStyle, ids: number[]) {
-  const key = catalogKey(row), unique = [...new Set(ids)]
-  chosen.value[key] = unique
-}
-function changeModels(row: CatalogStyle, ids: number[]) {
-  if (busy.value || unknown.value || !props.canWrite) return
-  const key = catalogKey(row)
-  styleOnly.value[key] = false
-  writeModels(row, ids); adjusted.value[key] = true; excluded.value[key] = ids.length === 0; unmatched.value[key] = []
-}
-function changeStyleOnly(row: CatalogStyle, value: boolean) {
-  if (busy.value || unknown.value || !props.canWrite) return
-  const key = catalogKey(row)
-  styleOnly.value[key] = value; adjusted.value[key] = true; excluded.value[key] = false; unmatched.value[key] = []
-  if (value) expanded.value[key] = true
-}
-function applyRow(row: CatalogStyle) {
-  const key = catalogKey(row), requested = batchMode.value === 'all' ? (unspecifiedScope(row) ? [] : allowedModels(row)) : commonModels.value
-  styleOnly.value[key] = false
-  const allowed = requested.filter(id => modelAllowed(row,id))
-  unmatched.value[key] = requested.filter(id => !allowed.includes(id))
-  writeModels(row, allowed)
-  selectedPhones.value[key] = allowed.map(id => batchPhones.value.find(phone => phone.phoneModelId === id)).filter((phone): phone is CompatiblePhone => !!phone)
-  excluded.value[key] = false
-}
-function applyBatch(mode: 'common' | 'all' = 'common') {
-  if (busy.value || unknown.value || !props.canWrite || mode === 'common' && !commonModels.value.length) return
-  batchMode.value = mode
-  let kept = 0
-  for (const row of props.items) {
-    if (adjusted.value[catalogKey(row)]) { kept++; continue }
-    applyRow(row)
-  }
-  batchMessage.value = `已更新本次选样范围${kept ? `；保留 ${kept} 款单独调整` : ''}。`
-}
-function restoreBatch(row: CatalogStyle) {
-  if (busy.value || unknown.value || !props.canWrite) return
-  adjusted.value[catalogKey(row)] = false; applyRow(row)
-}
-function chooseBatchFamily(ids: number[]) {
-  commonPhones.value = ids.map(id => batchPhones.value.find(phone => phone.phoneModelId === id)).filter((phone): phone is CompatiblePhone => !!phone)
-  commonModels.value = [...ids]; applyBatch()
-}
-function clearBatch() {
-  if (busy.value || unknown.value || !props.canWrite) return
-  commonModels.value = []; commonPhones.value = []; batchMode.value = 'common'; adjusted.value = {}; excluded.value = {}; unmatched.value = {}
-  styleOnly.value = {}
-  for (const row of props.items) writeModels(row, [])
-  batchMessage.value = '已清空本次型号选择。'
-}
-function familyChosen(row: CatalogStyle, ids: number[]) { return ids.every(id => chosen.value[catalogKey(row)]?.includes(id)) }
-function toggleFamily(row: CatalogStyle, ids: number[]) {
-  if (busy.value || unknown.value || !props.canWrite) return
-  const allowed = new Set(allowedModels(row)), members = ids.filter(id => allowed.has(id)), current = chosen.value[catalogKey(row)] || []
-  changeModels(row, familyChosen(row, members) ? current.filter(id => !members.includes(id)) : [...new Set([...current, ...members])])
-}
-function changeColors(row:CatalogStyle,values:string[]){if(busy.value||unknown.value||!props.canWrite)return;sampleColors.value[catalogKey(row)]=[...values];colorsAdjusted.value[catalogKey(row)]=true}
-function applyColors(){if(busy.value||unknown.value||!props.canWrite)return;for(const row of props.items)if(!excluded.value[catalogKey(row)]&&!colorsAdjusted.value[catalogKey(row)])sampleColors.value[catalogKey(row)]=[...commonColors.value]}
-function followColors(row:CatalogStyle){if(busy.value||unknown.value||!props.canWrite)return;colorsAdjusted.value[catalogKey(row)]=false;sampleColors.value[catalogKey(row)]=[...commonColors.value]}
-function changeQuantity(row:CatalogStyle,value:number|undefined){sampleQuantities.value[catalogKey(row)]=value??undefined;quantityAdjusted.value[catalogKey(row)]=true}
-function applyQuantity(){if(busy.value||unknown.value||!props.canWrite)return;for(const row of props.items)if(!quantityAdjusted.value[catalogKey(row)])sampleQuantities.value[catalogKey(row)]=commonSampleQty.value??undefined}
-function followQuantity(row:CatalogStyle){quantityAdjusted.value[catalogKey(row)]=false;sampleQuantities.value[catalogKey(row)]=commonSampleQty.value??undefined}
-function resultUnknown(cause:unknown){const failure=cause as {code?:string;response?:{status?:number}};return ['ECONNABORTED','ETIMEDOUT','ERR_NETWORK'].includes(failure?.code||'')||Number(failure?.response?.status)>=500}
-function toggleExpanded(row:CatalogStyle){expanded.value[catalogKey(row)]=!expanded.value[catalogKey(row)]}
+function payloadFingerprint(input:ReturnType<typeof payload>){return JSON.stringify({...input,items:[...input.items].sort((a,b)=>catalogKey(a).localeCompare(catalogKey(b)))})}
 function rememberRow(key:string,element:unknown){if(element instanceof HTMLElement)rowElements.set(key,element);else rowElements.delete(key)}
-async function locateIssue(item:CatalogSelectionItem){const key=catalogKey(item);expanded.value[key]=true;await nextTick();const element=rowElements.get(key);element?.scrollIntoView({block:'nearest'});element?.focus({preventScroll:true})}
+async function locateIssue(item:CatalogSelectionItem){await nextTick();const element=rowElements.get(catalogKey(item));element?.scrollIntoView({block:'nearest'});element?.focus({preventScroll:true})}
 async function reselectCurrent(){if(busy.value||unknown.value||!props.canWrite||!valid.value||!reselectItems.value.length)return;for(const item of reselectItems.value)reselected.value[catalogKey(item)]=true;await nextTick();await submit()}
+function resultUnknown(cause:unknown){const failure=cause as {code?:string;response?:{status?:number}};return ['ECONNABORTED','ETIMEDOUT','ERR_NETWORK'].includes(failure?.code||'')||Number(failure?.response?.status)>=500}
 async function submit(){
  if(!props.canWrite||busy.value||(!unknown.value&&!valid.value))return
  if(pendingCommand&&(pendingCommand.supplierCode!==props.supplierCode||pendingCommand.targetSelectionId!==props.targetSelectionId||pendingCommand.targetVersion!==props.targetVersion)){error.value='待核对的保存属于原供应商或原选品目录，请返回原页面核对。';return}
- const serial=generation,input=payload(),fingerprint=payloadFingerprint(input)
- busy.value=true;error.value=''
+ const serial=generation,input=payload(),fingerprint=payloadFingerprint(input);busy.value=true;error.value=''
  try{
-  if(!pendingCommand){if(!preview.value?.canAdd||!preview.value.previewToken){const checked=await previewCatalogSelection(input);if(!props.modelValue)return;if(serial!==generation||fingerprint!==payloadFingerprint(payload())){error.value='来源或选品目录已变化，请重新核对后保存。';return}preview.value=checked;if(!checked.canAdd){if(!validationIssues.value.length)error.value='本次选样未通过核对，请检查各款型号后重试。';return}if(!checked.previewToken){error.value='预览未返回保存凭证，请重试；本次填写已保留。';return}}pendingCommand=JSON.parse(JSON.stringify({...input,requestId:requestId.value,previewToken:preview.value.previewToken})) as CatalogAddition}
+  if(!pendingCommand){if(!preview.value?.canAdd||!preview.value.previewToken){const checked=await previewCatalogSelection(input);if(!props.modelValue)return;if(serial!==generation||fingerprint!==payloadFingerprint(payload())){error.value='来源或选品目录已变化，请重新核对后保存。';return}preview.value=checked;if(!checked.canAdd){if(!validationIssues.value.length)error.value='本次选品未通过核对，请检查款式后重试。';return}if(!checked.previewToken){error.value='预览未返回保存凭证，请重试；本次填写已保留。';return}}pendingCommand=JSON.parse(JSON.stringify({...input,requestId:requestId.value,previewToken:preview.value.previewToken})) as CatalogAddition}
   const result=await addCatalogSelection(pendingCommand)
   if(!props.modelValue)return
   if(serial!==generation){error.value='来源或选品目录已变化，请返回原目录核对保存结果。';return}
-  unknown.value=false;pendingCommand=undefined;emit('added',result);emit('update:modelValue',false)
-  ElMessage.success(uiText('已保存 {value0} 款选样{value1}；实际收样另行登记',{value0:(selectedStyleCount.value),value1:(plannedTotal.value?`，拟拿样合计 ${plannedTotal.value} 件`:'')}))
- }catch(cause){if(props.modelValue){if(serial!==generation)error.value='来源或选品目录已变化，请返回原目录核对保存结果。';else{unknown.value=!!pendingCommand&&resultUnknown(cause);if(unknown.value)error.value='保存结果待核对，请点击“核对保存结果”；会沿用本次资料，不重复选样。';else{pendingCommand=undefined;preview.value=undefined;error.value=partnerError(cause)}}}}finally{busy.value=false}
+  unknown.value=false;pendingCommand=undefined;emit('added',result);emit('update:modelValue',false);ElMessage.success(uiText('已加入选品目录；实际收样另行登记'))
+ }catch(cause){if(props.modelValue){if(serial!==generation){error.value='来源或选品目录已变化，请返回原目录核对保存结果。';return}unknown.value=!!pendingCommand&&resultUnknown(cause);if(unknown.value)error.value='保存结果待核对，请点击“核对保存结果”；会沿用本次资料，不重复加入。';else{pendingCommand=undefined;preview.value=undefined;error.value=partnerError(cause)}}}finally{busy.value=false}
 }
-
 </script>
 
 <template>
-  <el-dialog :model-value="modelValue" class="catalog-selection-dialog-shell" :title='uiText("选择样品")' width="min(1000px,96vw)" top="20px" append-to-body :close-on-click-modal="false" :close-on-press-escape="!busy&&!unknown" :show-close="!busy&&!unknown" :before-close="close">
-    <div class="catalog-selection-dialog">
-      <p class="selection-intro">{{ supplierName || supplierCode }}{{ uiText(" · 已勾选 ") }}{{ items.length }}{{ uiText(" 款") }}</p>
-      <section class="selection-models">
-        <section class="selection-batch" :aria-label='uiText("统一批量选择")'>
-          <div class="selection-section-heading"><h3>{{ uiText("统一选择手机型号") }}</h3><span>{{ uiText("应用到未单独调整的款式") }}</span></div>
-          <div class="selection-batch-controls">
-            <PhoneModelMultiSelect v-if="batchScope===undefined||batchScope.length" v-model="commonModels" class="selection-batch-picker" :members="batchPhones" :allowed-ids="batchScope" :disabled="busy||unknown||!canWrite" :aria-label='uiText("批量选择系列／型号")' :placeholder='uiText("选择手机系列／型号")' @selected="commonPhones=$event"/>
-            <span v-else class="selection-scope-note">{{ uiText("本批暂无可批量选择的型号，请逐款核对。") }}</span>
-            <el-button type="primary" :disabled="busy||unknown||!canWrite||!commonModels.length" @click="applyBatch()">{{ uiText("应用到 ") }}{{items.length}}{{ uiText(" 款") }}</el-button>
-          </div>
-          <div class="selection-batch-shortcuts"><span>{{ uiText("快捷选择") }}</span><el-button link :disabled="busy||unknown||!canWrite" @click="applyBatch('all')">{{ uiText("各款可选型号全选") }}</el-button><el-button v-for="family in batchFamilies" :key="family.key" link :disabled="busy||unknown||!canWrite" @click="chooseBatchFamily(family.phoneModelIds)">{{ uiText("选择") }}{{family.name}}（{{family.phoneModelIds.length}}）</el-button><el-button link class="selection-clear" :disabled="busy||unknown||!canWrite" @click="clearBatch">{{ uiText("清空") }}</el-button></div>
-          <div class="selection-colors-batch"><label>{{uiText('统一选样颜色')}}</label><SampleColorSelect v-model="commonColors" :options="commonColorOptions" :label="uiText('批量选样颜色')" :disabled="busy||unknown||!canWrite"/><el-button :disabled="busy||unknown||!canWrite" @click="applyColors">{{uiText('应用颜色')}}</el-button><small>{{uiText('保留单款例外')}}</small></div>
-          <div class="selection-quantity-batch"><label>{{ uiText("拟拿样数量（每款合计）") }}</label><el-input-number v-model="commonSampleQty" :key="'common-qty:'+(busy||unknown||!canWrite)" :min="0" :max="Number.MAX_SAFE_INTEGER" :precision="0" :controls="false" :placeholder='uiText("如 2")' :aria-label='uiText("每款统一拟拿样数量")' :disabled="busy||unknown||!canWrite"/><el-button :disabled="busy||unknown||!canWrite" @click="applyQuantity">{{ uiText("应用每款数量") }}</el-button><small>{{ uiText("保留单款例外，不按型号数相乘") }}</small></div>
-        </section>
-        <div class="selection-section-heading selection-check-heading"><h3>{{ uiText("逐款核对") }}</h3><span>{{selectedStyleCount}}{{ uiText(" 款已选") }}<template v-if="pendingRows.length"> · {{pendingRows.length}}{{ uiText(" 款待选择") }}</template></span></div>
-        <div class="selection-table-heading"><span>{{ uiText("款式") }}</span><span>{{ uiText("本次选中型号") }}</span><span>{{uiText("本次选样颜色")}}</span><span>{{ uiText("拟拿样数量") }}</span><span>{{ uiText("操作") }}</span></div>
-        <article v-for="row in items" :key="catalogKey(row)" :ref="element=>rememberRow(catalogKey(row),element)" tabindex="-1" class="selection-model-row" :class="{'is-excluded':excluded[catalogKey(row)]}">
-          <div class="selection-row-main">
-            <header><PartnerPhoto v-if="photo(row)" :id="photo(row)!.id"/><span v-else class="selection-photo-placeholder" :aria-label='uiText("暂无款式图片")'>{{ uiText("暂无图片") }}</span><div><strong>{{row.name}}</strong><small><template v-if="unspecifiedScope(row)">{{ uiText("供应商未注明型号") }}</template><template v-else-if="row.phoneScopeMode==='unresolved'||!row.phoneModelIds.length">{{ uiText("型号资料待关联") }}</template><template v-else-if="!allowedModels(row).length">{{ uiText("当前范围暂无可选型号") }}</template><template v-else>{{ uiText("本款可选 ") }}{{allowedModels(row).length}}{{ uiText(" 个型号") }}</template>{{ uiText(" · 本次选 ") }}{{styleOnly[catalogKey(row)]?0:chosen[catalogKey(row)]?.length||0}}{{ uiText(" 个") }}</small></div></header>
-            <div class="selection-row-chosen">
-              <el-checkbox class="selection-style-toggle" :model-value="!!styleOnly[catalogKey(row)]" :disabled="busy||unknown||!canWrite" @update:model-value="changeStyleOnly(row,Boolean($event))">{{ uiText("仅选款式，型号后补") }}</el-checkbox>
-              <template v-if="!styleOnly[catalogKey(row)]">
-              <el-tag v-for="id in (chosen[catalogKey(row)]||[]).slice(0,2)" :key="id" size="small" :closable="canWrite&&!busy&&!unknown" @close="changeModels(row,(chosen[catalogKey(row)]||[]).filter(value=>value!==id))">{{phoneName(row,id)}}</el-tag>
-              <el-button v-if="(chosen[catalogKey(row)]?.length||0)>2" link :aria-expanded="!!expanded[catalogKey(row)]" @click="toggleExpanded(row)">{{ uiText("共 ") }}{{chosen[catalogKey(row)].length}}{{ uiText(expanded[catalogKey(row)]?' 个，收起':' 个，展开') }}</el-button>
-              <span v-if="!chosen[catalogKey(row)]?.length" class="selection-row-empty">{{excluded[catalogKey(row)]?uiText('本次不选'):uiText('未选型号')}}</span>
-              </template>
-              <span v-else class="selection-row-empty">{{ uiText("型号后补") }}</span>
-              <small v-if="adjusted[catalogKey(row)]">{{ uiText("已单独调整") }}</small>
-            </div>
-            <div class="selection-row-colors"><label>{{uiText('本次选样颜色')}}</label><SampleColorSelect :model-value="sampleColors[catalogKey(row)]||[]" :options="colorOptions(row)" :label="row.name+uiText('选样颜色')" :disabled="busy||unknown||!canWrite||excluded[catalogKey(row)]" @update:model-value="changeColors(row,$event)"/><el-button v-if="colorsAdjusted[catalogKey(row)]" link :disabled="busy||unknown||!canWrite" @click="followColors(row)">{{uiText('随统一颜色')}}</el-button></div>
-            <div class="selection-row-quantity"><label>{{ uiText("拟拿样数量（本款合计）") }}</label><el-input-number :model-value="sampleQuantities[catalogKey(row)]" :key="catalogKey(row)+':qty:'+(busy||unknown||!canWrite||excluded[catalogKey(row)])" :min="0" :max="Number.MAX_SAFE_INTEGER" :precision="0" :controls="false" :placeholder='uiText("未定")' :aria-label="row.name+uiText('拟拿样数量')" :disabled="busy||unknown||!canWrite||excluded[catalogKey(row)]" @update:model-value="changeQuantity(row,$event)"/><el-button v-if="quantityAdjusted[catalogKey(row)]" link :disabled="busy||unknown||!canWrite" @click="followQuantity(row)">{{ uiText("随统一数量") }}</el-button></div>
-            <el-button class="selection-adjust-button" link :disabled="busy||unknown||!canWrite" :aria-expanded="!!expanded[catalogKey(row)]" @click="toggleExpanded(row)">{{expanded[catalogKey(row)]?uiText('收起'):uiText('调整')}}</el-button>
-          </div>
-          <div v-show="expanded[catalogKey(row)]" class="selection-row-adjust">
-          <div class="selection-adjust-actions"><strong>{{ uiText("本款型号") }}</strong><el-button v-if="adjusted[catalogKey(row)]" link :disabled="busy||unknown||!canWrite" @click="restoreBatch(row)">{{ uiText("恢复统一选择") }}</el-button><el-button v-if="!excluded[catalogKey(row)]" link :disabled="busy||unknown||!canWrite" @click="changeModels(row,[])">{{ uiText("本次不选") }}</el-button></div>
-          <div v-if="styleOnly[catalogKey(row)]" class="selection-style-text"><el-input v-model="selectionModelTexts[catalogKey(row)]" :disabled="busy||unknown||!canWrite" :aria-label="row.name+uiText('原选品型号要求')" :placeholder="uiText('原选品型号要求（选填）')"/><small>{{ uiText("先保存款式与原文，不自动选择供应商全部型号。") }}</small></div>
-          <p v-if="row.modelText" class="selection-source-models"><span>{{ uiText("来源型号：") }}</span>{{row.modelText}}</p>
-          <div v-if="!styleOnly[catalogKey(row)]&&modelFamilies[catalogKey(row)]?.length" class="selection-series-shortcuts" :aria-label='uiText("本款系列快捷选择")'><el-button v-for="family in modelFamilies[catalogKey(row)]" :key="family.key" size="small" :type="familyChosen(row,family.phoneModelIds)?'primary':undefined" plain :disabled="busy||unknown||!canWrite" @click="toggleFamily(row,family.phoneModelIds)">{{familyChosen(row,family.phoneModelIds)?uiText('取消'):uiText('选择')}}{{family.name}}（{{family.phoneModelIds.length}}）</el-button></div>
-          <PhoneModelMultiSelect v-if="!styleOnly[catalogKey(row)]&&(unspecifiedScope(row)||allowedModels(row).length)" :model-value="chosen[catalogKey(row)]||[]" :members="row.phones" :allowed-ids="selectorScope(row)" :disabled="busy||unknown||!canWrite||row.phoneScopeMode==='unresolved'" :aria-label="row.name+uiText('本次所选系列／型号')" :placeholder="unspecifiedScope(row)?uiText('从现有手机资料选择系列／型号'):uiText('选择系列／型号（仅本款可选范围）')" @update:model-value="changeModels(row,$event)" @selected="rememberPhones(row,$event)"/>
-          <p v-if="row.color" class="selection-color">{{ uiText("供方颜色：") }}{{row.color}}</p>
-          </div>
-          <p v-if="unspecifiedScope(row)&&!excluded[catalogKey(row)]" class="selection-scope-note selection-row-notice">{{ uiText("供应商未注明型号，可从现有资料选择；不代表已确认可供。") }}</p>
-          <p v-if="!excluded[catalogKey(row)]&&!styleOnly[catalogKey(row)]&&(row.phoneScopeMode==='unresolved'||!unspecifiedScope(row)&&!allowedModels(row).length)" class="selection-issue selection-row-notice">{{row.phoneScopeMode==='unresolved'||!row.phoneModelIds.length?uiText('本款型号资料尚未提取或关联，请先核对来源型号表。'):uiText('本款型号已明确不供，暂无可选型号。')}}</p>
-          <p v-if="!excluded[catalogKey(row)]&&!styleOnly[catalogKey(row)]&&chosen[catalogKey(row)]?.some(id=>!modelAllowed(row,id))" class="selection-issue selection-row-notice">{{ uiText("本次型号不在当前允许范围或资料已变化，请重新选择。") }}</p>
-          <p v-if="unmatched[catalogKey(row)]?.length" class="selection-scope-note selection-row-notice">{{ uiText("未选入：") }}{{phoneList(row,unmatched[catalogKey(row)],batchPhones)}}{{ uiText("（不在本款可选范围或已停用）") }}</p>
-          <section v-if="progressPhones(row).length" class="selection-supplier-progress"><strong>{{ uiText("本次型号的供方进度") }}</strong><p v-for="id in visibleProgress(row)" :key="id"><b>{{phoneName(row,id)}}</b><span v-for="status in catalogPhoneProgress(row,id)" :key="status">{{status}}</span></p><el-pagination v-if="progressPhones(row).length>6" :current-page="progressPage(row)" :page-size="6" :total="progressPhones(row).length" :pager-count="5" layout="prev,pager,next" @current-change="progressPages[catalogKey(row)]=$event"/><small>{{ uiText("原进度如实保留，不等于本批现货、实收或质检结论。") }}</small></section>
-        </article>
-        <p v-if="batchMessage" class="selection-batch-message" role="status">{{uiText(String((batchMessage) ?? ''))}}</p>
-        <p v-if="pendingRows.length&&selectedStyleCount" class="selection-scope-note">{{pendingRows.length}}{{ uiText(" 款尚未选择型号，请点击对应“调整”补选，或明确选择“本次不选”。") }}</p>
-      </section>
-      <p class="selection-note">{{targetSelectionId?uiText('本次增选直接保存到原选品目录。'):uiText('直接保存到本供应商的选品目录。')}}{{ uiText("收到实物再登记收样，不会提前生成产品或样品批次。") }}</p>
-    </div>
-    <template #footer><div v-if="error||validationIssues.length" class="selection-errors selection-save-error" role="alert"><p v-if="error" class="selection-issue">{{uiText(error)}}</p><p v-for="message in validationIssues" :key="message" class="selection-issue">{{message}}</p><el-button v-for="item in issueItems" :key="catalogKey(item)" link size="small" @click="locateIssue(item)">{{uiText('定位款式')}} · {{item.name}}</el-button></div><div v-if="reselectItems.length||hasReselected" class="selection-reselection"><span>{{uiText('以前的选样已取消，重新选择将保留历史，仅保存本次规格')}}</span><el-button v-if="reselectItems.length" type="primary" plain size="small" :disabled="busy||unknown||!canWrite||!valid" @click="reselectCurrent">{{uiText('重新选择本次规格')}}</el-button></div><div class="selection-total" aria-live="polite"><strong>{{ uiText("已选 ") }}{{selectedStyleCount}}{{ uiText(" 款") }}</strong><small>{{unplannedCount===selectedItems.length?uiText('拟拿样数量未填'):uiText('拟拿样合计 ')+plannedTotal+uiText(' 件')}}<template v-if="unplannedCount"> · {{unplannedCount}}{{ uiText(" 款未填数量") }}</template>{{ uiText("，不按型号数相乘") }}</small></div><el-button :disabled="busy||closing||unknown" @click="close()">{{ uiText("取消") }}</el-button><el-button type="primary" :disabled="!canWrite||busy||closing||(!unknown&&!valid)" :loading="busy" @click="submit">{{unknown?uiText('核对保存结果'):uiText('保存选样')}}</el-button></template>
-  </el-dialog>
+ <el-dialog :model-value="modelValue" class="catalog-selection-dialog-shell" :title="uiText('加入选品目录')" width="min(1000px,96vw)" top="20px" append-to-body :close-on-click-modal="false" :close-on-press-escape="!busy&&!unknown" :show-close="!busy&&!unknown" :before-close="close">
+  <div class="catalog-selection-dialog">
+   <p class="selection-intro">{{supplierName||supplierCode}}{{uiText(' · 已勾选 ')}}{{items.length}}{{uiText(' 款')}}</p>
+   <p class="selection-note">{{uiText('这里只选款式，自动包含该款全部可供型号并随供方目录更新。实际收到的型号、颜色和数量在登记收样时确认。')}}</p>
+   <details v-if="items.length>1" class="selection-batch"><summary>{{uiText('批量调整选品颜色（选填）')}}</summary><div class="selection-batch-controls"><SampleColorSelect v-model="commonColors" :options="commonColorOptions" :label="uiText('批量选品颜色')" :disabled="busy||unknown||!canWrite"/><el-button :disabled="busy||unknown||!canWrite" @click="applyColors">{{uiText('应用颜色')}}</el-button><small>{{uiText('保留单款已调整的颜色')}}</small></div></details>
+   <div class="selection-table-heading"><span>{{uiText('款式')}}</span><span>{{uiText('供方型号范围')}}</span><span>{{uiText('选品颜色（可调整）')}}</span><span>{{uiText('操作')}}</span></div>
+   <article v-for="row in items" :key="catalogKey(row)" :ref="element=>rememberRow(catalogKey(row),element)" tabindex="-1" class="selection-model-row" :class="{'is-excluded':excluded.has(catalogKey(row))}">
+    <header><PartnerPhoto v-if="photo(row)" :id="photo(row)!.id"/><span v-else class="selection-photo-placeholder">{{uiText('暂无图片')}}</span><div><strong>{{row.name}}</strong><small v-if="row.supplierItemCode">{{row.supplierItemCode}}</small></div></header>
+    <div class="selection-scope"><span v-if="row.phoneScopeMode!=='unresolved'&&row.phoneScopeMode!=='unspecified'&&suppliedCount(row)">{{incompleteScope(row)?uiText('已关联可供型号'):uiText('全部可供型号')}} · {{suppliedCount(row)}}{{uiText('个')}}<small>{{uiText('随供方目录更新')}}</small><small v-if="incompleteScope(row)">{{uiText('部分供方型号待核对')}}</small></span><span v-else>{{uiText('供方型号待补')}}<small>{{uiText('可先加入款式，收样前再核对')}}</small></span><small v-if="row.modelText">{{row.modelText}}</small></div>
+    <div class="selection-row-colors"><label>{{uiText('选品颜色（可调整）')}}</label><SampleColorSelect :model-value="displayedColors(row)" :options="colorOptions(row)" :label="row.name+uiText('选品颜色')" :disabled="busy||unknown||!canWrite||excluded.has(catalogKey(row))" @update:model-value="changeColors(row,$event)"/></div>
+    <el-button link :disabled="busy||unknown||!canWrite" @click="toggleStyle(row)">{{excluded.has(catalogKey(row))?uiText('恢复本款'):uiText('本次不加入')}}</el-button>
+   </article>
+   <p class="selection-note">{{targetSelectionId?uiText('加入原选品目录，同款自动复用。'):uiText('加入本供应商的选品目录，同款自动复用。')}}{{uiText('此操作不生成实物样品。')}}</p>
+  </div>
+  <template #footer><div v-if="error||validationIssues.length" class="selection-errors selection-save-error" role="alert"><p v-if="error">{{uiText(error)}}</p><p v-for="message in validationIssues" :key="message" class="selection-issue">{{message}}</p><el-button v-for="item in issueItems" :key="catalogKey(item)" link size="small" @click="locateIssue(item)">{{uiText('定位款式')}} · {{item.name}}</el-button></div><div v-if="reselectItems.length||Object.values(reselected).some(Boolean)" class="selection-reselection"><span>{{uiText('以前的选品已取消，重新加入将保留原历史')}}</span><el-button v-if="reselectItems.length" :disabled="busy||unknown||!canWrite||!valid" type="primary" plain @click="reselectCurrent">{{uiText('重新加入本次款式')}}</el-button></div><strong class="selection-total">{{uiText('已选 {value0} 款',{value0:selectedItems.length})}}</strong><el-button :disabled="busy||closing||unknown" @click="close()">{{uiText('取消')}}</el-button><el-button type="primary" :disabled="!canWrite||busy||closing||(!unknown&&!valid)" :loading="busy" @click="submit">{{unknown?uiText('核对保存结果'):uiText('加入选品目录')}}</el-button></template>
+ </el-dialog>
 </template>
 
 <style scoped>
-:global(.catalog-selection-dialog-shell){display:flex;flex-direction:column;max-height:calc(100dvh - 40px);margin-bottom:20px;padding:0;--el-component-size:28px;font-size:12px}
-:global(.catalog-selection-dialog-shell>.el-dialog__header){padding:16px 22px 0;margin:0;flex:none}
-:global(.catalog-selection-dialog-shell .el-dialog__title){font-size:16px;font-weight:600;color:var(--el-text-color-primary)}
-:global(.catalog-selection-dialog-shell>.el-dialog__body){padding:10px 22px 16px;min-height:0;overflow:auto}
-:global(.catalog-selection-dialog-shell>.el-dialog__footer){display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 22px;background:var(--el-fill-color-light);border-top:1px solid var(--el-border-color-lighter);flex:none}
+:global(.catalog-selection-dialog-shell){display:flex;flex-direction:column;max-height:calc(100dvh - 40px);margin-bottom:20px;padding:0;font-size:12px;--el-component-size:28px}
+:global(.catalog-selection-dialog-shell>.el-dialog__header){padding:16px 20px 0;flex:none}
+:global(.catalog-selection-dialog-shell .el-dialog__title){font-size:16px;font-weight:600}
+:global(.catalog-selection-dialog-shell>.el-dialog__body){padding:10px 20px 16px;min-height:0;overflow:auto}
+:global(.catalog-selection-dialog-shell>.el-dialog__footer){display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 20px;background:var(--el-fill-color-light);border-top:1px solid var(--el-border-color-lighter);flex:none}
 :global(.catalog-selection-dialog-shell>.el-dialog__footer>.el-button){margin:0;font-size:12px;min-height:28px;height:auto;white-space:normal}
-.catalog-selection-dialog{display:flex;flex-direction:column;gap:10px;min-width:0;container-type:inline-size;font-size:12px;color:var(--el-text-color-regular)}
-.catalog-selection-dialog :deep(.el-button),.catalog-selection-dialog :deep(.el-input__inner){font-size:12px}
-.catalog-selection-dialog :deep(.el-button){margin-left:0;min-height:28px;height:auto;white-space:normal;overflow-wrap:anywhere}
-.catalog-selection-dialog h3{margin:0;font-size:13px;color:var(--el-text-color-primary);font-weight:600}
-.selection-intro,.selection-note{margin:0;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
-.selection-intro,.selection-note{color:var(--el-text-color-secondary)}
-.selection-batch{padding:14px 16px;background:var(--el-fill-color-light);border:1px solid var(--el-border-color-lighter);border-radius:7px}
-.selection-section-heading{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
-.selection-section-heading>span{color:var(--el-text-color-secondary)}
-.selection-batch-controls{display:flex;gap:8px;align-items:flex-start}
-.selection-batch-picker{flex:1;min-width:0}
-.selection-batch-shortcuts{display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap;margin-top:8px}
-.selection-batch-shortcuts>span{color:var(--el-text-color-secondary)}
-.selection-batch-shortcuts .selection-clear{margin-left:auto;color:var(--el-text-color-secondary)}
-.selection-check-heading{margin-top:20px}
-.selection-table-heading,.selection-row-main{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr) minmax(0,1fr) 110px 44px;gap:12px;align-items:center;padding:9px 10px}
-.selection-table-heading{background:var(--el-fill-color-light);color:var(--el-text-color-secondary);border-block:1px solid var(--el-border-color-lighter);font-weight:600}
-.selection-model-row{border-bottom:1px solid var(--el-border-color-lighter);min-width:0}
-.selection-row-main{padding-block:13px}
-.selection-model-row header{display:flex;align-items:center;gap:10px;min-width:0}
-.selection-model-row header>div{min-width:0;overflow-wrap:anywhere}
-.selection-model-row strong{font-size:12px;font-weight:600;color:var(--el-text-color-primary)}
-.selection-model-row small{display:block;color:var(--el-text-color-secondary);font-size:12px;margin-top:3px;line-height:1.5}
-.selection-model-row :deep(.partner-photo),.selection-photo-placeholder{width:40px;height:42px;flex:none;border-radius:5px}
-.selection-photo-placeholder{display:grid;place-items:center;background:var(--el-fill-color-light);border:1px solid var(--el-border-color-lighter);color:var(--el-text-color-secondary);font-size:11px;text-align:center}
-.selection-row-chosen{display:flex;gap:5px;flex-wrap:wrap;min-width:0;align-items:center}
-.selection-style-toggle{width:100%;height:auto;margin:0}.selection-style-toggle :deep(.el-checkbox__label){font-size:12px;white-space:normal;overflow-wrap:anywhere;line-height:1.5}.selection-style-text{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
-.selection-row-chosen small{width:100%;margin:0}
-.selection-row-chosen :deep(.el-tag){max-width:100%;height:auto;min-height:24px}
-.selection-row-chosen :deep(.el-tag__content){white-space:normal;line-height:18px;overflow-wrap:anywhere}
-.selection-row-empty{color:var(--el-text-color-secondary)}
-.selection-adjust-button{color:var(--el-color-primary)}
-.selection-row-adjust{padding:10px 14px 14px;background:var(--el-fill-color-light);border-top:1px dashed var(--el-border-color-lighter);min-width:0}
-.selection-adjust-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
-.selection-adjust-actions>strong{margin-right:auto}
-.selection-source-models,.selection-scope-note{margin:0;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
-.selection-source-models{margin-bottom:7px}
-.selection-source-models>span,.selection-scope-note{color:var(--el-text-color-secondary)}
-.selection-row-notice{padding:0 10px 9px;margin:0}
-.selection-series-shortcuts{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:7px}
-.selection-series-shortcuts :deep(.el-button){max-width:100%;line-height:1.5}
-.selection-batch-message{margin:10px 0 0;color:var(--el-text-color-secondary);line-height:1.6}
-.selection-supplier-progress{margin:0 10px 9px;padding:7px;background:var(--el-fill-color-light);border-radius:4px;font-size:12px;min-width:0}
-.selection-supplier-progress>p{display:flex;gap:3px 10px;flex-wrap:wrap;margin:4px 0;overflow-wrap:anywhere;line-height:1.6}
-.selection-supplier-progress>p>b{font-weight:500}
-.selection-supplier-progress :deep(.el-pagination){max-width:100%;flex-wrap:wrap}
-.selection-issue{color:var(--el-color-danger);font-size:12px;line-height:1.6;overflow-wrap:anywhere}
-.selection-quantity-batch{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;margin-top:10px}.selection-quantity-batch>.el-input-number{width:90px}.selection-quantity-batch small{color:var(--el-text-color-secondary)}.selection-row-quantity{min-width:0;display:flex;flex-direction:column;gap:4px}.selection-row-quantity>label{font-size:11px;color:var(--el-text-color-secondary);line-height:1.5}.selection-row-quantity :deep(.el-input-number){width:100%}.selection-row-quantity :deep(.el-button){align-self:flex-start;font-size:11px}.selection-color{color:var(--el-text-color-secondary)}
-.selection-colors-batch{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;margin-top:10px}.selection-colors-batch>.sample-color-select{flex:1;min-width:180px}.selection-colors-batch small{color:var(--el-text-color-secondary)}.selection-row-colors{min-width:0;display:flex;flex-direction:column;gap:4px}.selection-row-colors>label{font-weight:600;color:var(--el-text-color-primary);font-size:12px}.selection-row-colors>.el-button{align-self:flex-start;font-size:11px}
-.selection-reselection{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-basis:100%;font-size:12px;text-align:left}.selection-reselection>span{flex:1;min-width:200px;line-height:1.5}.selection-save-error{flex-basis:100%;max-height:120px;overflow:auto;text-align:left}.selection-save-error p{margin:0 0 3px}.selection-save-error .el-button{font-size:12px}.selection-total{display:flex;flex-direction:column;gap:3px;margin-right:auto;text-align:left;font-size:12px;line-height:1.5}
-.selection-total strong{font-size:13px;color:var(--el-text-color-primary);font-weight:600}
-.selection-total small{font-size:12px;color:var(--el-text-color-secondary)}
-@container(max-width:720px){.selection-table-heading{display:none}.selection-row-main{grid-template-columns:minmax(0,1fr) 44px;gap:8px}.selection-model-row header{grid-column:1/-1}.selection-row-chosen{padding-left:50px}.selection-row-quantity,.selection-row-colors{grid-column:1;padding-left:50px}.selection-adjust-button{grid-column:2;grid-row:2/5}.selection-batch-controls{flex-wrap:wrap}.selection-batch-picker{flex-basis:100%}}
-@media(max-width:600px){:global(.catalog-selection-dialog-shell>.el-dialog__body){padding-inline:14px}:global(.catalog-selection-dialog-shell>.el-dialog__header){padding-inline:14px}:global(.catalog-selection-dialog-shell>.el-dialog__footer){padding-inline:14px}.selection-total{width:100%}.selection-batch{padding:12px}}
+.catalog-selection-dialog{container-type:inline-size;min-width:0;font-size:12px;color:var(--el-text-color-regular)}
+.selection-intro,.selection-note{margin:0 0 10px;line-height:1.6;overflow-wrap:anywhere}.selection-note,.selection-intro{color:var(--el-text-color-secondary)}
+.selection-table-heading,.selection-model-row{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1.1fr) minmax(0,1fr) 70px;gap:12px;align-items:center;padding:10px 8px}
+.selection-table-heading{background:var(--el-fill-color-light);font-weight:600}.selection-model-row{border-bottom:1px solid var(--el-border-color-lighter);padding-block:14px;min-width:0}.selection-model-row.is-excluded{opacity:.65}
+.selection-model-row header{display:flex;align-items:center;gap:10px;min-width:0}.selection-model-row header>div{min-width:0;overflow-wrap:anywhere}.selection-model-row strong{font-size:12px}
+.selection-photo-placeholder,.selection-model-row :deep(.partner-photo){width:40px;height:42px;flex:none;border-radius:4px}.selection-photo-placeholder{display:grid;place-items:center;background:var(--el-fill-color-light);font-size:11px;text-align:center}
+.selection-model-row small{display:block;line-height:1.6;color:var(--el-text-color-secondary);margin-top:3px;overflow-wrap:anywhere}.selection-scope{min-width:0;overflow-wrap:anywhere;line-height:1.6}.selection-row-colors{min-width:0}.selection-row-colors>label{display:none}
+.catalog-selection-dialog :deep(.el-button),.catalog-selection-dialog :deep(.el-input__inner){font-size:12px}.catalog-selection-dialog :deep(.el-button){margin:0;white-space:normal;overflow-wrap:anywhere;height:auto;min-height:28px}
+.selection-batch{margin-bottom:10px;padding:10px;background:var(--el-fill-color-light);border-radius:5px}.selection-batch summary{cursor:pointer;font-weight:600}.selection-batch-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:8px}.selection-batch-controls>.sample-color-select{flex:1;min-width:180px}.selection-batch-controls small{color:var(--el-text-color-secondary)}
+.selection-save-error{flex-basis:100%;max-height:120px;overflow:auto;text-align:left}.selection-save-error p{margin:0 0 3px}.selection-reselection{display:flex;flex-basis:100%;gap:8px;flex-wrap:wrap;font-size:12px;text-align:left;align-items:center}.selection-reselection>span{flex:1;min-width:200px}.selection-errors{color:var(--el-color-danger);overflow-wrap:anywhere}.selection-total{margin-right:auto;font-size:12px}
+@container(max-width:720px){.selection-table-heading{display:none}.selection-model-row{grid-template-columns:minmax(0,1fr) 80px;gap:8px}.selection-model-row header{grid-column:1/-1}.selection-scope,.selection-row-colors{grid-column:1;padding-left:50px}.selection-row-colors>label{display:block;margin-bottom:4px}.selection-model-row>.el-button{grid-column:2;grid-row:2/4}}
 </style>
-

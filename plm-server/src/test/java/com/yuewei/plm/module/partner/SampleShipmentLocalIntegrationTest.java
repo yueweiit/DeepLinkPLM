@@ -18,12 +18,12 @@ import static org.mockito.Mockito.*;
 import static com.yuewei.plm.module.partner.PartnerValues.*;
 
 /** Random owned schema only; no writes to the restored clone's real business schema. */
-@EnabledIfEnvironmentVariable(named="PLM_SAMPLE_IDENTITY_TEST_URL",matches="(?:jdbc:postgresql://127\\.0\\.0\\.1:15486/plm_sample_qr_kwhvfzrr(?:\\?currentSchema=plm)?|jdbc:postgresql://127\\.0\\.0\\.1:15504/plm_sales_policy_qa\\?currentSchema=plm)")
+@EnabledIfEnvironmentVariable(named="PLM_SAMPLE_IDENTITY_TEST_URL",matches="(?:jdbc:postgresql://127\\.0\\.0\\.1:15486/plm_sample_qr_kwhvfzrr(?:\\?currentSchema=plm)?|jdbc:postgresql://127\\.0\\.0\\.1:15504/plm_sales_policy_qa\\?currentSchema=plm|jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/plm_shipment_flow_qa)")
 class SampleShipmentLocalIntegrationTest {
  JdbcTemplate admin,jdbc;String schema;PartnerStore store;SampleShipmentService service;TransactionTemplate tx;SampleIdentityRegistry registry,warehouse;
  String role="administrator";long actorId=1;
  @BeforeEach void setup(){
-  String url=System.getenv("PLM_SAMPLE_IDENTITY_TEST_URL"),password=System.getenv("PLM_SAMPLE_IDENTITY_TEST_PASSWORD");String base=url.split("\\?")[0];admin=new JdbcTemplate(new DriverManagerDataSource(base,"postgres",password));if(url.contains(":15504/")){assertThat(admin.queryForObject("select current_database()",String.class)).isEqualTo("plm_sales_policy_qa");assertThat(admin.queryForObject("select system_identifier::text from pg_control_system()",String.class)).isNotEqualTo("7651923859845308451");}schema="sample_shipment_qa_"+UUID.randomUUID().toString().replace("-","");admin.execute("create schema "+schema);
+  String url=System.getenv("PLM_SAMPLE_IDENTITY_TEST_URL"),password=System.getenv("PLM_SAMPLE_IDENTITY_TEST_PASSWORD");String base=url.split("\\?")[0];admin=new JdbcTemplate(new DriverManagerDataSource(base,"postgres",password));if(url.endsWith("/plm_shipment_flow_qa")){assertThat(admin.queryForObject("select current_database()",String.class)).isEqualTo("plm_shipment_flow_qa");assertThat(admin.queryForObject("select system_identifier::text from pg_control_system()",String.class)).isNotEqualTo("7651923859845308451");}if(url.contains(":15504/")){assertThat(admin.queryForObject("select current_database()",String.class)).isEqualTo("plm_sales_policy_qa");assertThat(admin.queryForObject("select system_identifier::text from pg_control_system()",String.class)).isNotEqualTo("7651923859845308451");}schema="sample_shipment_qa_"+UUID.randomUUID().toString().replace("-","");admin.execute("create schema "+schema);
   var ds=new DriverManagerDataSource(base+"?currentSchema="+schema+",plm","postgres",password);jdbc=new JdbcTemplate(ds);tx=new TransactionTemplate(new DataSourceTransactionManager(ds));
   jdbc.execute("""
    create table sys_user(user_id bigint primary key,username text,display_name text,status text,deleted_flag int default0,all_permissions boolean default false);
@@ -138,6 +138,35 @@ class SampleShipmentLocalIntegrationTest {
   var version=parcel.get("version");parcel=run(()->service.action(id,"receive",data("requestId","receipt-to-correct","version",version,"date","2026-01-02","location","错误签收位置","rows",List.of(data("rowId","line-a","goodQty",2L)))));
   role="administrator";actorId=1;long receipt=store.events(id).stream().filter(event->"sample_shipment_receive".equals(event.get("action"))).mapToLong(event->number(event.get("id"))).findFirst().orElseThrow();var receivedVersion=parcel.get("version");parcel=run(()->service.action(id,"undo",data("requestId","correct-location","version",receivedVersion,"date","2026-01-03","targetEventId",receipt,"reason","签收位置录错")));
   role="mexico";actorId=2;var scan=warehouse.resolve("SY-000101");assertThat(scan.toString()).doesNotContain("错误签收位置","shipments");var local=map(scan.get("identity"));assertThat(maps(local.get("positions"))).isEmpty();assertThat(map(local.get("balances"))).containsEntry("inTransit",3L).containsEntry("onhand",0L);var row=maps(service.detail(id).get("rows")).get(0);assertThat(maps(row.get("receiptLocations"))).isEmpty();assertThat(row).containsEntry("inTransit",3L);
+ }
+
+ @Test void draftLogisticsRemainEditableMetadataWithoutInventingActualDispatchFacts(){
+  var d=run(()->service.create(data("requestId","draft-logistics","direction","mexico_outbound","destination","墨西哥办公室","dispatch",Map.of("tracking"," DRAFT-TRACK ","carrier","承运商","date","2026-01-01"),"rows",List.of(data("rowId","line-a","sampleIdentityId",101L,"qty",2L)))));
+  long id=number(d.get("id"));assertThat(d).containsEntry("status","draft");assertThat(map(d.get("dispatch"))).containsExactlyInAnyOrderEntriesOf(Map.of("tracking","DRAFT-TRACK","carrier","承运商"));assertThat(aggregate("inTransit")).isZero();assertThat(aggregate("available")).isEqualTo(10);
+  var edited=new LinkedHashMap<String,Object>(d);edited.put("requestId","edit-draft-logistics");edited.put("dispatch",Map.of("tracking","","carrier",""));d=run(()->service.save(id,edited));assertThat(map(d.get("dispatch"))).containsEntry("tracking","").doesNotContainKey("date");assertThat(maps(d.get("rows")).get(0)).containsEntry("qty",2);
+  var legacy=new LinkedHashMap<String,Object>(d);legacy.remove("dispatch");legacy.put("requestId","legacy-draft-save");d=run(()->service.save(id,legacy));assertThat(map(d.get("dispatch"))).containsEntry("tracking","");assertThat(d).containsEntry("status","draft");assertThat(aggregate("available")).isEqualTo(10);
+  assertThat(store.events(id).stream().map(event->text(event.get("action")))).containsExactly("sample_shipment_create","sample_shipment_save","sample_shipment_save");
+ }
+ @Test void blankTrackingDispatchAndLaterTrackingAtEverySentStateNeverWithdrawStockAgain(){
+  var d=draft(3);long id=number(d.get("id"));var version=d.get("version");
+  d=run(()->service.action(id,"dispatched",data("requestId","dispatch-without-number","version",version,"date","2026-01-01","tracking","")));
+  assertThat(d).containsEntry("status","dispatched");assertThat(map(d.get("dispatch"))).containsEntry("tracking","").containsEntry("date","2026-01-01");assertThat(aggregate("available")).isEqualTo(7);assertThat(aggregate("inTransit")).isEqualTo(3);
+  for(int step=0;step<3;step++){
+   long available=aggregate("available"),inTransit=aggregate("inTransit"),ledgerEvents=jdbc.queryForObject("select count(*) from plm_partner_event where record_id in (201,202)",Long.class);
+   var update=data("requestId","tracking-"+step,"version",d.get("version"),"date","2026-01-02","tracking","CONFIRMED-"+step,"carrier","承运商","note","人工核实补填运单");
+   d=run(()->service.action(id,"tracking",update));run(()->service.action(id,"tracking",update));
+   assertThat(map(d.get("dispatch"))).containsEntry("tracking","CONFIRMED-"+step).containsEntry("date","2026-01-01");assertThat(aggregate("available")).isEqualTo(available);assertThat(aggregate("inTransit")).isEqualTo(inTransit);assertThat(jdbc.queryForObject("select count(*) from plm_partner_event where record_id in (201,202)",Long.class)).isEqualTo(ledgerEvents);
+   if(step<2){var receive=data("requestId","receive-tracking-stage-"+step,"version",d.get("version"),"date","2026-01-02","location","墨西哥办公室","rows",List.of(data("rowId","line-a","goodQty",step==0?1L:2L)));d=run(()->service.action(id,"receive",receive));assertThat(d).containsEntry("status",step==0?"partially_received":"received");}
+  }
+  assertThat(store.events(id).stream().filter(event->"sample_shipment_tracking".equals(event.get("action")))).hasSize(3).allSatisfy(event->{assertThat(event).containsEntry("operator","国内工程");assertThat(map(event.get("data"))).containsEntry("reason","人工核实补填运单");});
+  verify(store.audit,atLeastOnce()).logRequired(any(),any());assertThat(aggregate("inTransit")).isZero();
+ }
+ @Test void optionalTrackingDoesNotRelaxActualDateQuantityOrAvailableStockGates(){
+  var d=draft(3);long id=number(d.get("id"));var version=d.get("version");
+  assertThatThrownBy(()->run(()->service.action(id,"dispatched",data("requestId","no-date","version",version,"tracking","")))).hasMessageContaining("日期");
+  assertThatThrownBy(()->run(()->service.action(id,"dispatched",data("requestId","zero-actual","version",version,"date","2026-01-01","tracking","","rows",List.of(data("rowId","line-a","sampleIdentityId",101L,"qty",0L)))))).hasMessageContaining("数量");
+  assertThatThrownBy(()->run(()->service.action(id,"dispatched",data("requestId","not-enough","version",version,"date","2026-01-01","tracking","","rows",List.of(data("rowId","line-a","sampleIdentityId",101L,"qty",11L)))))).hasMessageContaining("实际可用样品不足");
+  assertThat(service.detail(id)).containsEntry("status","draft");assertThat(aggregate("inTransit")).isZero();assertThat(aggregate("available")).isEqualTo(10);
  }
 
 }

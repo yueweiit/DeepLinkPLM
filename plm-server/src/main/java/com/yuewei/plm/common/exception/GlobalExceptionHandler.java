@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.sql.SQLException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.DataAccessException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -26,6 +27,24 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    // Service transaction advice has already rolled back before MVC reaches this boundary.
+    @ExceptionHandler(DataAccessException.class)
+    public ResponseEntity<ResponseVO<Void>> handleReceiptSourceLock(DataAccessException ex, HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        boolean receipt = "POST".equals(request.getMethod()) && ("/api/v1/samples".equals(uri)
+            || uri.matches("/api/v1/partner-selections/[0-9]+/sample-receipts"));
+        if (receipt) {
+            for (Throwable cause = ex; cause != null; cause = cause.getCause()) {
+                if (cause instanceof SQLException sql && "55P03".equals(sql.getSQLState())) {
+                    return ResponseEntity.status(HttpStatus.CONFLICT).body(ResponseVO.error(
+                        ErrorCodeConstants.CODE_CONFLICT, "供应商型号资料正在维护，请保留本次填写，稍后重新核对收样",
+                        RequestIdUtil.getRequestId(request), OffsetDateTime.now()));
+                }
+            }
+        }
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(handleUnknown(ex, request));
+    }
 
     @ExceptionHandler(DuplicateKeyException.class)
     public ResponseEntity<ResponseVO<Void>> handleDuplicateKey(DuplicateKeyException ex, HttpServletRequest request) {

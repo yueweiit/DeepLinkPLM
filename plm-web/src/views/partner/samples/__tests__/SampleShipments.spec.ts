@@ -26,7 +26,7 @@ describe('supplier source and sample parcel UI',()=>{
  it('reopens a saved shipment by ID without recreating a new inbound draft after refresh',async()=>{await start('/partner-samples?view=shipments&shipmentId=9');expect(api.sampleShipment).toHaveBeenCalledWith(9);expect(wrapper.find('.shipment-form').exists()).toBe(false);expect(wrapper.text()).toContain('SJ-000009')})
  it('cleans one-time draft-entry parameters when an unmodified new draft is closed',async()=>{const router=await start('/partner-samples?view=shipments&newShipment=mexico_outbound');await click('取消');expect(router.currentRoute.value.query.newShipment).toBeUndefined();expect(wrapper.findAll('button').find(b=>b.text()==='保存草稿')?.isVisible()).not.toBe(true)})
 
- it('prefills every selected identity, its only available position and a meaningful automatic shipment title',async()=>{api.sampleIdentity.mockImplementation(async(id:number)=>({id,sampleIdentityId:id,sampleCode:'SY-'+id,name:'实际样品'+id,specName:'手机 紫色',balances:{available:2},positions:[{name:'中国工程柜',available:2}]}));const router=await start('/partner-samples?view=shipments&newShipment=mexico_outbound&sampleIdentityIds=71,72');expect(api.sampleIdentity).toHaveBeenCalledWith(71);expect(api.sampleIdentity).toHaveBeenCalledWith(72);expect(wrapper.findAll('.draft-row')).toHaveLength(2);expect(wrapper.text()).not.toContain('记录名称');expect(wrapper.text()).toContain('寄样单标题（自动生成，可修改）');await click('保存草稿');expect(api.saveSampleShipment).toHaveBeenCalledWith(expect.objectContaining({name:'样品发往墨西哥 · 2种样品',origin:'中国样品间',destination:'墨西哥样品间',rows:[expect.objectContaining({sampleIdentityId:71,location:'中国工程柜',qty:null}),expect.objectContaining({sampleIdentityId:72,location:'中国工程柜',qty:null})]}),undefined);expect(router.currentRoute.value.query.sampleIdentityIds).toBeUndefined()})
+ it('prefills every selected identity, its only available position and a meaningful automatic shipment title',async()=>{api.sampleIdentity.mockImplementation(async(id:number)=>({id,sampleIdentityId:id,sampleCode:'SY-'+id,name:'实际样品'+id,specName:'手机 紫色',balances:{available:2},positions:[{name:'中国工程柜',available:2}]}));const router=await start('/partner-samples?view=shipments&newShipment=mexico_outbound&sampleIdentityIds=71,72');expect(api.sampleIdentity).toHaveBeenCalledWith(71);expect(api.sampleIdentity).toHaveBeenCalledWith(72);expect(wrapper.findAll('.draft-row')).toHaveLength(2);expect(wrapper.text()).not.toContain('记录名称');expect(wrapper.text()).toContain('寄样单标题（自动生成，可修改）');await click('保存草稿');expect(api.saveSampleShipment).toHaveBeenCalledWith(expect.objectContaining({name:'样品发往墨西哥 · 2种样品',origin:'中国样品间',destination:'墨西哥样品间',rows:[expect.objectContaining({sampleIdentityId:71,location:'中国工程柜',qty:1}),expect.objectContaining({sampleIdentityId:72,location:'中国工程柜',qty:1})]}),undefined);expect(router.currentRoute.value.query.sampleIdentityIds).toBeUndefined()})
 
  it('retains manually changed outbound rooms when the saved draft is reopened instead of applying new-draft defaults again',async()=>{
   await start('/partner-samples?view=shipments&newShipment=mexico_outbound')
@@ -51,7 +51,7 @@ describe('supplier source and sample parcel UI',()=>{
   await start('/samples?view=shipments&newShipment=supplier_inbound&selectionId=7&selectionRowIds=row-1');await click('查看／办理')
   expect(api.sampleShipments).toHaveBeenCalledWith(expect.objectContaining({direction:'mexico_outbound'}));expect(api.sampleShipmentOptions).not.toHaveBeenCalled();expect(source.options).not.toHaveBeenCalled();expect(source.head).not.toHaveBeenCalled();expect(api.sampleIdentities).not.toHaveBeenCalled()
   const buttons=wrapper.findAll('button').map(button=>button.text())
-  for(const label of ['编辑草稿','删除草稿','登记实际寄出','记录物流节点','登记国内实际收样','确认在途短少','从选品目录登记寄样','新建发墨草稿'])expect(buttons).not.toContain(label)
+  for(const label of ['编辑草稿','删除草稿','登记实际寄出','记录物流节点','补填／修改物流号','登记国内实际收样','确认在途短少','从选品目录登记寄样','新建发墨草稿'])expect(buttons).not.toContain(label)
   for(const text of ['私有中国源','国内柜不可见','私有SP批次','私有事件日期','私有事件说明','实际流转记录'])expect(wrapper.text()).not.toContain(text)
   expect(wrapper.findComponent({name:'PartnerFiles'}).exists()).toBe(false);expect(wrapper.findAll('select').some(select=>select.attributes('placeholder')==='全部方向')).toBe(false)
   await click('登记实际签收');expect(wrapper.getComponent({name:'SampleShipmentActionDialog'}).props()).toMatchObject({action:'receive',shipment:expect.objectContaining({id:9,minimal:true})});expect(api.sampleShipmentAction).not.toHaveBeenCalled()
@@ -65,6 +65,56 @@ describe('supplier source and sample parcel UI',()=>{
   const user=useUserStore();user.profile={userId:81,roleCode:'mexico'} as never;user.permissions=['pilot:tasks','task:arrival','task:acceptance','file:read']
   api.sampleShipment.mockRejectedValue(new Error('仅可查看本人待收包裹'));await start('/samples?view=shipments&shipmentId=99')
   expect(wrapper.text()).toContain('仅可查看本人待收包裹');expect(wrapper.find('.shipment-detail').exists()).toBe(false);expect(wrapper.findAll('button').map(button=>button.text())).not.toContain('登记实际签收')
+ })
+
+ it('starts a manually added Mexico row at one but preserves the user clearing it',async()=>{
+  await start('/partner-samples?view=shipments&newShipment=mexico_outbound');await click('＋ 添加样品')
+  const quantity=wrapper.findAllComponents(ElInput).find(i=>String(i.props('ariaLabel')||'').startsWith('拟寄数量'))!
+  expect(quantity.props('modelValue')).toBe('1');quantity.vm.$emit('update:modelValue','');await flushPromises();await click('保存草稿')
+  expect(api.saveSampleShipment.mock.calls[0][0].rows).toEqual([expect.objectContaining({qty:null})])
+ })
+ it('does not reapply new-row defaults over existing draft quantities or saved blanks',async()=>{
+  api.sampleShipment.mockResolvedValue({...shipment(),direction:'mexico_outbound',rows:[{rowId:'old-one',sampleIdentityId:71,qty:7},{rowId:'old-blank',sampleIdentityId:72,qty:null}]})
+  await start('/partner-samples?view=shipments&shipmentId=9');await click('编辑草稿')
+  const quantities=wrapper.findAllComponents(ElInput).filter(i=>String(i.props('ariaLabel')||'').startsWith('拟寄数量'))
+  expect(quantities.map(i=>i.props('modelValue'))).toEqual(['7','']);await click('保存草稿')
+  expect(api.saveSampleShipment.mock.calls[0][0].rows.map((r:{qty:number|null})=>r.qty)).toEqual([7,null])
+ })
+ it('keeps editable draft logistics prominent and reopens them without claiming a dispatch date',async()=>{
+  await start('/partner-samples?view=shipments&newShipment=mexico_outbound')
+  expect(wrapper.find('.shipment-form input[aria-label="运单／物流号（选填，可后补）"]').exists()).toBe(true)
+  expect(wrapper.find('.shipment-extra input[aria-label="运单／物流号（选填，可后补）"]').exists()).toBe(false)
+  wrapper.findAllComponents(ElInput).find(i=>i.props('ariaLabel')==='运单／物流号（选填，可后补）')!.vm.$emit('update:modelValue','DRAFT-TRACK')
+  wrapper.findAllComponents(ElInput).find(i=>i.props('ariaLabel')==='承运方（选填）')!.vm.$emit('update:modelValue','承运商')
+  await click('保存草稿');const saved={...shipment(),...JSON.parse(JSON.stringify(api.saveSampleShipment.mock.calls[0][0])),id:9,version:2}
+  expect(saved.dispatch).toEqual({tracking:'DRAFT-TRACK',carrier:'承运商'});expect(api.sampleShipmentAction).not.toHaveBeenCalled()
+  wrapper.unmount();document.body.innerHTML='';api.sampleShipment.mockResolvedValue(saved)
+  await start('/partner-samples?view=shipments&shipmentId=9');await click('编辑草稿');await click('保存草稿')
+  expect(api.saveSampleShipment).toHaveBeenLastCalledWith(expect.objectContaining({dispatch:{tracking:'DRAFT-TRACK',carrier:'承运商'},version:2}),9)
+ })
+ it.each(['dispatched','partially_received','received'])('offers tracking completion for %s without dispatching again',async status=>{
+  api.sampleShipment.mockResolvedValue({...shipment(status),dispatch:{date:'2026-10-27',tracking:''}})
+  await start('/partner-samples?view=shipments&shipmentId=9');expect(wrapper.text()).toContain('物流号待补')
+  await click('补填／修改物流号');expect(wrapper.getComponent({name:'SampleShipmentActionDialog'}).props('action')).toBe('tracking')
+  expect(api.sampleShipmentAction).not.toHaveBeenCalled();expect(wrapper.findAll('button').some(b=>b.text()==='登记实际寄出')).toBe(false)
+ })
+ it('keeps logistics actions unavailable to a read-only account',async()=>{
+  useUserStore().permissions=[];api.sampleShipment.mockResolvedValue(shipment('received'))
+  await start('/partner-samples?view=shipments&shipmentId=9')
+  expect(wrapper.findAll('button').some(b=>b.text()==='补填／修改物流号')).toBe(false)
+ })
+
+ it.each([
+  {location:'CN',site:'CN',expected:'中国样品间未设库位'},
+  {location:'中国工程室 A柜',site:'CN',locationId:81,locationCode:'A001-A0001-001-001-0001',expected:'A001-A0001-001-001-0001 · 中国工程室 A柜'}
+ ])('renders the dispatch source position independently of the product name for $location',async({expected,...position})=>{
+  const name='本地合成18 Pro Max样品',parcel=shipment('dispatched')
+  api.sampleShipment.mockResolvedValue({...parcel,direction:'mexico_outbound',rows:[{...parcel.rows[0],name,...position}]})
+  await start('/partner-samples?view=shipments&shipmentId=9')
+  const line=wrapper.get('.detail-line'),facts=line.get('span').text()
+  expect(line.get('strong').text()).toContain(name)
+  expect(facts).toContain('取出位置 '+expected)
+  expect(facts).not.toContain('取出位置 '+name)
  })
 
 })

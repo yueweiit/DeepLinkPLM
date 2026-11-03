@@ -71,6 +71,7 @@ public class SampleShipmentService {
  private Map<String,Object> draft(Map<String,Object> input,Map<String,Object> previous){
   var d=new LinkedHashMap<>(previous);String direction=text(input.getOrDefault("direction",previous.get("direction")));require(DIRECTIONS.contains(direction),"请选择寄样方向");if(previous.containsKey("direction"))require(direction.equals(previous.get("direction")),"已有寄样方向不能改写，请另建草稿");d.put("direction",direction);d.put("status","draft");d.put("name",text(input.getOrDefault("name",previous.get("name"))).isEmpty()?(direction.equals("supplier_inbound")?"供应商寄样":"样品发往墨西哥"):text(input.getOrDefault("name",previous.get("name"))));
   for(String field:List.of("origin","destination","note"))if(input.containsKey(field))d.put(field,text(input.get(field)));
+  if(input.containsKey("dispatch")){var logistics=map(input.get("dispatch"));d.put("dispatch",Map.of("tracking",text(logistics.get("tracking")),"carrier",text(logistics.get("carrier"))));}
   if(input.containsKey("domain"))d.put("domain",SampleDomains.validate(text(input.get("domain"))));
   long selection=number(input.getOrDefault("selectionId",previous.get("selectionId")));if(selection>0){var source=store.load(selection,"selection",false);PartnerSelectionService.requireSelectionPurpose(source);}d.put("selectionId",selection);
   String supplier=text(input.getOrDefault("supplierCode",previous.get("supplierCode")));if(!supplier.isEmpty())suppliers.requireSupplier(supplier);d.put("supplierCode",supplier);
@@ -104,7 +105,7 @@ public class SampleShipmentService {
   store.event(id,"sample_shipment_"+action,facts,key);store.save(id,d);return detail(id);
  }
  private void dispatch(long id,Map<String,Object> d,Map<String,Object> input,String key,Map<String,Object> facts){
-  require("draft".equals(d.get("status")),"本包裹已有实际发出，不能重复扣出");required(d.get("destination"),"实际收样目的地");String direction=text(d.get("direction"));var rows=normalizeRows(input.getOrDefault("rows",d.get("rows")),direction,number(d.get("selectionId")),true);String date=date(input.get("date")),tracking=required(input.get("tracking"),"运单／物流依据");facts.put("date",date);facts.put("tracking",tracking);facts.put("carrier",text(input.get("carrier")));
+  require("draft".equals(d.get("status")),"本包裹已有实际发出，不能重复扣出");required(d.get("destination"),"实际收样目的地");String direction=text(d.get("direction"));var rows=normalizeRows(input.getOrDefault("rows",d.get("rows")),direction,number(d.get("selectionId")),true);String date=date(input.get("date")),tracking=text(input.getOrDefault("tracking",map(d.get("dispatch")).get("tracking"))),carrier=text(input.getOrDefault("carrier",map(d.get("dispatch")).get("carrier")));facts.put("date",date);facts.put("tracking",tracking);facts.put("carrier",carrier);
   // Keep the last saved plan as evidence; only actual qty governs stock and receipt limits.
   var plannedRows=maps(d.get("rows"));for(var row:rows){var planned=plannedRows.stream().filter(r->text(r.get("rowId")).equals(text(row.get("rowId")))).findFirst().orElse(Map.of());row.put("plannedQty",planned.get("qty"));}store.revision(id,d);
   if(direction.equals("mexico_outbound")){
@@ -122,7 +123,7 @@ public class SampleShipmentService {
     }require(left==0,"实际可用样品不足，借出、留样、坏品及在途数量不能重复寄出");row.put("allocations",allocations);
    }
   }
-  d.put("rows",rows);d.put("status","dispatched");d.put("dispatch",Map.of("date",date,"tracking",tracking,"carrier",text(input.get("carrier"))));facts.put("rows",rows);
+  d.put("rows",rows);d.put("status","dispatched");d.put("dispatch",Map.of("date",date,"tracking",tracking,"carrier",carrier));facts.put("rows",rows);
  }
  private void settle(long id,Map<String,Object> d,String action,Map<String,Object> input,String key,Map<String,Object> facts,boolean mx){
   boolean inbound="supplier_inbound".equals(d.get("direction"));require(!inbound||action.equals("loss"),"供应商寄样请从原选品资料登记实收，不另外增加一笔库存");var destination=new LinkedHashMap<>(input);if(action.equals("receive")){destination.put("site","MX");locations().resolve(destination,"location","MX",true);}var rows=copyRows(store,d);var requested=maps(input.get("rows"));require(!requested.isEmpty(),"请填写本次实际办理数量");var ids=new HashSet<String>();var changes=new ArrayList<Map<String,Object>>();

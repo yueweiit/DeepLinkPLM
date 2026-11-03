@@ -301,6 +301,7 @@ public class PartnerCatalogPhoneResolver {
             return !components.isEmpty() && components.stream().allMatch(component -> component.suffix().equals("mini"));
         }
 
+        boolean availablePhone(long id) {var phone=byId.get(id);return phone!=null&&enabled(phone,brand(number(phone.get("brandId"))));}
         private Map<String, Object> brand(Long id) {
             return byBrand.get(id);
         }

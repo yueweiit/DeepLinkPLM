@@ -841,7 +841,7 @@ public class PartnerCatalogService {
                 var existing=reselectCancelled?history.stream().filter(saved->!cancelledSelection(saved)).toList():history;
                 var oldChosen=new LinkedHashSet<Long>();
                 for(var saved:existing){
-                    require(sameSourceVersion(saved,row)||!styleOnly&&PartnerSelectionService.awaitingFirstPhones(saved),"目标选品已采用该款另一来源版本，请先核对版本差异或另建选品");
+                    require(styleOnly||sameSourceVersion(saved,row)||PartnerSelectionService.awaitingFirstPhones(saved),"目标选品已采用该款另一来源版本，请先核对版本差异或另建选品");
                     var shared=PartnerSelectionService.scopeIds(saved.get("phoneModelIds")).stream().filter(chosen::contains).toList();
                     if(styleOnly||!shared.isEmpty()){
                         require(!cancelledSelection(saved),"已有选品中的型号已取消或排除，请在原选品明确处理，不能静默恢复");

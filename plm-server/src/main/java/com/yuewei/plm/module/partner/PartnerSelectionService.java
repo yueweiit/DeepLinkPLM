@@ -90,7 +90,7 @@ public class PartnerSelectionService {
  }
  public List<String> supplierCodes(long id){view();store.load(id,"selection",false);return store.jdbc.queryForList("select distinct coalesce(data->>'supplierCode','') as code from plm_partner_selection_row where record_id=? order by code",String.class,id);}
  public Map<String,Object> row(long id,String rowId){view();selection(id,false);require(validRowId(rowId),"行标识无效");var r=rows().find(id,rowId,false);require(!r.isEmpty(),"选品行不存在或不属于当前表");return currentRows(id,List.of(enrich(r))).get(0);}
- private List<Map<String,Object>> currentRows(long id,List<Map<String,Object>> rows){var styles=new PartnerCatalogStyles(store);var result=styles.enrichAll("selection",id,rows);styles.projectCurrent(result);return result.stream().map(this::displayRow).map(this::visible).toList();}
+ private List<Map<String,Object>> currentRows(long id,List<Map<String,Object>> rows){var styles=new PartnerCatalogStyles(store);var result=styles.enrichAll("selection",id,rows);styles.projectCurrent(result);if(result.stream().anyMatch(PartnerCatalogScopes::follows))new PartnerCatalogScopes(store).project(result,phoneScope());return result.stream().map(this::displayRow).map(this::visible).toList();}
  private Map<String,Object> displayRow(Map<String,Object> row){
   var result=new LinkedHashMap<>(row);result.put("phones",maps(row.get("phones")).stream().map(phone->{var shown=new LinkedHashMap<>(phone);for(String field:List.of("modelName","displayName"))if(phone.containsKey(field))shown.put(field,PhoneDisplayNames.displaySpelling(text(phone.get(field))));return shown;}).toList());return result;
  }
@@ -299,9 +299,9 @@ public class PartnerSelectionService {
   for(var row:requested(id,input,true)){if(confirmed(row))continue;freezeRow(id,head,row,request);completed++;}
   saveHeader(id,head);store.event(id,"selection_confirm",Map.of("rows",completed,"rowIds",input.get("rowIds"),"createsProduct",false,"createsSample",false,"inputFingerprint",signature(store.json,input)),request);return detail(id);
  }
- void validateReceiptDraft(Map<String,Object> row){permissions.engineer();validateConfirmation(row);}
+ void validateReceiptDraft(Map<String,Object> row){permissions.engineer();if(!PartnerCatalogScopes.follows(row)){validateConfirmation(row);return;}require(Boolean.TRUE.equals(row.get("selected"))&&!Boolean.TRUE.equals(row.get("discarded")),"只能收取明确选中且未取消的款式");required(row.get("name"),"款名");suppliers.requireSupplierForNewUse(required(row.get("supplierCode"),"供应商"));}
  private void freezeRow(long id,Map<String,Object> head,Map<String,Object> row,String request){
-  var identity=new PartnerCatalogStyles(store).identity("selection",id,text(row.get("rowId")));require(!identity.isEmpty(),"目录款式关联已失效，请刷新后核对");validateConfirmation(row);
+  var identity=new PartnerCatalogStyles(store).identity("selection",id,text(row.get("rowId")));require(!identity.isEmpty(),"目录款式关联已失效，请刷新后核对");validateReceiptDraft(row);
   var next=new LinkedHashMap<>(row);next.put("confirmed",true);next.put("confirmedAt",OffsetDateTime.now().toString());next.put("selectionConfirmationVersion",2);next.put("receiptColorMode",maps(row.get("selectedPairs")).isEmpty()?"at_receipt":"selected_pairs");
   var basis=new LinkedHashMap<>(row);for(String key:List.of("confirmationSnapshot","confirmedAt","selectionConfirmationVersion","receiptColorMode"))basis.remove(key);
   next.put("confirmationSnapshot",Map.of("row",copy(store.json,basis),"catalogStyleId",identity.get("catalogStyleId"),"catalogStyleCode",identity.get("catalogStyleCode"),"selectionId",id,"selectionVersion",head.get("version"),"confirmedBy",store.access.actorId()));rows().put(id,next,row,request);

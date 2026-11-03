@@ -9,8 +9,9 @@ export interface SupplyPair { supplierCode?:string; styleKey?:string; configKey?
 export interface SelectionSampleBatch { id:number; code:string; colorName?:string; label?:string; displayLabel?:string; receivedAt?:string; date?:string; qty?:number }
 export interface SupplierQuoteFields { unitPrice?:string|number|null;currency?:string;currencySource?:'explicit'|'business_default'|'historical_unknown';priceUnit?:string;moqQuantity?:string|number|null;moqUnit?:string;moqScope?:string;moqNote?:string }
 export interface SupplierPriceOption extends SupplierQuoteFields { label?:string;priceNote?:string;moq?:string;packaging?:string }
+export interface SelectionCurrentCatalog extends Record<string,unknown> {phoneModelIds?:number[];phones?:CompatiblePhone[];phoneScopeStatus?:'ready'|'unresolved'|'unavailable';phoneScopeComplete?:boolean;phoneScopeMessage?:string;sourceScopeToken?:string}
 export interface SelectionRow {
-  currentCatalog?:Record<string,unknown>;recordedName?:string
+  currentCatalog?:SelectionCurrentCatalog;recordedName?:string
   rowId:string; rowVersion?:number;canReviseSelection?:boolean;canCancelSelection?:boolean;canRestoreSelection?:boolean;selectionChangeBlockedReason?:string; selected:boolean; name:string; series:string; supplierCode:string; supplierItemCode:string
   material:string; specification:string; color:string; modelText:string; phoneModelIds:number[]
   sampleColors?:string[]
@@ -56,7 +57,7 @@ export interface SelectionGroup { groupId:string; rowIds:string[]; productId?:nu
 export interface SelectionConfirmation {version:number;requestId:string;rowIds:string[];groups?:SelectionGroup[]}
 export interface SelectionConfirmationRow {rowId:string;name:string;catalogStyleId?:number;catalogStyleCode?:string;catalogStyleLabel?:string;phoneModelIds?:number[];phones?:CompatiblePhone[];selectedPairs?:{phoneModelId:number;colorId:number;colorSnapshot?:SupplyPair['colorSnapshot']}[];pairings?:SupplyPair[];productCode?:string;specId?:number;targetSpecId?:number;messages:string[];canConfirm:boolean}
 export interface SelectionConfirmationPreview { rows?:SelectionConfirmationRow[]; groups?:SelectionGroup[]; issues?:{rowId?:string;message:string}[]; errors?:string[]; canConfirm?:boolean; errorCount?:number; [key:string]:unknown }
-export interface SelectionReceiptInputRow {clientRowId:string;rowId:string;rowVersion:number;phoneModelId?:number;colorId?:number;colorName?:string;qty?:number;sampleIdentityId?:number;identityReason?:string}
+export interface SelectionReceiptInputRow {clientRowId:string;rowId:string;rowVersion:number;sourceScopeToken?:string;phoneModelId?:number;colorId?:number;colorName?:string;qty?:number;sampleIdentityId?:number;identityReason?:string}
 export interface SelectionReceiptInput {version:number;requestId:string;date:string;location:string;site?:'CN'|'MX'|'';locationId?:number;locationCode?:string;locationParts?:Partial<import('./sampleManagement').SampleLocationParts>;ownerName:string;ownerUserId?:number;supplierShipmentId?:number;rows:SelectionReceiptInputRow[]}
 export interface SelectionReceiptPreviewRow extends SelectionReceiptInputRow {sampleColors?:string[];sourceColors?:string[];receiptColorMode?:'at_receipt'|'selected_pairs';name:string;catalogStyleId?:number;catalogStyleLabel?:string;supplierCode?:string;phones:CompatiblePhone[];colors:{id:number;name:string;code?:string;supplierColorCode?:string;styleKey?:string;configKey?:string}[];colorResolution?:'new'|'matched'|'ambiguous'|'missing';resolvedColorId?:number;refs:({id:number;name?:string;type?:string;contentType?:string})[];phoneName?:string;colorName?:string;sampleIdentityId?:number;sampleCode?:string;messages:string[];canSave:boolean}
 export interface SelectionReceiptPreview {id:number;version:number;canSave:boolean;messages:string[];rows:SelectionReceiptPreviewRow[]}
