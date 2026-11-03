@@ -38,7 +38,7 @@ public class PartnerSampleService {
   return prepared;
  }
  /** The same source/ledger validation serves single and bulk receipts; preview allocates no identity. */
- public Map<String,Object> receiptPreview(long selection,Map<String,Object> input){return prepareSelectionReceipt(selection,input,false,null);}
+ @Transactional(readOnly=true) public Map<String,Object> receiptPreview(long selection,Map<String,Object> input){return prepareSelectionReceipt(selection,input,false,null);}
  @Transactional public Map<String,Object> receiveSelection(long selection,Map<String,Object> input){
   receiptAccess();if(number(input.get("supplierShipmentId"))>0)SampleShipmentReceipts.lockInbound(store,number(input.get("supplierShipmentId")));String request=required(input.get("requestId"),"提交标识");require(request.length()<=80,"提交标识过长");
   var head=store.load(selection,"selection",true);PartnerSelectionService.requireSelectionPurpose(head);
@@ -54,12 +54,15 @@ public class PartnerSampleService {
   receiptAccess();var head=store.load(selection,"selection",lock);PartnerSelectionService.requireSelectionPurpose(head);store.check(head,number(input.get("version")));
   require(input.get("rows") instanceof List<?>,"请列出本次实际收到的样品");var requested=maps(input.get("rows"));require(!requested.isEmpty(),"请列出本次实际收到的样品");var common=new ArrayList<String>();
   try{date(input.get("date"));}catch(com.yuewei.plm.common.exception.BusinessException e){common.add(e.getMessage());}if(text(input.get("location")).isEmpty())common.add("实际存放位置不能为空");if(keeper==null)try{keeper=custodian(input);}catch(com.yuewei.plm.common.exception.BusinessException e){common.add(e.getMessage());}
-  var reports=new ArrayList<Map<String,Object>>();var seen=new HashSet<String>();var pairs=new HashSet<String>();boolean valid=common.isEmpty();
+  var selectedRows=new HashMap<String,Map<String,Object>>();var sourceRows=new HashMap<String,Map<String,Object>>();var checkedDrafts=new HashSet<String>();var reports=new ArrayList<Map<String,Object>>();var seen=new HashSet<String>();var pairs=new HashSet<String>();boolean valid=common.isEmpty();
   for(var row:requested){var out=new LinkedHashMap<String,Object>();for(String key:List.of("clientRowId","rowId","rowVersion","phoneModelId","colorId","qty"))out.put(key,row.getOrDefault(key,""));var messages=new ArrayList<String>();
-   try{String client=required(row.get("clientRowId"),"收样行标识");require(client.length()<=80&&seen.add(client),"收样行标识无效或重复");String rowId=required(row.get("rowId"),"来源选样行");require(PartnerSelectionService.validRowId(rowId),"来源选样行标识无效");var selected=new PartnerSelectionRows(store).find(selection,rowId,lock);require(!selected.isEmpty(),"来源选样行不属于本次资料");require(number(row.get("rowVersion"))==number(selected.get("rowVersion")),"选样资料已更新，请刷新后重新核对");
-    boolean draft=!PartnerSelectionService.confirmed(selected);out.put("requiresFreeze",draft);if(draft)selections.validateReceiptDraft(selected);var snapshot=catalogStyles.receiptSnapshot(selection,rowId,lock);for(String key:List.of("name","catalogStyleId","catalogStyleCode","catalogStyleLabel","supplierCode","phones","refs"))out.put(key,snapshot.getOrDefault(key,key.equals("phones")||key.equals("refs")?List.of():""));
+   try{String client=required(row.get("clientRowId"),"收样行标识");require(client.length()<=80&&seen.add(client),"收样行标识无效或重复");String rowId=required(row.get("rowId"),"来源选样行");require(PartnerSelectionService.validRowId(rowId),"来源选样行标识无效");var selected=selectedRows.computeIfAbsent(rowId,key->new PartnerSelectionRows(store).find(selection,key,lock));require(!selected.isEmpty(),"来源选样行不属于本次资料");require(number(row.get("rowVersion"))==number(selected.get("rowVersion")),"选样资料已更新，请刷新后重新核对");
+    boolean draft=!PartnerSelectionService.confirmed(selected);out.put("requiresFreeze",draft);if(draft&&checkedDrafts.add(rowId))selections.validateReceiptDraft(selected);var snapshot=sourceRows.computeIfAbsent(rowId,key->catalogStyles.receiptSnapshot(selection,key,lock));for(String key:List.of("name","catalogStyleId","catalogStyleCode","catalogStyleLabel","supplierCode","phones","refs"))out.put(key,snapshot.getOrDefault(key,key.equals("phones")||key.equals("refs")?List.of():""));
     out.put("sampleColors",snapshot.getOrDefault("sampleColors",List.of()));
-    long phone=number(row.get("phoneModelId"));out.put("phoneName",phoneName(snapshot,phone));out.put("colors",PartnerReceiptColors.choices(snapshot,phone));out.put("colorName",text(row.get("colorName")));
+    long phone=number(row.get("phoneModelId"));var choices=PartnerReceiptColors.choices(snapshot,phone);boolean atReceipt=PartnerReceiptColors.atReceipt(snapshot);
+    out.put("phoneName",phoneName(snapshot,phone));out.put("colors",choices);out.put("colorName",text(row.get("colorName")));
+    out.put("receiptColorMode",atReceipt?"at_receipt":"selected_pairs");
+    out.put("sourceColors",atReceipt?snapshot.getOrDefault("sourceColors",List.of()):phone>0?choices.stream().map(color->text(color.get("name"))).distinct().toList():List.of());
     if(phone<=0)messages.add("请选择本次实际收到的手机型号");try{qty(row.get("qty"),false);}catch(com.yuewei.plm.common.exception.BusinessException e){messages.add(e.getMessage());}
     var color=new PartnerReceiptColors(store).resolve(snapshot,phone,row);out.put("colorName",color.name());out.put("colorResolution",color.state());if(color.id()>0)out.put("resolvedColorId",color.id());
     if(phone>0){requireReceiptPhone(snapshot,phone);if(color.id()>0)PartnerCatalogSampleRules.pair(snapshot,phone,color.id());else require(number(row.get("sampleIdentityId"))==0,"新填写的颜色请在保存实际收样后生成主码，不能关联颜色尚未核对的已有主码");require(pairs.add(rowId+":"+phone+":"+color.duplicateKey()),"同款同型号同颜色请合并填写实收数量，不能重复登记");}

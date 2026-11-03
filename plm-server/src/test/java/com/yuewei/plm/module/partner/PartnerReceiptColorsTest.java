@@ -19,5 +19,22 @@ class PartnerReceiptColorsTest {
  @Test void sameNameDifferentRealColoursRequiresAnInlineChoice(){var s=source();s.put("receiptColors",List.of(Map.of("id",8,"name","黑色","supplierColorCode","B1"),Map.of("id",9,"name","黑色","supplierColorCode","B2")));assertThatThrownBy(()->colors.resolve(s,12,Map.of("colorName","黑色"))).hasMessageContaining("本行选择");assertThat(colors.resolve(s,12,Map.of("colorId",9,"colorName","黑色")).id()).isEqualTo(9);verifyNoInteractions(jdbc);}
  @Test void noFuzzyNameTranslationOrCombinationSplittingIsPerformed(){assertThat(colors.resolve(source(),12,Map.of("colorName","黑色/银色")).name()).isEqualTo("黑色/银色");assertThat(colors.resolve(source(),12,Map.of("colorName","蓝色")).proposed()).isTrue();}
  @Test void historicalConfirmedPairsKeepTheirOriginalPhoneAndColourScope(){var s=source();s.put("selectedPairs",List.of(Map.of("phoneModelId",12,"colorId",8,"colorName","历史黑"),Map.of("phoneModelId",13,"colorId",9,"colorName","另一型号蓝")));assertThat(colors.resolve(s,12,Map.of("colorName","历史黑")).id()).isEqualTo(8);assertThatThrownBy(()->colors.resolve(s,12,Map.of("colorName","新蓝"))).hasMessageContaining("原选样确认范围");assertThatThrownBy(()->colors.resolve(s,12,Map.of("colorId",9))).hasMessageContaining("已选范围");verifyNoInteractions(jdbc);}
- @Test void missingOrPastedMultilineColoursStayValidationErrors(){for(String value:List.of("","   ","黑色\n蓝色","黑\t蓝","x".repeat(256)))assertThatThrownBy(()->colors.resolve(source(),12,Map.of("colorName",value))).isInstanceOf(RuntimeException.class);verifyNoInteractions(jdbc);}
+ @Test void missingOrPastedMultilineColoursStayValidationErrors(){for(String value:List.of("","   ","图片色","如图","黑色\n蓝色","黑\t蓝","x".repeat(256)))assertThatThrownBy(()->colors.resolve(source(),12,Map.of("colorName",value))).isInstanceOf(RuntimeException.class);verifyNoInteractions(jdbc);}
+ @Test void allColourSourceUsesOnlyTheFrozenRowBaselineNotTheSupplierCandidatesOrEditedDisplay(){
+  var frozen=source();frozen.put("color","后续改色");frozen.put("supplierColors",List.of(Map.of("id",8,"name","通用候选")));
+  frozen.put("catalogSourceSnapshot",Map.of("color","错误层级的原文","selectionBaseline",Map.of("color","原目录黑、原目录白")));
+  assertThat(PartnerReceiptColors.sourceNames(frozen)).containsExactly("原目录黑","原目录白");verifyNoInteractions(jdbc);
+ }
+ @Test void explicitSourceNamesDeduplicateWithoutSplittingTwoToneColourNames(){
+  var frozen=Map.<String,Object>of("catalogSourceSnapshot",Map.of("selectionBaseline",Map.of("color"," Black、black； 白色\n黑色/银色,Blue")));
+  assertThat(PartnerReceiptColors.sourceNames(frozen)).containsExactly("Black","白色","黑色/银色","Blue");verifyNoInteractions(jdbc);
+ }
+ @Test void absentOrUnspecifiedOriginalColoursNeverTurnSuggestionsIntoAnAllColoursScope(){
+  assertThat(PartnerReceiptColors.sourceNames(source())).isEmpty();
+  for(String raw:List.of("待定","多色可选","见图","图片色","如图","黑色、其他颜色待确认","null","黑\t蓝","色".repeat(256))){
+   var frozen=Map.<String,Object>of("catalogSourceSnapshot",Map.of("selectionBaseline",Map.of("color",raw)));
+   assertThat(PartnerReceiptColors.sourceNames(frozen)).as(raw).isEmpty();
+  }
+  verifyNoInteractions(jdbc);
+ }
 }

@@ -30,6 +30,31 @@ const button=(text:string)=>wrapper.findAll('button').find(button=>button.text()
 async function selectRow(index=0,value=true){wrapper.findAll('.row-check')[index].getComponent(ElCheckbox).vm.$emit('change',value);await flushPromises()}
 
 describe('server-paged selection workbench',()=>{
+ it('shows the saved per-row imported colour for catalogue-linked selections without creating new colour choices or writes',async()=>{
+  const candidates=['橙色','白色','宝蓝色'].map((color,index)=>({...row(index+1),catalogStyleId:index+1,color,selectedPairs:[]})),original=JSON.stringify(candidates)
+  api.selectionRows.mockResolvedValue({content:candidates,totalElements:3,page:1,size:30});await start()
+  expect(wrapper.findAll('.row-color').map(cell=>cell.text())).toEqual(['橙色','白色','宝蓝色'])
+  expect(JSON.stringify(candidates)).toBe(original);expect(button('保存本页增量').attributes('disabled')).toBeDefined()
+  expect(api.patchSelectionRows).not.toHaveBeenCalled();expect(api.saveSelection).not.toHaveBeenCalled();expect(api.confirmSelection).not.toHaveBeenCalled();expect(api.saveSelectionReceipts).not.toHaveBeenCalled()
+ })
+ it('keeps only blank imported colours pending and gives explicit sample choices priority over source colour text',async()=>{
+  const candidates=[{...row(1),catalogStyleId:1,color:'   '},{...row(2),catalogStyleId:2,color:'橙色',sampleColors:['红色']},{...row(3),catalogStyleId:3,color:'白色',selectedPairs:[{phoneModelId:18,colorId:8}],pairings:[{phoneModelId:18,colorId:8,state:'available',colorSnapshot:{id:8,name:'原选黑色'}}]}]
+  api.selectionRows.mockResolvedValue({content:candidates,totalElements:3,page:1,size:30});await start()
+  expect(wrapper.findAll('.row-color').map(cell=>cell.text())).toEqual(['颜色待定','红色','原选黑色'])
+  expect(api.patchSelectionRows).not.toHaveBeenCalled();expect(api.saveSelectionReceipts).not.toHaveBeenCalled()
+ })
+ it.each([false,true])('preserves missing versus explicitly cleared sample colours across name-only save and reopen (cleared=%s)',async cleared=>{
+  const saved={...row(1),catalogStyleId:1,color:'橙色',...(cleared?{sampleColors:[]}: {})}
+  api.selectionRows.mockImplementation(async()=>({content:[structuredClone(saved)],totalElements:1,page:1,size:30}))
+  api.patchSelectionRows.mockImplementation(async(_id,input)=>{Object.assign(saved,input.operations[0].changes);return {...header(),version:4}})
+  await start();expect(wrapper.get('.row-color').text()).toBe(cleared?'颜色待定':'橙色')
+  await selectRow();await button('改名').trigger('click');await wrapper.get('.row-primary textarea').setValue('仅改款名，颜色保持');await button('保存本页增量').trigger('click');await flushPromises()
+  const changes=api.patchSelectionRows.mock.calls[0][1].operations[0].changes
+  if(cleared)expect(changes.sampleColors).toEqual([]);else expect(changes).not.toHaveProperty('sampleColors')
+  expect(changes.color).toBe('橙色');api.selectionDetail.mockResolvedValue({...header(),version:4});await button('刷新').trigger('click');await flushPromises()
+  expect(wrapper.get('.row-name').text()).toBe('仅改款名，颜色保持');expect(wrapper.get('.row-color').text()).toBe(cleared?'颜色待定':'橙色')
+  expect(Object.prototype.hasOwnProperty.call(saved,'sampleColors')).toBe(cleared);expect(api.saveSelectionReceipts).not.toHaveBeenCalled();expect(api.confirmSelection).not.toHaveBeenCalled()
+ })
  it('shows server-wide selected and received style and piece counts in the directory and opens the existing selection',async()=>{
   api.selectionPage.mockResolvedValue({content:[{...header(),selectedStyleCount:43,receivedStyleCount:15,receivedQuantity:30}],totalElements:1,page:1,size:30,totalPages:1})
   await start('/partner-selections');expect(wrapper.findAll('.selection-directory th').map(cell=>cell.text())).toEqual(['选品目录','已选产品','已到样产品','已到样数量','操作'])

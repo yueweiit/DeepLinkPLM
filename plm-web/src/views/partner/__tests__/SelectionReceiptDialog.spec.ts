@@ -40,6 +40,7 @@ const rowChecks=()=>wrapper.findAllComponents(ElCheckbox).filter(checkbox=>check
 const allCheck=()=>wrapper.findAllComponents(ElCheckbox).find(checkbox=>checkbox.props('ariaLabel')==='全选本次收样规格')!
 const bulkButton=()=>[...document.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent?.trim().startsWith('应用到已勾选'))!
 const allStyleModelsButton=()=>[...document.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent?.trim()==='选择各款全部型号')
+const allStyleColorsButton=()=>[...document.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent?.trim()==='选择各款全部颜色')
 const lastPreviewInput=()=>api.preview.mock.calls[api.preview.mock.calls.length-1][1] as SelectionReceiptInput
 async function fillBulk(colorName:string,qty?:number,index=0){bulkColor(index).vm.$emit('update:modelValue',colorName);bulkQty(index).vm.$emit('update:modelValue',qty);await flushPromises()}
 async function applyBulk(){expect(bulkButton()).toBeDefined();bulkButton().click();await flushPromises()}
@@ -60,7 +61,7 @@ describe('actual multi-style sample receipt',()=>{
  it('defaults the shared actual custodian to the logged-in account and saves a selected system account once for all receipt rows',async()=>{await start();const custodian=wrapper.getComponent(SampleCustodianSelect);expect(custodian.props('modelValue')).toBe(71);expect(custodian.props('name')).toBe('国内工程');custodian.getComponent(ElSelect).vm.$emit('update:modelValue',72);await flushPromises();await fillCommon();await fillActual(0,2);await fillActual(1,3);await click('保存实际收样');expect(api.save.mock.calls[0][1]).toMatchObject({ownerUserId:72,ownerName:'样品室保管'});expect(api.save.mock.calls[0][1].rows).toHaveLength(2)})
 
  it('shows adopted photos and supplier-scoped choices, with shared fields once and no planned quantity default',async()=>{await start();expect([...document.querySelectorAll('.receipt-common')]).toHaveLength(1);expect([...document.querySelectorAll('.receipt-row')]).toHaveLength(2);expect([...document.querySelectorAll('.partner-photo')]).toHaveLength(2);expect(actualQuantities().map(input=>input.props('modelValue'))).toEqual([undefined,undefined]);expect(wrapper.findAllComponents(ElSelect).flatMap(select=>select.findAllComponents({name:'ElOption'}).map(option=>option.props('label')))).not.toContain('全库型号');expect(document.body.textContent).not.toContain('请选择实收型号、颜色和数量');expect(api.save).not.toHaveBeenCalled();expect(api.preview.mock.calls[0][1].rows.every((row:{qty?:number})=>row.qty===undefined)).toBe(true)})
- it('validates missing actual data without losing the inputs or silently saving any rows',async()=>{await start();await fillCommon();await fillActual(0,3);await click('保存实际收样');expect(document.body.textContent).toContain('请选择实收型号、颜色和数量');expect(actualQuantities()[0].props('modelValue')).toBe(3);expect(actualQuantities()[1].props('modelValue')).toBeUndefined();expect(api.save).not.toHaveBeenCalled();expect([...document.querySelectorAll('button')].some(button=>button.textContent?.trim()==='预览本次收样')).toBe(false)})
+ it('validates missing actual data without losing the inputs or silently saving any rows',async()=>{await start();await fillCommon();await fillActual(0,3);const reads=api.preview.mock.calls.length;await click('保存实际收样');expect(document.body.textContent).toContain('还有1条规格未填写实收型号、颜色或数量');expect(api.preview).toHaveBeenCalledTimes(reads);expect(actualQuantities()[0].props('modelValue')).toBe(3);expect(actualQuantities()[1].props('modelValue')).toBeUndefined();expect(api.save).not.toHaveBeenCalled();expect([...document.querySelectorAll('button')].some(button=>button.textContent?.trim()==='预览本次收样')).toBe(false)})
  it('validates internally and directly saves multiple actual specifications once and links only the real returned SP batches',async()=>{const router=await start();await fillCommon();await fillActual(0,3);await fillActual(1,4);[...document.querySelectorAll('.receipt-row')][0].querySelectorAll('button').forEach(button=>{if(button.textContent?.trim()==='增加规格')button.click()});await flushPromises();expect([...document.querySelectorAll('.receipt-row')]).toHaveLength(3);expect(actualQuantities()[2].props('modelValue')).toBeUndefined();await fillActual(2,1);expect(document.body.textContent).toContain('合计 8 件');await click('保存实际收样');expect(api.save).toHaveBeenCalledTimes(1);const input=api.save.mock.calls[0][1];expect(input).toMatchObject({date:'2026-10-27',location:'公司样品柜A',ownerName:'国内工程'});expect(input.rows.map((row:{rowId:string;qty:number})=>[row.rowId,row.qty])).toEqual([['row-1',3],['row-2',4],['row-1',1]]);expect(input.rows.every((row:Record<string,unknown>)=>!('sampleQty'in row))).toBe(true);expect(document.body.textContent).toContain('SY-000101');expect(document.body.textContent).toContain('SY-000102');expect(wrapper.emitted('saved')).toHaveLength(1);await click('内部收样原记录');expect(router.currentRoute.value.query.id).toBe('41')})
  it('retains a failed save and reconciles timeout with the exact same request, including after dialog remount',async()=>{api.save.mockRejectedValueOnce({code:'ECONNABORTED'});await start([style(1)]);await fillCommon();await fillActual(0,6);await click('保存实际收样');const first=JSON.parse(JSON.stringify(api.save.mock.calls[0][1]));expect(document.body.textContent).toContain('保存结果待核对');expect([...document.querySelectorAll('button')].find(button=>button.textContent?.trim()==='取消')!.getAttribute('disabled')).toBeDefined();expect(sessionStorage.getItem('plm:selection-receipt:71:7')).toContain(first.requestId);wrapper.unmount();await start([style(1)]);expect(document.body.textContent).toContain('上次保存结果尚未核对');await click('核对本次保存结果');expect(api.save.mock.calls[1][1]).toEqual(first);expect(sessionStorage.getItem('plm:selection-receipt:71:7')).toBeNull();expect(document.body.textContent).toContain('实际收样已保存')})
  it('directly accepts a new colour name and saves in the same receipt without opening supplier maintenance',async()=>{await start([style(1)]);expect(document.querySelector('.receipt-bulk')).not.toBeNull();expect(rowChecks()).toHaveLength(1);await fillCommon();const model=models()[0]!;model.vm.$emit('update:modelValue',[18]);actualQuantities()[0]!.vm.$emit('update:modelValue',5);await typeColor(0,'湖蓝色');expect(wrapper.getComponent({name:'ElAutocomplete'}).props('modelValue')).toBe('湖蓝色');expect(document.body.textContent).not.toContain('维护供方颜色');expect(document.body.textContent).not.toContain('批量录入原色');expect(api.candidates).not.toHaveBeenCalled();expect(api.save).not.toHaveBeenCalled();await click('保存实际收样');expect(api.save.mock.calls[0][1]).toMatchObject({location:'公司样品柜A',ownerName:'国内工程',rows:[expect.objectContaining({phoneModelId:18,colorName:'湖蓝色',colorId:undefined,qty:5})]});expect(document.body.textContent).toContain('湖蓝色');expect(document.body.textContent).toContain('实际收样已保存')})
@@ -370,6 +371,7 @@ describe('actual receipt page navigation',()=>{
  it('jumps to the page containing the first row that fails the original preview',async()=>{
   api.preview.mockImplementation(async(_id,input:SelectionReceiptInput)=>({...response(input),canSave:false,rows:response(input).rows.map((row,index)=>({...row,canSave:index!==55,messages:index===55?['第56条需填写实际数量']:[]}))}));
   await start(Array.from({length:60},(_,i)=>style(i+1)));await fillCommon();expect(wrapper.getComponent(ElPagination).props('currentPage')).toBe(1);
+  bulkModel().vm.$emit('update:modelValue',[18]);await fillBulk('黑色',2);await applyBulk();
   await click('保存实际收样');expect(wrapper.getComponent(ElPagination).props('currentPage')).toBe(2);expect(document.querySelectorAll('.receipt-row')).toHaveLength(10);
   expect(document.querySelector('.receipt-row-errors')?.textContent).toContain('第56条需填写实际数量');expect(api.save).not.toHaveBeenCalled();expect(lastPreviewInput().rows).toHaveLength(60);
  },15000)
@@ -414,11 +416,84 @@ describe('authoritative intended colours with per-style phone selection',()=>{
   await start([{...style(1),phoneModelIds:[18,17]}]);await fillCommon();await click('选择各款全部型号');await fillBulk('',2);await applyBulk();await click('保存实际收样');
   const first=JSON.parse(JSON.stringify(api.save.mock.calls[0][1])) as SelectionReceiptInput;expect(first.rows).toHaveLength(4);expect(first.rows.map(row=>row.colorName)).toEqual(['红色','蓝色','红色','蓝色']);const reads=api.preview.mock.calls.length;
   wrapper.unmount();previewStylePhones({'row-1':[18,17]},{'row-1':['后续计划新色']});await start([{...style(1),phoneModelIds:[18,17],sampleColors:['后续缓存新色']}]);
-  expect(api.preview).toHaveBeenCalledTimes(reads);expect(colorInputs().map(input=>input.props('modelValue'))).toEqual(['红色','蓝色','红色','蓝色']);expect(actualQuantities().map(input=>input.props('modelValue'))).toEqual([2,2,2,2]);expect(allStyleModelsButton()?.disabled).toBe(true);allStyleModelsButton()!.click();await flushPromises();
+  expect(api.preview).toHaveBeenCalledTimes(reads);expect(colorInputs().map(input=>input.props('modelValue'))).toEqual(['红色','蓝色','红色','蓝色']);expect(actualQuantities().map(input=>input.props('modelValue'))).toEqual([2,2,2,2]);expect(allStyleModelsButton()?.disabled).toBe(true);expect(allStyleColorsButton()?.disabled).toBe(true);allStyleModelsButton()!.click();allStyleColorsButton()!.click();await flushPromises();
   await click('核对本次保存结果');expect(api.save).toHaveBeenCalledTimes(2);expect(api.save.mock.calls[1][1]).toEqual(first);expect(api.preview).toHaveBeenCalledTimes(reads);expect(sessionStorage.getItem('plm:selection-receipt:71:7')).toBeNull();
  })
  it('keeps an initial authoritative source read failure visible instead of seeding cached intended colours',async()=>{
   api.preview.mockRejectedValueOnce(new Error('读取实收来源失败'));await start([{...style(1),sampleColors:['旧缓存色']}]);
   expect(document.body.textContent).toContain('读取实收来源失败');expect(colorInputs().map(input=>input.props('modelValue'))).toEqual(['']);expect(models().map(input=>input.props('modelValue'))).toEqual([[]]);expect(actualQuantities()[0].props('modelValue')).toBeUndefined();expect(api.preview).toHaveBeenCalledTimes(1);expect(api.save).not.toHaveBeenCalled();
  })
+})
+
+// The boundary supplies original per-style colours separately from broad supplier suggestions.
+function previewStyleColors(phones:Record<string,number[]>,sourceColors:Record<string,string[]>,intended:Record<string,string[]>={}){
+ api.preview.mockImplementation(async(_id,input:SelectionReceiptInput)=>({...response(input),rows:response(input).rows.map(row=>({...row,phones:(phones[row.rowId]||[]).map(phoneModelId=>({phoneModelId,modelName:`型号${phoneModelId}`})),sourceColors:sourceColors[row.rowId]||[],sampleColors:intended[row.rowId]||[],receiptColorMode:'at_receipt'}))}))
+}
+
+describe('compact per-style receipt shortcuts',()=>{
+ it('keeps the two all-style actions together and the manual apply action with its input fields',async()=>{
+  await start();const shortcuts=document.querySelector('[role="group"][aria-label="按款快速填写"]')!
+  expect(shortcuts).not.toBeNull();expect([...shortcuts.querySelectorAll('button')].map(button=>button.textContent?.trim())).toEqual(['选择各款全部型号','选择各款全部颜色']);
+  expect(document.querySelector('.receipt-bulk-model')?.contains(allStyleModelsButton()!)).toBe(false);
+  expect(document.querySelector('.receipt-bulk-inputs')?.contains(bulkButton())).toBe(true);expect(api.save).not.toHaveBeenCalled();
+ })
+ it('fills each styles original colours without using supplier-wide suggestions or cached source props and repeats without duplicating',async()=>{
+  previewStyleColors({'row-1':[18,17],'row-2':[18]},{'row-1':['红色','蓝色'],'row-2':['黑色']});
+  const rows=[{...style(1),color:'缓存旧色'},{...style(2),color:'缓存另色'}],original=JSON.stringify(rows);await start(rows);
+  const reads=api.preview.mock.calls.length;await click('选择各款全部颜色');
+  expect(colorInputs().map(input=>input.props('modelValue'))).toEqual(['红色','蓝色','黑色']);expect(actualQuantities().every(input=>input.props('modelValue')===undefined)).toBe(true);
+  expect(models().map(input=>input.props('modelValue'))).toEqual([[],[],[18]]);const elements=[...document.querySelectorAll('.receipt-row')];await click('选择各款全部颜色');
+  expect([...document.querySelectorAll('.receipt-row')]).toEqual(elements);expect(api.preview).toHaveBeenCalledTimes(reads);expect(JSON.stringify(rows)).toBe(original);
+  await click('取消');expect(wrapper.emitted('close')).toHaveLength(1);expect(api.save).not.toHaveBeenCalled();
+ })
+ it('retains selected colour identities, actual quantities, exceptions and unchecked styles while only adding missing colours',async()=>{
+  previewStyleColors({'row-1':[18],'row-2':[18]},{'row-1':['供方烟灰','白色'],'row-2':['黑色']});
+  api.candidates.mockResolvedValue({content:[{sampleIdentityId:101,sampleCode:'SY-000101',name:'原同物',specName:'原规格'}],canCreate:true,requiresReview:false});
+  await start();await fillCommon();await selectExistingColour(0,8,'供方烟灰',7);await selectExistingColour(1,9,'供方黑色',3);await checkLine(1,false);
+  const before=JSON.parse(JSON.stringify(lastPreviewInput().rows)),original=[...document.querySelectorAll('.receipt-row')];await click('选择各款全部颜色');
+  expect(colorInputs().map(input=>input.props('modelValue'))).toEqual(['供方烟灰','白色','供方黑色']);expect(actualQuantities().map(input=>input.props('modelValue'))).toEqual([7,undefined,3]);
+  expect(document.querySelectorAll('.receipt-row')[0]).toBe(original[0]);expect(document.querySelectorAll('.receipt-row')[2]).toBe(original[1]);await fillBulk('',2);await applyBulk();
+  expect(actualQuantities().map(input=>input.props('modelValue'))).toEqual([2,2,3]);await click('保存实际收样');const rows=api.save.mock.calls[0][1].rows;
+  expect(rows[0]).toMatchObject({clientRowId:before[0].clientRowId,colorId:8,sampleIdentityId:101,qty:2});expect(rows[2]).toMatchObject({clientRowId:before[1].clientRowId,colorId:9,sampleIdentityId:101,qty:3});
+ })
+ it('supports colours first then each styles own phones and sends all real rows through the original single save',async()=>{
+  previewStyleColors({'row-1':[18,17],'row-2':[18]},{'row-1':['红色','蓝色'],'row-2':['黑色']});await start();await fillCommon();await click('选择各款全部颜色');await click('选择各款全部型号');
+  const expected=[['row-1',18,'红色'],['row-1',18,'蓝色'],['row-1',17,'红色'],['row-1',17,'蓝色'],['row-2',18,'黑色']];
+  expect(models().map(input=>input.props('modelValue'))).toEqual([[18],[18],[17],[17],[18]]);expect(colorInputs().map(input=>input.props('modelValue'))).toEqual(['红色','蓝色','红色','蓝色','黑色']);expect(actualQuantities().every(input=>input.props('modelValue')===undefined)).toBe(true);
+  await fillBulk('',2);await applyBulk();await click('保存实际收样');expect(api.save).toHaveBeenCalledTimes(1);expect(api.save.mock.calls[0][1].rows.map((row:SelectionReceiptInput['rows'][number])=>[row.rowId,row.phoneModelId,row.colorName])).toEqual(expected);
+  expect(api.save.mock.calls[0][1].rows.every((row:SelectionReceiptInput['rows'][number])=>row.qty===2&&!row.sampleIdentityId)).toBe(true);
+ })
+ it('uses explicit sample colours before a broader original list and exposes shortcuts for one phone with multiple original colours',async()=>{
+  previewStyleColors({'row-1':[18]},{'row-1':['原目录黑','原目录白']},{'row-1':['本次选红','本次选蓝']});await start([style(1)]);await click('选择各款全部颜色');expect(colorInputs().map(input=>input.props('modelValue'))).toEqual(['本次选红','本次选蓝']);
+  wrapper.unmount();previewStyleColors({'row-1':[18]},{'row-1':['黑','白']});await start([style(1)]);expect(allStyleColorsButton()).toBeDefined();await click('选择各款全部颜色');expect(colorInputs().map(input=>input.props('modelValue'))).toEqual(['黑','白']);expect(models().map(input=>input.props('modelValue'))).toEqual([[18],[18]]);expect(api.save).not.toHaveBeenCalled();
+ })
+ it('does not partially fill earlier styles when one checked style has no explicit colours',async()=>{
+  previewStyleColors({'row-1':[18,17],'row-2':[18,17]},{'row-1':['红','蓝']});await start();const elements=[...document.querySelectorAll('.receipt-row')];await click('选择各款全部颜色');
+  expect([...document.querySelectorAll('.receipt-row')]).toEqual(elements);expect(colorInputs().map(input=>input.props('modelValue'))).toEqual(['','']);expect(document.body.textContent).toContain('款式2尚未记录可带入的颜色');expect(api.save).not.toHaveBeenCalled();
+ })
+ it('keeps historical colours specific to each phone instead of expanding their union',async()=>{
+  api.preview.mockImplementation(async(_id,input:SelectionReceiptInput)=>({...response(input),rows:response(input).rows.map(row=>({...row,receiptColorMode:'selected_pairs',sourceColors:row.phoneModelId===18?['型号18黑']:row.phoneModelId===17?['型号17白']:[]}))}));
+  await start([style(1)]);await click('选择各款全部型号');await click('选择各款全部颜色');expect(models().map(input=>input.props('modelValue'))).toEqual([[18],[17]]);expect(colorInputs().map(input=>input.props('modelValue'))).toEqual(['型号18黑','型号17白']);expect(api.save).not.toHaveBeenCalled();
+ })
+ it('retains all 1170 rows in one payload while rendering only the current page',async()=>{
+  const ids=Array.from({length:39},(_,i)=>i+1),rows=Array.from({length:15},(_,i)=>({...style(i+1),phoneModelIds:ids}));
+  previewStyleColors(Object.fromEntries(rows.map(row=>[row.rowId,ids])),Object.fromEntries(rows.map(row=>[row.rowId,['黑','白']])));await start(rows);await fillCommon();await click('选择各款全部型号');await click('选择各款全部颜色');
+  expect(document.querySelectorAll('.receipt-row')).toHaveLength(50);expect(wrapper.getComponent(ElPagination).props('total')).toBe(1170);await fillBulk('',2);await applyBulk();await click('保存实际收样');
+  const input=api.save.mock.calls[0][1] as SelectionReceiptInput;expect(api.save).toHaveBeenCalledTimes(1);expect(input.rows).toHaveLength(1170);expect(new Set(input.rows.map(row=>row.clientRowId)).size).toBe(1170);
+  expect(input.rows.filter(row=>row.rowId==='row-15'&&row.phoneModelId===39).map(row=>row.colorName)).toEqual(['黑','白']);expect(input.rows.every(row=>row.qty===2)).toBe(true);
+ },30000)
+})
+
+it('expands 1709 models locally and reports empty quantities immediately without a full-table read',async()=>{
+ const rows=Array.from({length:28},(_,i)=>({...style(i+1),phoneModelIds:Array.from({length:i===27?62:61},(_,j)=>j+1)}))
+ previewStyleColors(Object.fromEntries(rows.map(row=>[row.rowId,row.phoneModelIds])),Object.fromEntries(rows.map(row=>[row.rowId,['黑色']])));await start(rows);await fillCommon();
+ const reads=api.preview.mock.calls.length;await click('选择各款全部型号');expect(wrapper.getComponent(ElPagination).props('total')).toBe(1709);expect(api.preview).toHaveBeenCalledTimes(reads);expect(allStyleModelsButton()?.disabled).toBe(false);
+ await click('选择各款全部颜色');await click('保存实际收样');expect(document.body.textContent).toContain('还有1709条规格未填写');expect(api.preview).toHaveBeenCalledTimes(reads);expect(api.save).not.toHaveBeenCalled();
+ api.save.mockRejectedValueOnce({code:'ECONNABORTED'});await fillBulk('',2);await applyBulk();await click('保存实际收样');expect(api.preview).toHaveBeenCalledTimes(reads+1);expect(api.save).toHaveBeenCalledTimes(1);expect(api.save.mock.calls[0][1].rows).toHaveLength(1709);const pending=JSON.parse(sessionStorage.getItem('plm:selection-receipt:71:7')!);expect(pending.metadata).toHaveLength(28);expect(pending.input.rows).toHaveLength(1709);wrapper.unmount();await start(rows);expect(api.preview).toHaveBeenCalledTimes(reads+1);expect(wrapper.getComponent(ElPagination).props('total')).toBe(1709);expect(models()[0].props('modelValue')).toEqual([1]);expect(colorInputs()[0].props('modelValue')).toBe('黑色');expect(actualQuantities()[0].props('modelValue')).toBe(2);
+},30000)
+
+it('retains complete inputs and allows a safe retry when only the read-only validation times out',async()=>{
+ await start([style(1)]);await fillCommon();await fillActual(0,2);api.preview.mockRejectedValueOnce({code:'ECONNABORTED'});await click('保存实际收样');
+ expect(document.body.textContent).toContain('收样资料校验暂未完成，填写内容已保留');expect(actualQuantities()[0].props('modelValue')).toBe(2);expect(api.save).not.toHaveBeenCalled();expect(sessionStorage.getItem('plm:selection-receipt:71:7')).toBeNull();
+ await click('保存实际收样');expect(api.save).toHaveBeenCalledTimes(1);
 })

@@ -14,14 +14,29 @@ final class PartnerReceiptColors {
  }
  static String fold(String value){return text(value).strip().toLowerCase(Locale.ROOT);}
  static String name(Object value){
-  String result=text(value).strip();require(result.length()<=255,"实收颜色名称不能超过255字");
+  String result=text(value).strip();require(!Set.of("图片色","如图","见图","看图","待定","待确认","多色可选").contains(result),"请填写实际收到的颜色，不能使用图片色、如图或待定");require(result.length()<=255,"实收颜色名称不能超过255字");
   require(result.codePoints().noneMatch(Character::isISOControl),"一条实收规格只填写一个颜色，不要粘贴多行");return result;
+ }
+ /** Only the per-row frozen catalogue text is an all-colours basis; supplier suggestions are broader. */
+ static List<String> sourceNames(Map<String,Object> frozen){
+  var baseline=map(map(frozen.get("catalogSourceSnapshot")).get("selectionBaseline"));return explicitNames(baseline.get("color"));
+ }
+ static List<String> explicitNames(Object input){
+  var result=new LinkedHashMap<String,String>();
+  for(String part:text(input).split("[、，,;；\\r\\n]+")){
+   String value=part.strip();if(value.isEmpty())continue;
+   if(value.length()>255||value.codePoints().anyMatch(Character::isISOControl)
+       ||value.matches("(?i).*(待定|待确认|待核实|未提供|未记录|未注明|未知|多色|多种颜色|随机|图片色|如图|见图|看图|见色卡|见目录|详见|以实物).*")
+       ||Set.of("-","—","/","null","n/a","tbd","unknown","various","assorted").contains(fold(value)))return List.of();
+   result.putIfAbsent(fold(value),value);
+  }
+  return new ArrayList<>(result.values());
  }
  /** Acquired before snapshot colour locks; generic colour maintenance takes the supplier UPDATE lock. */
  void lockNames(long selection,Map<String,Object> input){
-  var keys=new TreeSet<String>();
+  var keys=new TreeSet<String>();var sources=new HashMap<String,Map<String,Object>>();
   for(var row:maps(input.get("rows"))){String value=name(row.get("colorName"));if(value.isEmpty())continue;
-   String rowId=text(row.get("rowId"));require(PartnerSelectionService.validRowId(rowId),"来源选样行标识无效");var source=new PartnerSelectionRows(store).find(selection,rowId,false);
+   String rowId=text(row.get("rowId"));require(PartnerSelectionService.validRowId(rowId),"来源选样行标识无效");var source=sources.computeIfAbsent(rowId,key->new PartnerSelectionRows(store).find(selection,key,false));
    String supplier=text(source.get("supplierCode"));if(!supplier.isEmpty())keys.add("sample-receipt-color:"+supplier+":"+fold(value));
   }
   for(String key:keys)store.jdbc.queryForList("select pg_advisory_xact_lock(hashtextextended(?,0))",key);

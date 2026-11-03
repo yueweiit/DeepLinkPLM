@@ -254,7 +254,7 @@ public class PartnerSelectionService {
   String curr=text(input.getOrDefault("currency",previous.get("currency"))).toUpperCase(Locale.ROOT);row.put("currency",curr.isEmpty()?"":currency(curr));
   row.putAll(PartnerCatalogFields.normalize(previous,input,previous.isEmpty()));
   row.put("priceOptions",priceOptions(input.getOrDefault("priceOptions",previous.get("priceOptions"))));
-  row.put("sampleColors",sampleColors(input.getOrDefault("sampleColors",previous.get("sampleColors"))));
+  if(input.containsKey("sampleColors")||previous.containsKey("sampleColors"))row.put("sampleColors",sampleColors(input.getOrDefault("sampleColors",previous.get("sampleColors"))));
   String quantity=text(input.getOrDefault("sampleQty",previous.get("sampleQty")));row.put("sampleQty",quantity.isEmpty()?"":qty(quantity,true));
   String development=text(input.getOrDefault("developmentStatus",previous.getOrDefault("developmentStatus","unknown")));require(DEVELOPMENT.contains(development),"开发优先状态无效");row.put("developmentStatus",development);
   String developed=text(input.getOrDefault("developedOn",previous.get("developedOn")));row.put("developedOn",developed.isEmpty()?"":date(developed));

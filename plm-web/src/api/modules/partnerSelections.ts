@@ -14,7 +14,7 @@ export const batchSelectionRows=async(id:number,data:{version:number;requestId:s
 export const previewSelectionConfirmation=async(id:number,data:SelectionConfirmation)=>unwrapResponse<SelectionConfirmationPreview>(await request.post(`${root}/${id}/confirmation-preview`,data))
 export const confirmSelection=async(id:number,data:SelectionConfirmation)=>unwrapResponse<SelectionSheet>(await request.post(`${root}/${id}/confirm`,data))
 export const previewSelectionReceipts=async(id:number,data:SelectionReceiptInput)=>unwrapResponse<SelectionReceiptPreview>(await request.post(`${root}/${id}/sample-receipts/preview`,data))
-export const saveSelectionReceipts=async(id:number,data:SelectionReceiptInput)=>unwrapResponse<SelectionReceiptResult>(await request.post(`${root}/${id}/sample-receipts`,data))
+export const saveSelectionReceipts=async(id:number,data:SelectionReceiptInput)=>unwrapResponse<SelectionReceiptResult>(await request.post(`${root}/${id}/sample-receipts`,data,{timeout:180000}))
 export const transitionSelectionRows=async(id:number,data:SelectionTransition)=>unwrapResponse<SelectionSheet>(await request.post(`${root}/${id}/rows/transition`,data))
 // One file contract serves source records and historical selections; ownership stays server-checked.
 export type PartnerFileContext='selection'|'catalog'

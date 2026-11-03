@@ -4,6 +4,11 @@ import dynamic from './es-dynamic.json'
 export default {
   ...ui,
   ...dynamic,
+  '收样资料校验暂未完成，填写内容已保留，请稍后重试': 'La validación no ha finalizado. Se conservan los datos introducidos; vuelva a intentarlo más tarde.',
+  '请填写实际入库日期、存放位置和保管人': 'Indique la fecha de recepción, la ubicación y el custodio',
+  '还有{value0}条规格未填写实收型号、颜色或数量，请补齐后保存': 'Faltan el modelo, el color o la cantidad recibida en {value0} filas. Complételas antes de guardar.',
+  '请填写实际收到的颜色，不能使用图片色、如图或待定': 'Indique el color realmente recibido, no «según imagen» ni «pendiente».',
+
   '选择或输入颜色，回车添加': 'Seleccione o escriba un color y pulse Intro',
   '统一选样颜色': 'Colores comunes de las muestras',
   '批量选样颜色': 'Colores de las muestras en lote',
@@ -16,6 +21,10 @@ export default {
   '本次型号、颜色或拟拿样数量还未保存，确定放弃并关闭吗？': 'Los modelos, colores o cantidades previstos no se han guardado. ¿Descartar y cerrar?',
   '本款型号': 'Modelos de este estilo',
   "选择各款全部型号": "Seleccionar todos los modelos de cada estilo",
+  '选择各款全部颜色': 'Seleccionar todos los colores de cada estilo',
+  '按款快速填写': 'Completar por estilo',
+  '已按各款颜色全选，已有规格和数量保留': 'Se seleccionaron los colores de cada estilo. Se conservan las variantes y cantidades existentes.',
+  '{value0}尚未记录可带入的颜色，请先填写本款颜色': '{value0} no tiene colores registrados para completar. Indique sus colores primero.',
   "收样规格分页": "Paginación de variantes recibidas",
   "已按各款型号全选，已有规格保留，可继续填写颜色和数量": "Se seleccionaron los modelos de cada estilo. Se conservan las variantes existentes; puede completar colores y cantidades.",
   "所选款式暂无可用型号，请先核对型号资料": "Algún estilo seleccionado no tiene modelos disponibles. Revise sus datos de modelos.",
