@@ -7,6 +7,7 @@ import { useUserStore } from '@/stores/user'
 import { currentLanguage, t } from '@/locales'
 import { normalizeLegacyProductTarget, toArchivedProductRoute, toArchivedSkuRoute, toInProgressProjectRoute } from '@/utils/projectRoute'
 import { collaborationRedirect, moldScheduleTaskRoute } from '@/utils/collaboration'
+import { canAccessLocalSamples } from '@/utils/sampleLocation'
 
 type RouteMetaConfig = {
   title: string
@@ -452,7 +453,7 @@ router.beforeEach(async (to) => {
   const permission = to.path === '/reports' && to.query.view === 'finance' ? 'finance:read'
     : to.path === '/projects' && ['product','sku'].includes(String(to.query.archiveView || '')) ? 'product:view'
     : to.meta.permission as string | undefined
-  if (permission && !userStore.hasPermission(permission)) {
+  if (permission && !userStore.hasPermission(permission) && !(to.path === '/samples' && canAccessLocalSamples(userStore))) {
     return '/403'
   }
 

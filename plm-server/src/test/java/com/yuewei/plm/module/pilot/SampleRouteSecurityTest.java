@@ -49,8 +49,21 @@ class SampleRouteSecurityTest {
  @Test void mexicoHasOnlyAssignedReadAndReceiveEntryPoints()throws Exception{
   role="mexico";permissions=List.of("task:arrival");
   for(String path:List.of("/api/v1/sample-scan","/api/v1/sample-shipments","/api/v1/sample-shipments/1"))ok(get(path));ok(post("/api/v1/sample-shipments/1/actions/receive"));
-  for(String path:List.of("/api/v1/sample-identities","/api/v1/sample-identities/1","/api/v1/sample-identities/candidates","/api/v1/sample-identities/resolve","/api/v1/sample-shipments/options","/api/v1/sample-shipments/1/files","/api/v1/sample-scan/extra"))no(get(path));
+  for(String path:List.of("/api/v1/sample-identities/candidates","/api/v1/sample-shipments/options","/api/v1/sample-shipments/1/files","/api/v1/sample-scan/extra"))no(get(path));
   for(String path:List.of("/api/v1/sample-identities","/api/v1/sample-shipments","/api/v1/sample-shipments/1/files","/api/v1/sample-shipments/1/actions/dispatched","/api/v1/sample-shipments/1/actions/tracking","/api/v1/sample-shipments/1/actions/loss","/api/v1/sample-shipments/1/actions/cancel","/api/v1/sample-shipments/1/actions/undo"))no(post(path));no(put("/api/v1/sample-shipments/1"));no(delete("/api/v1/sample-shipments/1"));
+ }
+ @Test void numericWarehouseDetailReadsAreAllowedForNonAdministratorReadersAndMexico()throws Exception{
+  role="domestic";permissions=List.of("partner:view");ok(get("/api/v1/sample-locations/17"));no(post("/api/v1/sample-locations/17"));no(get("/api/v1/sample-locations/17/private"));
+  role="mexico";permissions=List.of("task:arrival");ok(get("/api/v1/sample-locations/17"));no(get("/api/v1/sample-locations/17/private"));no(patch("/api/v1/sample-locations/17"));
+  permissions=List.of("file:read");no(get("/api/v1/sample-locations/17"));
+ }
+ @Test void mexicoRoomAccessIsLocalAndDoesNotOpenBorrowingOrOtherSourceActions()throws Exception{
+  role="mexico";permissions=List.of("task:arrival");
+  for(String path:List.of("/api/v1/sample-identities","/api/v1/sample-identities/1","/api/v1/sample-identities/options","/api/v1/sample-identities/resolve","/api/v1/sample-identities/1/photos/3/preview","/api/v1/sample-locations","/api/v1/sample-locations/options","/api/v1/sample-locations/3/references"))ok(get(path));
+  for(String path:List.of("/api/v1/sample-locations","/api/v1/sample-identities/1/actions/move","/api/v1/sample-identities/bulk-actions/move"))ok(post(path));ok(put("/api/v1/sample-locations/1"));ok(delete("/api/v1/sample-locations/1"));
+  for(String action:List.of("loan","return","count","undo","correct_color","source_resolve"))no(post("/api/v1/sample-identities/1/actions/"+action));
+  for(String action:List.of("loan","return"))no(post("/api/v1/sample-identities/bulk-actions/"+action));
+  no(get("/api/v1/sample-identities/1/photos/3/download"));no(get("/api/v1/sample-identities/1/colors"));no(get("/api/v1/samples/1"));
  }
  @Test void mexicoCannotUseAnotherPermissionOrAHeadRequestAsArrival()throws Exception{
   role="mexico";permissions=List.of("partner:view","samples:write");no(get("/api/v1/sample-scan"));no(get("/api/v1/sample-shipments"));no(post("/api/v1/sample-shipments/1/actions/receive"));for(String action:List.of("loan","return","move"))no(post("/api/v1/sample-identities/bulk-actions/"+action));permissions=List.of("task:arrival");no(head("/api/v1/sample-scan"));no(post("/api/v1/sample-scan"));

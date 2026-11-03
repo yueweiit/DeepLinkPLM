@@ -82,4 +82,21 @@ describe('normal session restoration and recovery routing',()=>{
     await router!.replace(String(router!.currentRoute.value.query.redirect))
     expect(router!.currentRoute.value.path).toBe('/pilot/tasks');expect(reads()).toBe(2)
   })
+  it('allows the real Mexico arrival role only the shared samples route without granting domestic permissions',async()=>{
+    const permissions=['pilot:tasks','task:arrival','task:acceptance','file:read']
+    const {user}=await start(undefined,permissions,'mexico')
+    await router!.push('/samples?identityId=1001');await router!.isReady()
+    expect(router!.currentRoute.value.fullPath).toBe('/samples?identityId=1001')
+    await router!.push('/samples?view=shipments&shipmentId=89001')
+    expect(router!.currentRoute.value.fullPath).toBe('/samples?view=shipments&shipmentId=89001')
+    for(const path of ['/partner-samples','/model-samples','/research-samples','/partner-selections','/partner-products','/samples/']){
+      await router!.push(path);expect(router!.currentRoute.value.path,path).toBe('/403')
+    }
+    expect(user.permissions).toEqual(permissions);expect(user.hasPermission('partner:view')).toBe(false)
+  })
+  it.each([{role:'supplier',permissions:['pilot:tasks','task:arrival']},{role:'mexico',permissions:['pilot:tasks','task:acceptance','file:read']}])('does not extend samples access to $role without both Mexico and arrival permission',async({role,permissions})=>{
+    await start(undefined,permissions,role);await router!.push('/samples');await router!.isReady()
+    expect(router!.currentRoute.value.path).toBe('/403')
+  })
+
 })

@@ -20,13 +20,13 @@ final class PartnerCatalogSampleRules {
   var out=new LinkedHashMap<>(pair);out.put("catalogStyleId",snapshot.get("catalogStyleId"));out.put("catalogStyleCode",snapshot.get("catalogStyleCode"));out.put("catalogConfigurationKey",configurationKey(snapshot));out.put("catalogSpecKey",key(number(snapshot.get("catalogStyleId")),phone,color)+":"+configurationKey(snapshot));
   var member=maps(snapshot.get("phones")).stream().filter(p->number(p.getOrDefault("phoneModelId",p.get("id")))==phone).findFirst().orElseThrow(()->invalid("所选手机型号快照缺失，请核对选择来源"));
   out.put("phones",List.of(member));out.put("phoneModelIds",List.of(phone));
-  String colorName=text(pair.getOrDefault("colorName",pair.get("color")));required(colorName,"实际供应商颜色");out.put("colorName",colorName);
+  String colorName=PartnerReceiptColors.name(required(pair.getOrDefault("colorName",pair.get("color")),"实际供应商颜色"));out.put("colorName",colorName);
   out.put("specName",text(member.getOrDefault("displayName",member.get("modelName")))+" · "+colorName);return out;
  }
  static Map<String,Object> qualityScope(Map<String,Object> sample){
   var row=new LinkedHashMap<String,Object>();
   for(String field:List.of("catalogStyleId","catalogStyleCode","catalogSpecKey","catalogConfigurationKey","phoneModelId","colorId","colorName","specName","qualityBasis"))row.put(field,sample.get(field));
-  row.put("sampleId",sample.get("id"));row.put("qty",sample.get("receivedQty"));return row;
+  row.put("sampleId",sample.get("id"));row.put("qty",sample.getOrDefault("effectiveReceivedQty",sample.get("receivedQty")));return row;
  }
  static String qualityBasis(com.fasterxml.jackson.databind.ObjectMapper json,Map<String,Object> snapshot,Map<String,Object> pair){
   var basis=new LinkedHashMap<String,Object>();

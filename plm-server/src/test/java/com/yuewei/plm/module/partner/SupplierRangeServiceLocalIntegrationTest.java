@@ -68,6 +68,29 @@ class SupplierRangeServiceLocalIntegrationTest {
         var first=command("palette",items);first.put("reuseExisting",true);tx.execute(s->service.saveColors("A",first));var repeated=command("palette-again",items);repeated.put("reuseExisting",true);tx.execute(s->service.saveColors("A",repeated));
         assertThat(count("plm_supplier_color")).isEqualTo(25);assertThat(count("plm_supplier_color_version")).isEqualTo(25);assertThat(count("plm_code_item")).isEqualTo(2);assertThat(service.colors("A",Map.of("scope","general")).get("totalElements")).isEqualTo(24L);
     }
+    @Test void applicableColourPageReusesActualScopedColoursWithoutExposingOtherStylesOrConfigurations(){
+        var generic=addColor("A","黑色");
+        var scoped=rows(tx.execute(s->service.saveColors("A",command("actual-scoped-colours",List.of(
+            Map.of("name","松绿色","styleKey","source-row-125","configKey","default"),
+            Map.of("name","本款通用色","styleKey","source-row-125"),
+            Map.of("name","默认配置色","configKey","default"),
+            Map.of("name","其他款颜色","styleKey","another-style","configKey","default"),
+            Map.of("name","其他配置色","styleKey","source-row-125","configKey","another-config"))))));
+        addColor("B","另一供应商颜色");
+        var query=new HashMap<>(Map.of("scope","applicable","styleKey","source-row-125","configKey","default","size","2"));
+        var first=service.colors("A",query);query.put("page","2");var second=service.colors("A",query);
+        assertThat(first.get("totalElements")).isEqualTo(4L);assertThat(second.get("totalElements")).isEqualTo(4L);
+        var visible=new ArrayList<>(rows(first));visible.addAll(rows(second));
+        assertThat(visible).extracting(value->text(value.get("name"))).containsExactlyInAnyOrder("黑色","松绿色","本款通用色","默认配置色");
+        query.put("page","1");query.put("keyword","松绿");var filtered=service.colors("A",query);
+        assertThat(filtered.get("totalElements")).isEqualTo(1L);assertThat(number(rows(filtered).get(0).get("id"))).isEqualTo(number(scoped.get(0).get("id")));
+        assertThat(service.colors("A",Map.of("scope","general")).get("totalElements")).isEqualTo(1L);
+        long before=count("plm_supplier_color"),history=count("plm_supplier_color_version");
+        var adopted=tx.execute(s->service.catalogColors("A",List.of(generic.get("id"),scoped.get(0).get("id")),List.of(),List.of(),"source-row-125","default"));
+        assertThat(adopted).extracting(value->number(value.get("id"))).containsExactly(number(generic.get("id")),number(scoped.get(0).get("id")));
+        assertThat(count("plm_supplier_color")).isEqualTo(before);assertThat(count("plm_supplier_color_version")).isEqualTo(history);
+        assertThatThrownBy(()->tx.execute(s->service.catalogColors("A",List.of(scoped.get(3).get("id")),List.of(),List.of(),"source-row-125","default"))).hasMessageContaining("不适用于");
+    }
     @Test void savedRowResolvesChosenColourIdsAndTypedNamesInTheExistingTransactionWithoutSupplyPairings(){
         var black=addColor("A","黑色");var store=new PartnerStore(jdbc,new ObjectMapper(),access,audit);var products=mock(PartnerProductService.class);when(products.selectedPhones(anyList(),anyList())).thenReturn(List.of());when(permissions.costs()).thenReturn(true);
         var selections=new PartnerSelectionService(store,permissions,profiles,products,mock(PartnerMaterialService.class));org.springframework.test.util.ReflectionTestUtils.setField(selections,"ranges",service);

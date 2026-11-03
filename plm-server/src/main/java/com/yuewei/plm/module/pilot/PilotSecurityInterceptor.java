@@ -109,21 +109,24 @@ public class PilotSecurityInterceptor implements HandlerInterceptor {
   throw denied();
  }
  /** These new routes have scoped services; admit only their reviewed methods and paths. */
- private static boolean samplePath(String path){return path.equals("/api/v1/sample-identities")||path.startsWith("/api/v1/sample-identities/")||path.equals("/api/v1/sample-shipments")||path.startsWith("/api/v1/sample-shipments/")||path.equals("/api/v1/sample-scan")||path.startsWith("/api/v1/sample-scan/");}
+ private static boolean samplePath(String path){return path.equals("/api/v1/sample-locations")||path.startsWith("/api/v1/sample-locations/")||path.equals("/api/v1/sample-identities")||path.startsWith("/api/v1/sample-identities/")||path.equals("/api/v1/sample-shipments")||path.startsWith("/api/v1/sample-shipments/")||path.equals("/api/v1/sample-scan")||path.startsWith("/api/v1/sample-scan/");}
  private boolean sampleBoundary(String path,String method,String role){
   boolean get=method.equals("GET"),post=method.equals("POST");
   if(role.equals("mexico")){
-   boolean assignedRead=get&&(path.equals("/api/v1/sample-scan")||path.equals("/api/v1/sample-shipments")||path.matches("/api/v1/sample-shipments/[0-9]+"));
+   boolean assignedRead=get&&(path.equals("/api/v1/sample-locations")||path.equals("/api/v1/sample-locations/options")||path.matches("/api/v1/sample-locations/[0-9]+(?:/references)?")||path.equals("/api/v1/sample-identities")||path.matches("/api/v1/sample-identities/(?:[0-9]+|options|resolve)")||path.matches("/api/v1/sample-identities/[0-9]+/photos/[0-9]+/preview")||path.equals("/api/v1/sample-scan")||path.equals("/api/v1/sample-shipments")||path.matches("/api/v1/sample-shipments/[0-9]+"));
    boolean assignedReceipt=post&&path.matches("/api/v1/sample-shipments/[0-9]+/actions/receive");
-   if(!assignedRead&&!assignedReceipt)throw denied();access.requirePermission("task:arrival");return true; // Service still checks recipient, actual dispatch and row allocation.
+   boolean localWrite=post&&(path.equals("/api/v1/sample-locations")||path.equals("/api/v1/sample-identities/bulk-actions/move")||path.matches("/api/v1/sample-identities/[0-9]+/actions/move"))||Set.of("PUT","DELETE").contains(method)&&path.matches("/api/v1/sample-locations/[0-9]+");
+   if(!assignedRead&&!assignedReceipt&&!localWrite)throw denied();access.requirePermission("task:arrival");return true; // Service still checks recipient, actual dispatch and row allocation.
   }
   if(Set.of("supplier","overseas_sales").contains(role))throw denied();access.requireDomesticView();
-  boolean identityRead=get&&(path.equals("/api/v1/sample-identities")||path.matches("/api/v1/sample-identities/(?:[0-9]+|resolve|candidates)"));
+  boolean locationRead=get&&(path.equals("/api/v1/sample-locations")||path.equals("/api/v1/sample-locations/options")||path.matches("/api/v1/sample-locations/[0-9]+(?:/references)?"));
+  boolean locationWrite=post&&path.equals("/api/v1/sample-locations")||Set.of("PUT","DELETE").contains(method)&&path.matches("/api/v1/sample-locations/[0-9]+");
+  boolean identityRead=get&&(path.equals("/api/v1/sample-identities")||path.matches("/api/v1/sample-identities/(?:[0-9]+|options|resolve|candidates)")||path.matches("/api/v1/sample-identities/[0-9]+/photos/[0-9]+/preview"));
   boolean identityWrite=post&&(path.equals("/api/v1/sample-identities")||path.matches("/api/v1/sample-identities/bulk-actions/(?:loan|return|move)")||path.matches("/api/v1/sample-identities/[0-9]+/actions/(?:loan|return|move|retain|gift|consume|scrap|loss|count|undo|custody)")||path.matches("/api/v1/sample-identities/batches/[0-9]+/identity"));
   boolean shipmentRead=get&&(path.equals("/api/v1/sample-shipments")||path.matches("/api/v1/sample-shipments/(?:[0-9]+|options)"));
   boolean shipmentWrite=post&&(path.equals("/api/v1/sample-shipments")||path.matches("/api/v1/sample-shipments/[0-9]+/(?:files|actions/(?:dispatched|tracking|receive|loss|cancel|undo))"))||Set.of("PUT","DELETE").contains(method)&&path.matches("/api/v1/sample-shipments/[0-9]+");
-  if(identityRead||shipmentRead||get&&path.equals("/api/v1/sample-scan")){access.requirePermission("partner:view");return true;}
-  if(identityWrite||shipmentWrite){access.requirePermission("samples:write");return true;}
+  if(locationRead||identityRead||shipmentRead||get&&path.equals("/api/v1/sample-scan")){access.requirePermission("partner:view");return true;}
+  if(locationWrite||identityWrite||shipmentWrite){access.requirePermission("samples:write");return true;}
   throw denied();
  }
  private static String financeAction(String path,boolean read){return path.contains("export")?"finance:export":path.endsWith("/confirm")?"finance:confirm":read?"finance:read":"finance:write";}

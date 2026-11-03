@@ -3,15 +3,16 @@ import { t as uiText } from '@/locales'
 
 import {ref} from 'vue'
 import PartnerFilePreview from './PartnerFilePreview.vue'
+import {sampleIdentityPhoto} from '@/api/modules/sampleManagement'
 import {fileBlob} from '@/api/modules/partner'
 import {useBlobPreview} from '@/composables/useBlobPreview'
 import {attachmentPreviewKey} from '@/utils/authorizedBlobQueue'
 // A caller that owns an outer button opts out of the inner retry control.
-const props=withDefaults(defineProps<{id:number;allowRetry?:boolean;previewable?:boolean;previewFiles?:{id:number;name?:string}[]}>(),{allowRetry:true,previewable:false})
+const props=withDefaults(defineProps<{id:number;sampleIdentityId?:number;allowRetry?:boolean;previewable?:boolean;previewFiles?:{id:number;name?:string}[]}>(),{allowRetry:true,previewable:false})
 const previewOpen=ref(false)
 const {url,loading,error,retry,imageFailed}=useBlobPreview(()=>{
- const id=props.id
- return id?{key:attachmentPreviewKey(id),fetch:(signal:AbortSignal)=>fileBlob(id,true,{signal})}:undefined
+ const id=props.id,identityId=props.sampleIdentityId
+ return id?{key:identityId?`sample:${identityId}:${id}`:attachmentPreviewKey(id),fetch:(signal:AbortSignal)=>identityId?sampleIdentityPhoto(identityId,id,{signal}):fileBlob(id,true,{signal})}:undefined
 })
 function open(event:MouseEvent){if(!props.previewable)return;event.stopPropagation();if(error.value){void retry();return}if(url.value)previewOpen.value=true}
 </script>

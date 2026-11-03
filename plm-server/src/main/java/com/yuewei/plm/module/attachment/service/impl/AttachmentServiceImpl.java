@@ -70,6 +70,8 @@ public class AttachmentServiceImpl implements AttachmentService {
     private final AppProperties appProperties;
     private final OperationLogService operationLogService;
     private final RequirementFormRepository requirementFormRepository;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.yuewei.plm.module.partner.SampleIdentityRegistry sampleIdentities;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.yuewei.plm.module.project.development.ProductDevelopmentService productDevelopmentService;
 
@@ -275,6 +277,22 @@ public class AttachmentServiceImpl implements AttachmentService {
     @Transactional
     public AttachmentDownloadResource preview(Long attachmentId, HttpServletRequest request) {
         Attachment attachment = getAttachmentOrThrow(attachmentId);
+        return previewResource(attachment, request);
+    }
+
+    @Override
+    @Transactional
+    public AttachmentDownloadResource previewSamplePhoto(Long sampleIdentityId, Long attachmentId, HttpServletRequest request) {
+        sampleIdentities.requirePhoto(sampleIdentityId, attachmentId);
+        Attachment attachment = attachmentRepository.selectById(attachmentId);
+        if (attachment == null || Integer.valueOf(1).equals(attachment.getDeletedFlag()) ||
+            attachment.getContentType() == null || !attachment.getContentType().startsWith("image/")) {
+            throw new BusinessException(ErrorCodeConstants.ATTACHMENT_NOT_FOUND, "样品照片不存在或未获授权");
+        }
+        return previewResource(attachment, request);
+    }
+
+    private AttachmentDownloadResource previewResource(Attachment attachment, HttpServletRequest request) {
         String previewType = resolvePreviewType(attachment);
         if (!isPreviewable(previewType)) {
             writeLog(OperationActionConstants.ATTACHMENT_PREVIEW, attachment, "{\"action\":\"preview\",\"status\":\"unsupported\"}", request);

@@ -181,4 +181,20 @@ describe('mold ledger navigation', () => {
     const {wrapper:hidden}=await start(['product:view'],'/files');expect(hidden.text()).not.toContain('开模申请');hidden.unmount();
     vi.mocked(getMoldApplicationConfig).mockResolvedValue({enabled:false});const {wrapper:disabled}=await start(['collaboration:view'],'/market-data');expect(disabled.text()).not.toContain('开模申请');
   })
+  it('shows Mexico arrival accounts the shared samples item under workbench without domestic menus',async()=>{
+    vi.mocked(getMoldApplicationConfig).mockClear()
+    const permissions=['pilot:tasks','task:arrival','task:acceptance','file:read']
+    const {wrapper,router}=await start(permissions,'/pilot/tasks','mexico')
+    const workbench=wrapper.findAll('.sidebar__group').find(group=>group.get('.sidebar__group-label').text()==='工作台')!
+    expect(workbench.findAll('.sidebar__item').map(item=>item.text())).toEqual(['我的待办','样品管理'])
+    await workbench.findAll('.sidebar__item').find(item=>item.text()==='样品管理')!.trigger('click');await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/samples');expect(wrapper.get('.sidebar__item.is-active').text()).toBe('样品管理')
+    for(const text of ['合作产品','供应商产品目录','选品目录','项目中心','成本报价','新品研发','型号研发'])expect(wrapper.text()).not.toContain(text)
+    expect(useUserStore().permissions).toEqual(permissions);expect(vi.mocked(getMoldApplicationConfig)).not.toHaveBeenCalled()
+  })
+  it('keeps shared samples hidden for Mexico accounts without arrival permission',async()=>{
+    const {wrapper}=await start(['pilot:tasks','task:acceptance','file:read'],'/pilot/tasks','mexico')
+    expect(wrapper.findAll('.sidebar__item').map(item=>item.text())).not.toContain('样品管理')
+  })
+
 })

@@ -291,6 +291,18 @@ class AttachmentServiceImplTest {
         verify(attachmentRepository, Mockito.never()).updateById(any(Attachment.class));
     }
 
+    @Test
+    void samplePhotoPreviewUsesTheScopedSampleGateAndTheOriginalStorageStream() throws Exception {
+        var properties=new AppProperties();properties.getStorage().setLocalRoot(tempDir.toString());var files=mock(AttachmentRepository.class);
+        var image=attachment(901L,10L,null,"sample_image");image.setFileExt("png");image.setContentType("image/png");image.setOriginalFileName("sample.png");image.setStorageKey("sample.png");image.setDeletedFlag(0);
+        byte[] bytes=java.util.Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");Files.write(tempDir.resolve("sample.png"),bytes);when(files.selectById(901L)).thenReturn(image);
+        var target=service(properties,mock(ProductRepository.class),files);var identities=mock(com.yuewei.plm.module.partner.SampleIdentityRegistry.class);org.springframework.test.util.ReflectionTestUtils.setField(target,"sampleIdentities",identities);
+        var materials=mock(com.yuewei.plm.module.partner.PartnerMaterialService.class);org.springframework.test.util.ReflectionTestUtils.setField(target,"partnerMaterials",materials);
+        var result=target.previewSamplePhoto(1L,901L,null);assertThat(result.contentType()).isEqualTo("image/png");assertThat(result.resource().getInputStream().readAllBytes()).isEqualTo(bytes);verify(identities).requirePhoto(1L,901L);Mockito.verifyNoInteractions(materials);
+        Mockito.doThrow(new BusinessException(40103,"样品照片不存在或未获授权")).when(identities).requirePhoto(2L,901L);assertThatThrownBy(()->target.previewSamplePhoto(2L,901L,null)).hasMessageContaining("未获授权");
+        image.setContentType("application/pdf");assertThatThrownBy(()->target.previewSamplePhoto(1L,901L,null)).hasMessageContaining("照片不存在或未获授权");
+    }
+
     private AttachmentServiceImpl service(AppProperties appProperties,
                                           ProductRepository productRepository,
                                           AttachmentRepository attachmentRepository) {

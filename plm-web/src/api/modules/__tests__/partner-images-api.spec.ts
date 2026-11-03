@@ -2,8 +2,9 @@ import {beforeEach,describe,expect,it,vi} from 'vitest'
 const api=vi.hoisted(()=>({get:vi.fn()}))
 vi.mock('../../request',async()=>({...await vi.importActual<typeof import('../../request')>('../../request'),default:api}))
 import {fileBlob} from '../partner'
+import {sampleIdentityPhoto} from '../sampleManagement'
 import {catalogSourceFileClient,selectionImportImage} from '../partnerSelections'
-beforeEach(()=>{vi.clearAllMocks();api.get.mockResolvedValue({data:new Blob(['image'],{type:'image/png'})})})
+beforeEach(()=>{vi.clearAllMocks();localStorage.clear();api.get.mockResolvedValue({data:new Blob(['image'],{type:'image/png'})})})
 describe('authenticated preview request options',()=>{
  it('keeps formal and staged previews as authenticated Blobs with bounded long-read timeout and cancellation',async()=>{
   const signal=new AbortController().signal
@@ -14,4 +15,11 @@ describe('authenticated preview request options',()=>{
  it('does not change ordinary download behavior or mute its errors',async()=>{
   await fileBlob(27,false);expect(api.get).toHaveBeenCalledWith('/attachments/27/download',{responseType:'blob'})
  })
+ it('keeps the narrow sample-photo endpoint on the shared long-read, cancellation and session-guard contract',async()=>{
+  localStorage.setItem('plm_token','preview-session-one');const signal=new AbortController().signal
+  const blob=await sampleIdentityPhoto(71,27,{signal});expect(blob).toBeInstanceOf(Blob)
+  expect(api.get).toHaveBeenCalledWith('/sample-identities/71/photos/27/preview',{responseType:'blob',timeout:120000,suppressErrorToast:true,signal,isAuthSessionCurrent:expect.any(Function)})
+  const options=api.get.mock.calls.at(-1)![1] as {isAuthSessionCurrent:()=>boolean};expect(options.isAuthSessionCurrent()).toBe(true);localStorage.setItem('plm_token','preview-session-two');expect(options.isAuthSessionCurrent()).toBe(false)
+ })
+
 })

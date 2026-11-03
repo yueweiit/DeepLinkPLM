@@ -23,7 +23,7 @@ import static com.yuewei.plm.module.partner.PartnerValues.*;
 @EnabledIfEnvironmentVariable(named="PLM_SAMPLE_IDENTITY_TEST_URL",matches="(?:jdbc:postgresql://127\\.0\\.0\\.1:15486/plm_sample_qr_kwhvfzrr(?:\\?currentSchema=plm)?|jdbc:postgresql://127\\.0\\.0\\.1:15504/plm_sales_policy_qa\\?currentSchema=plm)")
 class SampleIdentityLocalIntegrationTest {
  JdbcTemplate jdbc,admin;TransactionTemplate tx;String schema;PartnerStore store;PartnerSampleService samples;SampleIdentityRegistry registry;SampleIdentityActions actions;PilotAccessService access;
- boolean restricted=false;long user=1;final Set<Long> allowed=new HashSet<>();final Set<Long> allowedProducts=new HashSet<>();
+ String role="administrator";boolean restricted=false;long user=1;final Set<Long> allowed=new HashSet<>();final Set<Long> allowedProducts=new HashSet<>();
  @BeforeEach void setup()throws Exception{
   String url=System.getenv("PLM_SAMPLE_IDENTITY_TEST_URL"),password=System.getenv("PLM_SAMPLE_IDENTITY_TEST_PASSWORD");admin=new JdbcTemplate(new DriverManagerDataSource(url,"postgres",password));if(url.contains(":15504/")){assertThat(admin.queryForObject("select current_database()",String.class)).isEqualTo("plm_sales_policy_qa");assertThat(admin.queryForObject("select system_identifier::text from pg_control_system()",String.class)).isNotEqualTo("7651923859845308451");}schema="sample_identity_qa_"+UUID.randomUUID().toString().replace("-","");admin.execute("create schema "+schema);
   var data=new DriverManagerDataSource(url.split("\\?",2)[0]+"?currentSchema="+schema,"postgres",password);jdbc=new JdbcTemplate(data);tx=new TransactionTemplate(new DataSourceTransactionManager(data));
@@ -51,11 +51,12 @@ class SampleIdentityLocalIntegrationTest {
   jdbc.update("insert into plm_partner_event(record_id,action,data,request_id,created_by,actor_id) values(1,'loan','{\"qty\":2,\"date\":\"2026-10-02\",\"location\":\"旧柜\",\"condition\":\"good\",\"person\":\"历史借用人\",\"due\":\"2026-10-30\"}','old-loan','历史工程',1)");
   jdbc.update("insert into plm_partner_event(record_id,action,data,request_id,created_by,actor_id) values(1,'return','{\"qty\":1,\"damaged\":1,\"date\":\"2026-10-03\",\"location\":\"旧柜\",\"condition\":\"good\",\"loanId\":2}','old-return','历史工程',1)");
   String legacyJson=jdbc.queryForObject("select data::text from plm_partner_record where record_id=1",String.class);String legacyEvents=jdbc.queryForObject("select jsonb_agg(to_jsonb(e) order by event_id)::text from plm_partner_event e",String.class);
-  try(var c=data.getConnection()){ScriptUtils.executeSqlScript(c,new ClassPathResource("db/migration/V20261027_1600__sample_identity_and_shipments.sql"));}
+  try(var c=data.getConnection()){ScriptUtils.executeSqlScript(c,new ClassPathResource("db/migration/V20261027_1600__sample_identity_and_shipments.sql"));ScriptUtils.executeSqlScript(c,new ClassPathResource("db/migration/V20261103_1500__sample_location_directory.sql"));}
   assertThat(jdbc.queryForObject("select data::text from plm_partner_record where record_id=1",String.class)).isEqualTo(legacyJson);assertThat(jdbc.queryForObject("select jsonb_agg(to_jsonb(e) order by event_id)::text from plm_partner_event e",String.class)).isEqualTo(legacyEvents);assertThat(jdbc.queryForObject("select sample_identity_id from plm_partner_record where record_id=1",Long.class)).isNull();
-  access=mock(PilotAccessService.class);when(access.actor()).thenAnswer(i->new CurrentUser(user,"identity-qa","样品隔离验收",false));when(access.actorId()).thenAnswer(i->user);when(access.hasPermission(anyString())).thenReturn(true);
+  access=mock(PilotAccessService.class);when(access.actor()).thenAnswer(i->new CurrentUser(user,"identity-qa","样品隔离验收",false));when(access.actorId()).thenAnswer(i->user);when(access.hasPermission(anyString())).thenAnswer(i->!role.equals("mexico")||i.getArgument(0).equals("task:arrival"));when(access.access()).thenAnswer(i->new PilotAccessService.Access(access.actor(),role,role.equals("mexico")?List.of("task:arrival"):List.of("*"),!role.equals("mexico"),true));
+  doAnswer(i->{if(role.equals("mexico"))throw invalid("domestic forbidden");return null;}).when(access).requireDomesticView();doAnswer(i->{if(!access.hasPermission(i.getArgument(0)))throw invalid("permission forbidden");return null;}).when(access).requirePermission(anyString());
   when(access.visibleSqlClause(anyString(),anyString())).thenAnswer(i->{String kind=i.getArgument(0),expr=i.getArgument(1);return !restricted?"true":kind.equals("partner")&&!allowed.isEmpty()?expr+" in ("+String.join(",",allowed.stream().map(Object::toString).toList())+")":kind.equals("product")&&!allowedProducts.isEmpty()?expr+" in ("+String.join(",",allowedProducts.stream().map(Object::toString).toList())+")":"false";});
-  doAnswer(i->{if(restricted&&!allowed.contains(number(i.getArgument(0))))throw invalid("对象不存在或未获授权");return null;}).when(access).requirePartner(anyLong());
+  doAnswer(i->{if(role.equals("mexico")||restricted&&!allowed.contains(number(i.getArgument(0))))throw invalid("对象不存在或未获授权");return null;}).when(access).requirePartner(anyLong());
   store=new PartnerStore(jdbc,new ObjectMapper(),access,mock(OperationLogService.class));registry=new SampleIdentityRegistry(store);var products=mock(PartnerProductService.class);when(products.snapshot(eq(15L),eq("SUP-A"),eq(true))).thenAnswer(i->new LinkedHashMap<>(Map.of("productId",42L,"productName","真实产品","specId",15L,"specName","Phone A 黑色","supplierCode","SUP-A","phones",List.of(Map.of("phoneModelId",12L,"modelName","Phone A")),"phoneModelIds",List.of(12L),"refs",List.of())));
   samples=new PartnerSampleService(store,products,mock(PartnerMaterialService.class));ReflectionTestUtils.setField(samples,"identities",registry);actions=new SampleIdentityActions(store,registry,samples);
  }
@@ -147,6 +148,261 @@ class SampleIdentityLocalIntegrationTest {
  }
  @Test void directlyTypedActualColorCreatesOneSupplierColorAndNoNewStock(){var batch=catalog(10,2,"new-color-receipt");long id=number(batch.get("sampleIdentityId"));var command=new LinkedHashMap<String,Object>(Map.of("requestId","new-color","version",registry.detail(id).get("version"),"colorName","烟紫色","reason","实物颜色录错，更正实际颜色"));var result=tx.execute(t->actions.action(id,"correct_color",command));assertThat(result).containsEntry("colorName","烟紫色");assertThat(number(map(result.get("balances")).get("onhand"))).isEqualTo(2);assertThat(jdbc.queryForObject("select count(*) from plm_supplier_color where supplier_code='SUP-A' and name='烟紫色'",Long.class)).isEqualTo(1);tx.execute(t->actions.action(id,"correct_color",command));assertThat(jdbc.queryForObject("select count(*) from plm_supplier_color where name='烟紫色'",Long.class)).isEqualTo(1);}
 
+ @Test void aVoidedReceiptCannotBeRestoredThroughTheOldCountAction(){
+  var batch=receive(4,"void-before-count");long id=number(batch.get("id")),identity=number(batch.get("sampleIdentityId"));
+  tx.execute(t->actions.action(identity,"void_receipt",receiptCorrection(batch,"void-before-count-confirm")));
+  long events=jdbc.queryForObject("select count(*) from plm_partner_event",Long.class);
+  var count=new LinkedHashMap<String,Object>(Map.of("version",samples.detail(id).get("version"),"requestId","wrong-count-restore","actual",1,"location","中国工程柜","date",java.time.LocalDate.now().toString(),"reason","误用旧盘点入口"));
+  assertThatThrownBy(()->tx.execute(t->samples.action(id,"count",count))).hasMessageContaining("不能通过盘点恢复库存");
+  assertThat(jdbc.queryForObject("select count(*) from plm_partner_event",Long.class)).isEqualTo(events);assertThat(samples.detail(id)).containsEntry("effectiveReceivedQty",0L).containsEntry("receiptStatus","voided");assertThat(map(samples.detail(id).get("balances"))).containsEntry("onhand",0L);
+  assertThat(registry.page(Map.of())).containsEntry("totalElements",0L);assertThat(registry.page(Map.of("receiptStatus","voided"))).containsEntry("totalElements",1L);
+ }
+ @Test void anActiveReceiptConsumedToZeroCanStillUseTheExistingCountAction(){
+  var batch=receive(2,"active-before-count");long id=number(batch.get("id"));
+  tx.execute(t->samples.action(id,"consume",Map.of("version",samples.detail(id).get("version"),"requestId","consume-all-before-count","qty",2,"location","中国工程柜","date",java.time.LocalDate.now().toString(),"reason","实际测试耗用")));
+  assertThat(map(samples.detail(id).get("balances"))).containsEntry("onhand",0L);
+  var count=Map.<String,Object>of("version",samples.detail(id).get("version"),"requestId","valid-count-after-consume","actual",1,"location","中国工程柜","date",java.time.LocalDate.now().toString(),"reason","盘点更正");
+  var corrected=tx.execute(t->samples.action(id,"count",count));assertThat(corrected).containsEntry("effectiveReceivedQty",2L).containsEntry("receiptStatus","active");assertThat(map(corrected.get("balances"))).containsEntry("onhand",1L);assertThat(registry.page(Map.of())).containsEntry("totalElements",1L);
+ }
+ @Test void aPreallocatedTypeWithoutAnyReceiptKeepsItsExistingActiveVisibility(){
+  var source=Map.<String,Object>of("sourceType","model","modelProductId",7L,"phoneModelId",12L,"sampleVersion","V1","name","预分配主码");var head=tx.execute(t->registry.ensure(source,Map.of("requestId","empty-identity-status")));
+  assertThat(registry.page(Map.of())).containsEntry("totalElements",1L);assertThat(registry.detail(number(head.get("id")))).containsEntry("receiptStatus","active");assertThat(registry.page(Map.of("receiptStatus","voided"))).containsEntry("totalElements",0L);
+ }
+ @Test void aReaderCannotModifyAVisibleIdentityBySendingAnUnauthorisedBatch(){
+  var a=receive(2,"acl-visible");var b=receive(3,"acl-hidden");long identity=number(a.get("sampleIdentityId"));var command=receiptCorrection(b,"hidden-correction");restricted=true;user=2;allowed.add(number(a.get("id")));command.put("version",registry.detail(identity).get("version"));
+  assertThatThrownBy(()->tx.execute(t->actions.action(identity,"void_receipt",command))).hasMessageContaining("未获授权");restricted=false;
+  doThrow(invalid("没有样品写入权限")).when(access).requirePermission("samples:write");assertThatThrownBy(()->tx.execute(t->actions.action(identity,"void_receipt",receiptCorrection(a,"read-only-void")))).hasMessageContaining("写入权限");
+ }
+ @Test void legacyReceiptSqlReadsEventsWhenTheOldBatchHasNoReceivedQuantityMetadata(){
+  tx.execute(t->actions.bind(1,new LinkedHashMap<>(Map.of("version",0L,"requestId","legacy-attach-projection","identityReason","真实历史同物核对"))));
+  long identity=jdbc.queryForObject("select sample_identity_id from plm_partner_record where record_id=1",Long.class);assertThat(registry.page(Map.of())).containsEntry("totalElements",1L);assertThat(registry.detail(identity)).containsEntry("effectiveReceivedQty",10L);
+  assertThat(jdbc.queryForObject("select "+SampleReceiptCorrections.effectiveSql("s")+" from plm_partner_record s where s.record_id=1",Long.class)).isEqualTo(10L);
+ }
+ @Test void receiptCorrectionAndVoidingReopenTheOriginalInboundParcelsActualAllocation(){
+  var a=receive(4,"inbound-original");long identity=number(a.get("sampleIdentityId")),batchId=number(a.get("id"));
+  long shipment=tx.execute(t->{long sid=store.create("sample_shipment","实际供应商包裹");store.save(sid,new LinkedHashMap<>(Map.of("name","实际供应商包裹","direction","supplier_inbound","status","dispatched","supplierCode","SUP-A","dispatch",Map.of("date",java.time.LocalDate.now().toString()),"rows",List.of(new LinkedHashMap<>(Map.of("rowId","source-line","sampleIdentityId",identity,"qty",4L,"receivedGood",0L))))));SampleShipmentReceipts.recordInbound(store,sid,List.of(store.load(batchId,"sample",false)),"link-inbound");return sid;});
+  assertThat(store.load(shipment,"sample_shipment",false)).containsEntry("status","received");
+  var correction=receiptCorrection(a,"inbound-correct");correction.put("qty",2);tx.execute(t->actions.action(identity,"correct_receipt",correction));var partial=store.load(shipment,"sample_shipment",false);assertThat(partial).containsEntry("status","partially_received");var row=maps(partial.get("rows")).get(0);assertThat(number(row.get("receivedGood"))).isEqualTo(2);assertThat(number(maps(row.get("receivedBatches")).get(0).get("qty"))).isEqualTo(2);
+  tx.execute(t->actions.action(identity,"void_receipt",receiptCorrection(a,"inbound-void")));var empty=store.load(shipment,"sample_shipment",false);assertThat(empty).containsEntry("status","dispatched");row=maps(empty.get("rows")).get(0);assertThat(number(row.get("receivedGood"))).isZero();assertThat(maps(row.get("receivedBatches"))).isEmpty();assertThat(map(registry.detail(identity).get("balances"))).containsEntry("onhand",0L);
+ }
+ Map<String,Object> receiptCorrection(Map<String,Object> batch,String request){
+  long id=number(batch.get("id")),identity=number(batch.get("sampleIdentityId"));return new LinkedHashMap<>(Map.of("requestId",request,"version",registry.detail(identity).get("version"),"batchId",id,"batchVersion",samples.detail(id).get("version"),"reason","重复登记或数量填错"));
+ }
+ @Test void receiptCorrectionKeepsOriginalFactsAndRetriesWithoutChangingAnotherBatch(){
+  var a=receive(4,"correct-first");var b=receive(3,"correct-second");long id=number(a.get("id")),identity=number(a.get("sampleIdentityId"));
+  String original=jdbc.queryForObject("select data::text from plm_partner_event where record_id=? and action='receive'",String.class,id);
+  var command=receiptCorrection(a,"correct-two");command.put("qty",2);var result=tx.execute(t->actions.action(identity,"correct_receipt",command));
+  assertThat(result).containsEntry("effectiveReceivedQty",5L);assertThat(samples.detail(id)).containsEntry("receivedQty",4).containsEntry("effectiveReceivedQty",2L).containsEntry("receiptStatus","active");
+  assertThat(map(result.get("balances"))).containsEntry("onhand",5L);assertThat(samples.detail(number(b.get("id")))).containsEntry("effectiveReceivedQty",3L);assertThat(count("sample")).isEqualTo(3);
+  long events=jdbc.queryForObject("select count(*) from plm_partner_event",Long.class);tx.execute(t->actions.action(identity,"correct_receipt",command));assertThat(jdbc.queryForObject("select count(*) from plm_partner_event",Long.class)).isEqualTo(events);
+  assertThat(jdbc.queryForObject("select data::text from plm_partner_event where record_id=? and action='receive'",String.class,id)).isEqualTo(original);
+  command.put("qty",1);assertThatThrownBy(()->tx.execute(t->actions.action(identity,"correct_receipt",command))).hasMessageContaining("同一提交标识");
+ }
+ @Test void voidedRegistrationLeavesHistoryAndOnlyDisappearsAfterTheLastValidBatch(){
+  var a=receive(2,"void-first");var b=receive(3,"void-second");long identity=number(a.get("sampleIdentityId"));
+  tx.execute(t->actions.action(identity,"void_receipt",receiptCorrection(a,"void-one")));assertThat(registry.page(Map.of())).containsEntry("totalElements",1L);assertThat(registry.detail(identity)).containsEntry("effectiveReceivedQty",3L);
+  tx.execute(t->actions.action(identity,"void_receipt",receiptCorrection(b,"void-last")));assertThat(registry.page(Map.of())).containsEntry("totalElements",0L);assertThat(registry.page(Map.of("receiptStatus","voided"))).containsEntry("totalElements",1L);assertThat(registry.page(Map.of("receiptStatus","all"))).containsEntry("totalElements",1L);
+  assertThat(samples.detail(number(a.get("id")))).containsEntry("receiptStatus","voided").containsEntry("receivedQty",2);assertThat(count("sample")).isEqualTo(3);assertThat(count("sample_identity")).isEqualTo(1);
+ }
+ @Test void oldReceiptUndoUsesCurrentCorrectedQuantityAndUpdatesTheSameProjection(){
+  var batch=receive(4,"old-undo-receipt");long id=number(batch.get("id")),identity=number(batch.get("sampleIdentityId"));var correct=receiptCorrection(batch,"before-legacy-undo");correct.put("qty",2);tx.execute(t->actions.action(identity,"correct_receipt",correct));
+  long original=jdbc.queryForObject("select event_id from plm_partner_event where record_id=? and action='receive'",Long.class,id);
+  var undo=new LinkedHashMap<String,Object>(Map.of("version",samples.detail(id).get("version"),"requestId","legacy-undo-now","targetEventId",original,"reason","原批次重复登记"));
+  tx.execute(t->samples.action(id,"undo",undo));tx.execute(t->samples.action(id,"undo",undo));assertThat(samples.detail(id)).containsEntry("effectiveReceivedQty",0L).containsEntry("receiptStatus","voided");assertThat(map(registry.detail(identity).get("balances"))).containsEntry("onhand",0L);
+  assertThat(jdbc.queryForObject("select count(*) from plm_partner_event where record_id=? and action='receipt_correction'",Long.class,id)).isEqualTo(2);
+ }
+ @Test void correctionRejectsStaleBatchWrongIdentityAndStockOrQualityDependencies(){
+  var a=receive(4,"guard-receipt");long identity=number(a.get("sampleIdentityId"));var command=receiptCorrection(a,"stale-batch");command.put("batchVersion",-1);assertThatThrownBy(()->tx.execute(t->actions.action(identity,"void_receipt",command))).hasMessageContaining("记录已变化");
+  var another=input(1,"different-type");another.put("sampleVersion","another");var b=tx.execute(t->samples.create(another));var wrong=receiptCorrection(a,"wrong-batch");wrong.put("batchId",b.get("id"));assertThatThrownBy(()->tx.execute(t->actions.action(identity,"void_receipt",wrong))).hasMessageContaining("不属于");
+  tx.execute(t->actions.action(identity,"loan",Map.of("version",registry.detail(identity).get("version"),"requestId","dependency-loan","qty",1,"location","中国工程柜","date",java.time.LocalDate.now().toString(),"person","QA","due",java.time.LocalDate.now().plusDays(1).toString())));
+  assertThatThrownBy(()->tx.execute(t->actions.action(identity,"void_receipt",receiptCorrection(a,"dependent-void")))).hasMessageContaining("已有借出");
+  jdbc.update("insert into plm_partner_record(kind,code,name,parent_record_id,data) values('inspection','QC-DEPENDENCY','实际质检',?,'{}')",b.get("id"));
+  assertThat(samples.detail(number(b.get("id")))).containsEntry("canCorrectReceipt",false);assertThatThrownBy(()->tx.execute(t->actions.action(number(b.get("sampleIdentityId")),"void_receipt",receiptCorrection(b,"qc-void")))).hasMessageContaining("质检");
+ }
+ @Test void bulkVoidingIsAtomicAndCannotSilentlySkipAStaleRegistration(){
+  var a=receive(2,"bulk-void-a");var other=input(3,"bulk-void-b");other.put("sampleVersion","another");var b=tx.execute(t->samples.create(other));
+  var first=receiptCorrection(a,"unused-a");first.put("sampleIdentityId",a.get("sampleIdentityId"));first.put("allocations",List.of(Map.of("batchId",a.get("id"),"batchVersion",first.remove("batchVersion"))));first.remove("batchId");
+  var second=receiptCorrection(b,"unused-b");second.put("sampleIdentityId",b.get("sampleIdentityId"));second.put("allocations",List.of(Map.of("batchId",b.get("id"),"batchVersion",-1)));second.remove("batchId");second.remove("batchVersion");
+  var command=new LinkedHashMap<String,Object>(Map.of("requestId","bulk-void","reason","重复收样登记","items",List.of(first,second)));long events=jdbc.queryForObject("select count(*) from plm_partner_event",Long.class);
+  assertThatThrownBy(()->tx.execute(t->actions.bulk("void_receipt",command))).hasMessageContaining("记录已变化");assertThat(jdbc.queryForObject("select count(*) from plm_partner_event",Long.class)).isEqualTo(events);assertThat(samples.detail(number(a.get("id")))).containsEntry("effectiveReceivedQty",2L);
+  second.put("allocations",List.of(Map.of("batchId",b.get("id"),"batchVersion",samples.detail(number(b.get("id"))).get("version"))));tx.execute(t->actions.bulk("void_receipt",command));long saved=jdbc.queryForObject("select count(*) from plm_partner_event",Long.class);tx.execute(t->actions.bulk("void_receipt",command));assertThat(jdbc.queryForObject("select count(*) from plm_partner_event",Long.class)).isEqualTo(saved);assertThat(registry.page(Map.of())).containsEntry("totalElements",0L);
+ }
+ @Test void receiptProjectionDoesNotHideRealSamplesMerelyBecauseTheyAreFullyBorrowed(){
+  var a=receive(2,"zero-onhand");long identity=number(a.get("sampleIdentityId"));
+  tx.execute(t->actions.action(identity,"loan",Map.of("version",registry.detail(identity).get("version"),"requestId","all-loaned","qty",2,"location","中国工程柜","date",java.time.LocalDate.now().toString(),"person","QA","due",java.time.LocalDate.now().plusDays(1).toString())));
+  assertThat(registry.page(Map.of())).containsEntry("totalElements",1L);assertThat(map(registry.detail(identity).get("balances"))).containsEntry("onhand",0L);assertThat(registry.detail(identity)).containsEntry("effectiveReceivedQty",2L);
+ }
  @Test void correctionPreviewNeverDisclosesAnExistingColourIdentityOutsideTheReadersScope(){var wrong=catalog(10,3,"scope-wrong");var other=catalog(11,2,"scope-target");long id=number(wrong.get("sampleIdentityId"));restricted=true;user=2;allowed.add(number(wrong.get("id")));var command=colorCommand(id,"scope-preview");assertThatThrownBy(()->actions.previewColor(id,command)).hasMessageContaining("未获授权").hasMessageNotContaining(text(other.get("sampleCode")));}
+
+ @Test void warehouseDirectoryIsOptionalStableAndReferencedHistoryIsNeverRewritten(){
+  var locations=new SampleLocationService(store);var unused=tx.execute(t->locations.create(new LinkedHashMap<>(Map.of("site","CN","name","未用柜","requestId","unused-create"))));long unusedId=number(unused.get("id"));
+  var deleted=tx.execute(t->locations.delete(unusedId,Map.of("version",unused.get("version"),"requestId","unused-delete")));assertThat(deleted).containsEntry("deleted",true);
+  var restored=tx.execute(t->locations.update(unusedId,Map.of("version",deleted.get("version"),"status","active","requestId","unused-restore")));assertThat(restored).containsEntry("deleted",false).containsEntry("locationCode","");
+  var source=input(5,"optional-receipt");source.remove("location");var received=tx.execute(t->samples.create(source));long identity=number(received.get("sampleIdentityId"));assertThat(maps(map(received.get("balances")).get("positions"))).singleElement().satisfies(v->assertThat(v).containsEntry("site","CN").containsEntry("locationId",0L).containsEntry("name",""));
+  var request=new LinkedHashMap<String,Object>(Map.of("requestId","set-directory","site","CN","mode","all_onhand","targetLocationId",unusedId,"items",List.of(Map.of("identityId",identity,"version",registry.detail(identity).get("version")))));
+  var moved=tx.execute(t->actions.bulk("move",request));assertThat(map(moved.get("totals"))).containsEntry("movedQty",5L);tx.execute(t->actions.bulk("move",request));assertThat(number(map(registry.detail(identity).get("balances")).get("onhand"))).isEqualTo(5);
+  String before=jdbc.queryForObject("select jsonb_agg(to_jsonb(e) order by event_id)::text from plm_partner_event e where record_id=?",String.class,received.get("id"));
+  var current=locations.detail(unusedId);tx.execute(t->locations.update(unusedId,Map.of("version",current.get("version"),"name","改名柜","locationParts",Map.of("area","01","rack","002","shelf","03","box","004","sequence","05"),"requestId","rename-code")));
+  var projected=maps(map(registry.detail(identity).get("balances")).get("positions")).stream().filter(v->number(v.get("onhand"))>0).toList();assertThat(projected).singleElement().satisfies(v->assertThat(v).containsEntry("locationId",unusedId).containsEntry("name","改名柜").containsEntry("locationCode","01-002-03-004-05").containsEntry("onhand",5L));
+  assertThat(jdbc.queryForObject("select jsonb_agg(to_jsonb(e) order by event_id)::text from plm_partner_event e where record_id=?",String.class,received.get("id"))).isEqualTo(before);
+  var referenced=locations.detail(unusedId);assertThat(number(referenced.get("referenceCount"))).isPositive();assertThatThrownBy(()->tx.execute(t->locations.update(unusedId,Map.of("version",referenced.get("version"),"site","MX","requestId","bad-site")))).hasMessageContaining("不能改变站点");
+  var inactive=tx.execute(t->locations.delete(unusedId,Map.of("version",referenced.get("version"),"requestId","used-delete")));assertThat(inactive).containsEntry("deleted",false).containsEntry("referenced",true).containsEntry("status","inactive");
+ }
+ @Test void bulkMovesOnlySelectedSiteOnhandIncludingRetainedAndDamagedAndMxCannotReadOrMoveChina(){
+  var received=receive(12,"warehouse-stock");long batch=number(received.get("id")),identity=number(received.get("sampleIdentityId"));
+  var borrowed=tx.execute(t->samples.action(batch,"loan",Map.of("version",received.get("version"),"requestId","warehouse-loan","qty",2,"location","中国工程柜","date","2026-11-03","due","2026-11-05","person","借用人")));long loan=number(maps(map(borrowed.get("balances")).get("loans")).get(0).get("id"));
+  var returned=tx.execute(t->samples.action(batch,"return",Map.of("version",borrowed.get("version"),"requestId","warehouse-return","qty",1,"damaged",1,"loanId",loan,"location","中国工程柜","date","2026-11-03")));
+  tx.execute(t->samples.action(batch,"retain",Map.of("version",returned.get("version"),"requestId","warehouse-retain","qty",2,"location","中国工程柜","date","2026-11-03")));
+  var parcels=new SampleShipmentService(store,registry,mock(SupplierProfileService.class));var parcel=tx.execute(t->parcels.create(Map.of("requestId","warehouse-parcel","direction","mexico_outbound","destination","MX","rows",List.of(Map.of("sampleIdentityId",identity,"qty",2)))));long parcelId=number(parcel.get("id"));var sent=tx.execute(t->parcels.action(parcelId,"dispatched",Map.of("version",parcel.get("version"),"requestId","warehouse-dispatch","date","2026-11-03","tracking","QA")));
+  tx.execute(t->parcels.action(parcelId,"receive",Map.of("version",sent.get("version"),"requestId","warehouse-arrive","date","2026-11-03","rows",List.of(Map.of("rowId",maps(sent.get("rows")).get(0).get("rowId"),"goodQty",1)))));
+  var locations=new SampleLocationService(store);var cn=tx.execute(t->locations.create(Map.of("site","CN","name","同名柜","locationCode","01-02-03-04-05","requestId","cn-cabinet")));var mx=tx.execute(t->locations.create(Map.of("site","MX","name","同名柜","locationCode","01-02-03-04-05","requestId","mx-cabinet")));
+  var cnInput=Map.<String,Object>of("site","CN","mode","all_onhand","targetLocationId",cn.get("id"),"requestId","cn-stock-move","items",List.of(Map.of("identityId",identity,"version",registry.detail(identity).get("version"))));var result=tx.execute(t->actions.bulk("move",cnInput));assertThat(map(result.get("totals"))).containsEntry("movedQty",9L);assertThat(map(registry.detail(identity).get("balances"))).containsEntry("borrowed",1L).containsEntry("inTransit",1L).containsEntry("onhand",10L).containsEntry("retained",2L).containsEntry("damaged",1L);
+  String sourceBefore=jdbc.queryForObject("select data->'sourceSnapshot' from plm_partner_record where record_id=?",String.class,identity);role="mexico";user=2;
+  assertThatThrownBy(()->locations.page(Map.of("site","CN"))).hasMessageContaining("仅限墨西哥");assertThatThrownBy(()->tx.execute(t->actions.bulk("move",Map.of("site","MX","mode","all_onhand","targetLocationId",cn.get("id"),"requestId","cross-site","items",List.of(Map.of("identityId",identity,"version",registry.detail(identity).get("version"))))))).hasMessageContaining("仅限墨西哥");
+  var mxInput=Map.<String,Object>of("site","MX","mode","all_onhand","targetLocationId",mx.get("id"),"requestId","mx-stock-move","items",List.of(Map.of("identityId",identity,"version",registry.detail(identity).get("version"))));var local=tx.execute(t->actions.bulk("move",mxInput));assertThat(map(local.get("totals"))).containsEntry("movedQty",1L);var localReferences=locations.references(number(mx.get("id")));assertThat(localReferences).containsEntry("onhand",1L);assertThat(maps(localReferences.get("references"))).allSatisfy(reference->assertThat(reference).containsEntry("site","MX"));assertThat(localReferences.toString()).doesNotContain("sourceSnapshot","中国工程柜","shipment");tx.execute(t->actions.bulk("move",mxInput));assertThat(map(registry.detail(identity).get("balances"))).containsEntry("onhand",1L);assertThat(local.toString()).doesNotContain("sourceSnapshot","中国工程柜","旧柜");
+  assertThat(jdbc.queryForObject("select data->'sourceSnapshot' from plm_partner_record where record_id=?",String.class,identity)).isEqualTo(sourceBefore);
+  var clear=Map.<String,Object>of("site","MX","mode","clear_code","sourceLocationId",mx.get("id"),"requestId","mx-clear","items",List.of(Map.of("identityId",identity,"version",registry.detail(identity).get("version"))));tx.execute(t->actions.bulk("move",clear));assertThat(maps(map(registry.detail(identity).get("balances")).get("positions")).stream().filter(v->number(v.get("onhand"))>0)).singleElement().satisfies(v->assertThat(v).containsEntry("site","MX").containsEntry("locationId",0L).containsEntry("name",""));
+ }
+
+ Map<String,Object> warehouseQueryFixture(long style,long color,long cn,long mx,String request){return tx.execute(t->{var source=new LinkedHashMap<String,Object>(Map.of("sourceType","catalog","catalogStyleId",style,"supplierCode","SUP-A","phoneModelId",12L,"colorId",color,"colorName",color==10?"黑色":"紫色","catalogConfigurationKey","warehouse-query","name","同名款式","sourceSnapshot",Map.of("priceCents",99999,"private","国内原资料")));var head=registry.ensure(source,Map.of("requestId",request));long batch=store.create("sample","同名款式");source.put("status","active");store.save(batch,source);store.event(batch,"receive",Map.of("qty",cn+mx,"date","2026-11-03","location","cn","condition","good"),request+"-receive");if(mx>0)store.event(batch,"move",Map.of("qty",mx,"date","2026-11-03","location","CN","to","mx","condition","good"),request+"-old-move");registry.attach(batch,number(head.get("id")),Map.of("identityReason","历史样品间实物确认"));return samples.detail(batch);});}
+ @Test void warehouseStyleGroupingSupplierShortNameAndPaginationUseRealIdsRatherThanNames(){
+  var one=warehouseQueryFixture(81,10,1,2,"group-one");warehouseQueryFixture(81,11,1,1,"group-two");warehouseQueryFixture(82,10,1,0,"group-different");
+  var all=registry.page(Map.of("groupBy","style","size","1"));assertThat(all).containsEntry("totalElements",2L).containsEntry("totalSamples",3);assertThat(maps(all.get("content"))).hasSize(1);
+  var groups=maps(registry.page(Map.of("groupBy","style","size","50")).get("content"));var grouped=groups.stream().filter(g->number(g.get("catalogStyleId"))==81).findFirst().orElseThrow();assertThat(grouped).containsEntry("sampleCount",2).containsEntry("phoneCount",1).containsEntry("colorCount",2).containsEntry("cnOnhand",2L).containsEntry("mxOnhand",3L);
+  var expanded=registry.page(Map.of("groupKey",text(grouped.get("groupKey")),"page","2","size","1","supplierCode","SUP-A"));assertThat(expanded).containsEntry("totalElements",2L);assertThat(maps(expanded.get("content"))).hasSize(1);
+  jdbc.update("update plm_supplier_profile set deleted_flag=1 where supplier_code='SUP-A'");assertThat(registry.options(Map.of("keyword","A")).toString()).contains("SUP-A","实际原供方");assertThat(maps(registry.page(Map.of("keyword","A","groupBy","style")).get("content"))).hasSize(2);
+ }
+ @Test void warehouseMexicoProjectionSeparatesCountriesWithinOneOriginalBatchAndDoesNotReturnOtherParcelDetails(){
+  var batch=warehouseQueryFixture(83,10,5,3,"local-buckets");long bid=number(batch.get("id")),id=number(batch.get("sampleIdentityId"));
+  tx.execute(t->{store.event(bid,"loan",Map.of("qty",2,"date","2026-11-03","location","MX","condition","good","person","当地借用人","due","2026-11-10"),"local-loan");long parcel=store.create("sample_shipment","他人包裹");store.save(parcel,Map.of("name","他人包裹","status","dispatched","direction","mexico_outbound","receiverUserId",99));store.event(bid,"dispatch",Map.of("qty",1,"date","2026-11-03","location","cn","condition","good","shipmentId",parcel,"shipmentRowId","row","destination","隐藏运单地址"),"local-transit");return null;});
+  role="mexico";user=2;var local=registry.detail(id);assertThat(map(local.get("balances"))).containsEntry("onhand",1L).containsEntry("borrowed",2L).containsEntry("inTransit",1L);assertThat(maps(local.get("positions"))).allSatisfy(p->assertThat(p).containsEntry("site","MX"));assertThat(local.toString()).doesNotContain("sourceSnapshot","国内原资料","priceCents","receiverUserId","隐藏运单地址","receivedQty");
+  assertThat(registry.resolve(text(batch.get("sampleCode")))).containsEntry("type","identity");assertThatThrownBy(()->registry.page(Map.of("site","CN"))).hasMessageContaining("仅限墨西哥");
+ }
+ @Test void warehousePhotoPreviewAuthorizationRequiresAnActualLocalImagePhotoAndExcludesCostAndSourceDocuments(){
+  var local=warehouseQueryFixture(84,10,1,1,"local-photo");var china=warehouseQueryFixture(85,10,2,0,"china-photo");long bid=number(local.get("id")),id=number(local.get("sampleIdentityId"));
+  for(long file=901;file<=905;file++)jdbc.update("insert into plm_attachment(attachment_id,file_name,content_type) values(?,?,?)",file,"image-"+file,file==904?"application/pdf":"image/png");
+  jdbc.update("insert into plm_partner_file(record_id,attachment_id,purpose) values(?,901,'photo'),(?,902,'photo'),(?,902,'financial'),(?,903,'material'),(?,904,'photo'),(?,905,'photo')",bid,bid,bid,bid,bid,china.get("id"));
+  role="mexico";user=2;when(access.hasPermission("file:read")).thenReturn(true);registry.requirePhoto(id,901);for(long file:List.of(902L,903L,904L,905L)){long denied=file;assertThatThrownBy(()->registry.requirePhoto(id,denied)).hasMessageContaining("照片不存在或未获授权");}assertThatThrownBy(()->registry.requirePhoto(number(china.get("sampleIdentityId")),905)).hasMessageContaining("主码不存在或未获授权");
+ }
+
+ @Test void domesticInheritedMaterialImagesRemainVisibleWithoutBroadeningMexicoPhotos(){
+  var sample=warehouseQueryFixture(86,10,1,1,"material-image");long batch=number(sample.get("id")),identity=number(sample.get("sampleIdentityId"));jdbc.update("insert into plm_attachment(attachment_id,file_name,content_type) values(906,'原收样继承图片.png','image/png')");jdbc.update("insert into plm_partner_file(record_id,attachment_id,purpose) values(?,906,'material')",batch);
+  var domestic=maps(registry.page(Map.of()).get("content")).stream().filter(r->number(r.get("sampleIdentityId"))==identity).findFirst().orElseThrow();assertThat(maps(domestic.get("files"))).anyMatch(f->number(f.get("id"))==906);assertThat(map(domestic.get("photo"))).containsEntry("id",906L);registry.requirePhoto(identity,906);
+  role="mexico";user=2;when(access.hasPermission("file:read")).thenReturn(true);assertThat(maps(registry.detail(identity).get("files"))).isEmpty();assertThatThrownBy(()->registry.requirePhoto(identity,906)).hasMessageContaining("照片不存在或未获授权");
+ }
+
+ @Test void legacyCnAndMxLocationRequestsKeepTheirRecognizedCountryDuringUniqueBatchAllocation(){
+  for(String occupied:List.of("CN","MX")){
+   var batch=warehouseQueryFixture(occupied.equals("CN")?93:94,10,3,0,"legacy-site-"+occupied);long bid=number(batch.get("id")),identity=number(batch.get("sampleIdentityId"));String other=occupied.equals("CN")?"MX":"CN";
+   jdbc.update("update plm_partner_event set data=jsonb_set(data,'{location}',to_jsonb(?::text)) where record_id=? and action='receive'",occupied.toLowerCase(Locale.ROOT),bid);
+   String before=jdbc.queryForObject("select jsonb_agg(to_jsonb(e) order by event_id)::text from plm_partner_event e where record_id=?",String.class,bid);long version=number(registry.detail(identity).get("version"));
+   var wrong=Map.<String,Object>of("version",version,"requestId","wrong-site-"+occupied,"qty",1,"location",other,"date","2026-11-03","due","2026-11-04","person","借用人");
+   assertThatThrownBy(()->tx.execute(t->actions.action(identity,"loan",wrong))).hasMessageContaining("数量不足");assertThatThrownBy(()->tx.execute(t->samples.action(bid,"loan",Map.of("version",batch.get("version"),"requestId","wrong-sp-site-"+occupied,"qty",1,"location",other,"date","2026-11-03","due","2026-11-04","person","借用人")))).hasMessageContaining("数量不足");
+   assertThat(jdbc.queryForObject("select jsonb_agg(to_jsonb(e) order by event_id)::text from plm_partner_event e where record_id=?",String.class,bid)).isEqualTo(before);assertThat(map(registry.detail(identity).get("balances"))).containsEntry("onhand",3L).containsEntry("borrowed",0L);assertThat(number(registry.detail(identity).get("version"))).isEqualTo(version);
+   var command=Map.<String,Object>of("version",version,"requestId","same-site-"+occupied,"qty",1,"location",occupied,"date","2026-11-03","due","2026-11-04","person","借用人");var saved=tx.execute(t->actions.action(identity,"loan",command));assertThat(map(saved.get("balances"))).containsEntry("onhand",2L).containsEntry("borrowed",1L);tx.execute(t->actions.action(identity,"loan",command));assertThat(map(registry.detail(identity).get("balances"))).containsEntry("borrowed",1L);assertThat(jdbc.queryForObject("select data->>'site' from plm_partner_event where record_id=? and action='loan'",String.class,bid)).isEqualTo(occupied);
+   assertThat(jdbc.queryForObject("select jsonb_agg(to_jsonb(e) order by event_id)::text from plm_partner_event e where record_id=? and action<>'loan'",String.class,bid)).isEqualTo(before);
+   long loan=number(store.events(bid).stream().filter(e->"loan".equals(e.get("action"))).findFirst().orElseThrow().get("id"));var current=samples.detail(bid);assertThatThrownBy(()->tx.execute(t->samples.action(bid,"return",Map.of("version",current.get("version"),"requestId","wrong-return-"+occupied,"qty",1,"loanId",loan,"location",other,"date","2026-11-03")))).hasMessageContaining("跨站点归还");assertThat(map(samples.detail(bid).get("balances"))).containsEntry("onhand",2L).containsEntry("borrowed",1L);
+   var returned=tx.execute(t->samples.action(bid,"return",Map.of("version",current.get("version"),"requestId","same-return-"+occupied,"qty",1,"loanId",loan,"location",occupied,"date","2026-11-03")));assertThat(map(returned.get("balances"))).containsEntry("onhand",3L).containsEntry("borrowed",0L);assertThat(jdbc.queryForObject("select jsonb_agg(to_jsonb(e) order by event_id)::text from plm_partner_event e where record_id=? and action not in ('loan','return')",String.class,bid)).isEqualTo(before);
+  }
+ }
+
+ @Test void locationOptionsReadTheDirectoryOnceWithoutReplayingStockPerOption(){
+  var locations=new SampleLocationService(store);for(int i=0;i<3;i++){int index=i;tx.execute(t->locations.create(Map.of("site","CN","name","下拉位置"+index,"requestId","dropdown-"+index)));}
+  var counted=spy(jdbc);var service=new SampleLocationService(new PartnerStore(counted,store.json,access,store.audit));var result=service.options(Map.of("site","CN"));assertThat(maps(result.get("content"))).hasSize(3);verify(counted,times(1)).queryForList(anyString(),any(Object[].class));clearInvocations(counted);var page=service.page(Map.of("site","CN"));assertThat(maps(page.get("content"))).hasSize(3);verify(counted,times(2)).queryForList(anyString(),any(Object[].class));
+ }
+
+ @Test void locationReferencesExposeOnlyVisibleLocalSampleFactsWhileHiddenReferencesStillPreventDeletion(){
+  var one=receive(3,"reference-visible");var two=receive(7,"reference-hidden");long visibleBatch=number(one.get("id")),identity=number(one.get("sampleIdentityId"));var locations=new SampleLocationService(store);var location=tx.execute(t->locations.create(Map.of("site","CN","name","共用位置","requestId","reference-location")));long locationId=number(location.get("id"));tx.execute(t->actions.bulk("move",Map.of("site","CN","mode","all_onhand","targetLocationId",locationId,"requestId","reference-move","items",List.of(Map.of("identityId",identity,"version",registry.detail(identity).get("version"))))));
+  restricted=true;user=2;allowed.add(visibleBatch);var scoped=locations.references(locationId);assertThat(scoped).containsEntry("referenced",true).containsEntry("onhand",3L).containsEntry("batches",1);var visible=maps(scoped.get("references"));assertThat(visible).filteredOn(v->v.get("type").equals("sample")).singleElement().satisfies(v->assertThat(v).containsEntry("sampleCode",one.get("sampleCode")).containsEntry("onhand",3L));assertThat(visible).filteredOn(v->v.get("type").equals("event")).singleElement().satisfies(v->assertThat(v).containsEntry("site","CN").containsEntry("action","move").containsEntry("qty",3L));assertThat(scoped.toString()).doesNotContain("sourceSnapshot","receiptRequestHash",text(two.get("code")));
+  allowed.clear();var hidden=locations.references(locationId);assertThat(hidden).containsEntry("referenced",true).containsEntry("referenceCount",0L).containsEntry("onhand",0L).containsEntry("batches",0).containsEntry("references",List.of());assertThat(maps(locations.page(Map.of("site","CN")).get("content"))).singleElement().satisfies(v->assertThat(v).containsEntry("referenced",true).doesNotContainKey("onhand"));
+  var inactive=tx.execute(t->locations.delete(locationId,Map.of("version",location.get("version"),"requestId","hidden-reference-delete")));assertThat(inactive).containsEntry("deleted",false).containsEntry("referenced",true).containsEntry("onhand",0L);restricted=false;assertThat(locations.references(locationId)).containsEntry("onhand",10L);
+ }
+
+ @Test void oneSchemaReceiptPartialMoveDispatchPartialArrivalLocalMoveAndScanKeepChinaUnchanged(){
+  jdbc.execute("alter table sys_user add column display_name text,add column status text default 'active',add column deleted_flag int default 0;create table plm_pilot_account(user_id bigint primary key,role_code text,permissions jsonb);insert into plm_pilot_account values(2,'mexico','[\"task:arrival\"]');update sys_user set display_name='墨西哥接收人' where user_id=2");
+  String date=java.time.LocalDate.now().toString();var locations=new SampleLocationService(store);var cnA=tx.execute(t->locations.create(Map.of("site","CN","name","流程中国原柜","requestId","flow-cn-a")));var cnB=tx.execute(t->locations.create(Map.of("site","CN","name","流程中国移入柜","requestId","flow-cn-b")));var mxA=tx.execute(t->locations.create(Map.of("site","MX","name","流程墨西哥签收柜","requestId","flow-mx-a")));var mxB=tx.execute(t->locations.create(Map.of("site","MX","name","流程墨西哥移入柜","requestId","flow-mx-b")));
+  var receipt=input(10,"flow-receipt");receipt.put("locationId",cnA.get("id"));receipt.put("location",cnA.get("name"));var received=tx.execute(t->samples.create(receipt));long batch=number(received.get("id")),identity=number(received.get("sampleIdentityId"));String sampleCode=text(received.get("sampleCode"));assertThat(count("sample")).isEqualTo(2);assertThat(count("sample_identity")).isEqualTo(1);
+  var partial=tx.execute(t->samples.action(batch,"move",Map.of("site","CN","version",received.get("version"),"requestId","flow-partial-move","date",date,"qty",4,"locationId",cnA.get("id"),"toLocationId",cnB.get("id"))));var cnPositions=maps(map(partial.get("balances")).get("positions"));assertThat(cnPositions).anySatisfy(p->assertThat(p).containsEntry("locationId",cnA.get("id")).containsEntry("onhand",6L));assertThat(cnPositions).anySatisfy(p->assertThat(p).containsEntry("locationId",cnB.get("id")).containsEntry("onhand",4L));
+  var parcels=new SampleShipmentService(store,registry,mock(SupplierProfileService.class));var planned=tx.execute(t->parcels.create(Map.of("direction","mexico_outbound","destination","墨西哥样品间","receiverUserId",2,"requestId","flow-parcel","rows",List.of(Map.of("sampleIdentityId",identity,"qty",3,"site","CN","locationId",cnB.get("id"),"location",cnB.get("name"))))));long parcel=number(planned.get("id"));var dispatched=tx.execute(t->parcels.action(parcel,"dispatched",Map.of("version",planned.get("version"),"requestId","flow-dispatch","date",date,"tracking","FLOW-QA")));assertThat(map(dispatched.get("totals"))).containsEntry("inTransit",3L);
+  var afterDispatch=SampleLedger.replay(store.events(batch)).view();assertThat(maps(afterDispatch.get("positions")).stream().filter(p->"CN".equals(p.get("site"))).mapToLong(p->number(p.get("onhand"))).sum()).isEqualTo(7);
+  role="mexico";user=2;var arrived=tx.execute(t->parcels.action(parcel,"receive",Map.of("version",dispatched.get("version"),"requestId","flow-partial-arrival","date",date,"site","MX","locationId",mxA.get("id"),"rows",List.of(Map.of("rowId",maps(dispatched.get("rows")).get(0).get("rowId"),"goodQty",1,"damagedQty",1)))));assertThat(map(arrived.get("totals"))).containsEntry("inTransit",1L).containsEntry("receivedGood",1L).containsEntry("receivedDamaged",1L);
+  var local=registry.detail(identity);assertThat(map(local.get("balances"))).containsEntry("onhand",2L).containsEntry("damaged",1L);tx.execute(t->actions.action(identity,"move",Map.of("site","MX","version",local.get("version"),"requestId","flow-local-move","date",date,"qty",1,"condition","good","locationId",mxA.get("id"),"toLocationId",mxB.get("id"))));
+  long eventCount=jdbc.queryForObject("select count(*) from plm_partner_event",Long.class);var scanned=registry.resolve(sampleCode);assertThat(scanned).containsEntry("type","identity").containsEntry("sampleIdentityId",identity).containsEntry("sampleCode",sampleCode);var scannedIdentity=map(scanned.get("identity"));assertThat(map(scannedIdentity.get("balances"))).containsEntry("onhand",2L).containsEntry("available",1L).containsEntry("damaged",1L).containsEntry("inTransit",1L);var localPositions=maps(scannedIdentity.get("positions"));assertThat(localPositions).allSatisfy(p->assertThat(p).containsEntry("site","MX"));assertThat(localPositions).anySatisfy(p->assertThat(p).containsEntry("locationId",mxB.get("id")).containsEntry("onhand",1L));assertThat(scanned.toString()).doesNotContain("流程中国原柜","流程中国移入柜","sourceSnapshot","receivedQty","receiverUserId");assertThat(jdbc.queryForObject("select count(*) from plm_partner_event",Long.class)).isEqualTo(eventCount);
+  var finalBalance=SampleLedger.replay(store.events(batch)).view();assertThat(finalBalance).containsEntry("onhand",9L).containsEntry("inTransit",1L);assertThat(maps(finalBalance.get("positions")).stream().filter(p->"CN".equals(p.get("site"))).mapToLong(p->number(p.get("onhand"))).sum()).isEqualTo(7);assertThat(count("sample")).isEqualTo(2);assertThat(count("sample_identity")).isEqualTo(1);
+ }
+
+ @Test void receiptCorrectionsKeepTheOriginalWarehouseIdentityAfterDirectoryRename(){
+  var locations=new SampleLocationService(store);
+  var location=tx.execute(t->locations.create(Map.of("site","CN","name","更正前中国柜","locationCode","01-002-03-004-05","requestId","intersection-cn-location")));
+  long locationId=number(location.get("id"));
+  var input=input(4,"intersection-cn-receipt");input.put("locationId",locationId);input.put("location",location.get("name"));
+  var batch=tx.execute(t->samples.create(input));long id=number(batch.get("id")),identity=number(batch.get("sampleIdentityId"));
+  String originalReceipt=jdbc.queryForObject("select to_jsonb(e)::text from plm_partner_event e where record_id=? and action='receive'",String.class,id);
+  String sourceSnapshot=jdbc.queryForObject("select data->'sourceSnapshot' from plm_partner_record where record_id=?",String.class,id);
+  var original=map(store.events(id).stream().filter(e->"receive".equals(e.get("action"))).findFirst().orElseThrow().get("data"));
+  assertThat(original).containsEntry("site","CN").containsEntry("location","更正前中国柜").containsEntry("locationCode","01-002-03-004-05");assertThat(number(original.get("locationId"))).isEqualTo(locationId);
+  tx.execute(t->locations.update(locationId,Map.of("version",location.get("version"),"name","更正后中国柜","locationCode","09-008-07-006-05","requestId","intersection-rename-location")));
+  var command=receiptCorrection(batch,"intersection-correct-six");command.put("qty",6L);
+  tx.execute(t->actions.action(identity,"correct_receipt",command));
+  var corrected=samples.detail(id);assertThat(corrected).containsEntry("effectiveReceivedQty",6L).containsEntry("receivedQty",4).containsEntry("receiptStatus","active");
+  assertThat(maps(map(corrected.get("balances")).get("positions"))).singleElement().satisfies(p->assertThat(p).containsEntry("site","CN").containsEntry("locationId",locationId).containsEntry("name","更正前中国柜").containsEntry("locationCode","01-002-03-004-05").containsEntry("onhand",6L));
+  assertThat(maps(registry.detail(identity).get("positions"))).singleElement().satisfies(p->assertThat(p).containsEntry("site","CN").containsEntry("locationId",locationId).containsEntry("name","更正后中国柜").containsEntry("locationCode","09-008-07-006-05").containsEntry("onhand",6L));
+  long afterCorrection=jdbc.queryForObject("select count(*) from plm_partner_event",Long.class);
+  tx.execute(t->actions.action(identity,"correct_receipt",command));
+  assertThat(jdbc.queryForObject("select count(*) from plm_partner_event",Long.class)).isEqualTo(afterCorrection);
+  tx.execute(t->actions.action(identity,"void_receipt",receiptCorrection(batch,"intersection-void-six")));
+  var voided=samples.detail(id);assertThat(voided).containsEntry("effectiveReceivedQty",0L).containsEntry("receiptStatus","voided");
+  assertThat(maps(map(voided.get("balances")).get("positions"))).singleElement().satisfies(p->assertThat(p).containsEntry("site","CN").containsEntry("locationId",locationId).containsEntry("onhand",0L));
+  var corrections=store.events(id).stream().filter(e->"receipt_correction".equals(e.get("action"))).toList();assertThat(corrections).hasSize(2);
+  for(var event:corrections){var data=map(event.get("data"));for(String key:List.of("site","locationId","location","locationCode","locationParts"))assertThat(data.get(key)).as("original receipt %s",key).isEqualTo(original.get(key));}
+  assertThat(jdbc.queryForObject("select to_jsonb(e)::text from plm_partner_event e where record_id=? and action='receive'",String.class,id)).isEqualTo(originalReceipt);
+  assertThat(jdbc.queryForObject("select data->'sourceSnapshot' from plm_partner_record where record_id=?",String.class,id)).isEqualTo(sourceSnapshot);
+  assertThat(registry.page(Map.of("supplierCode","SUP-A","groupBy","style","size","1"))).containsEntry("totalElements",0L);
+  var deletedPage=registry.page(Map.of("receiptStatus","voided","supplierCode","SUP-A","groupBy","style","size","1"));
+  assertThat(deletedPage).containsEntry("totalElements",1L).containsEntry("totalPages",1L);assertThat(maps(deletedPage.get("content"))).hasSize(1);
+  assertThat(maps(registry.page(Map.of("receiptStatus","voided","supplierCode","SUP-A","groupBy","style","size","1","page","2")).get("content"))).isEmpty();
+ }
+
+ @Test void mixedWarehouseBatchDoesNotGiveMexicoReceiptCorrectionOrVoidedCountAccess(){
+  jdbc.execute("alter table sys_user add column display_name text,add column status text default 'active',add column deleted_flag int default 0;create table plm_pilot_account(user_id bigint primary key,role_code text,permissions jsonb);insert into plm_pilot_account values(2,'mexico','[\"task:arrival\"]');update sys_user set display_name='交集墨西哥接收人' where user_id=2");
+  String date=java.time.LocalDate.now().toString();var locations=new SampleLocationService(store);
+  var cn=tx.execute(t->locations.create(Map.of("site","CN","name","不可公开国内交集柜","requestId","intersection-private-cn")));
+  var mx=tx.execute(t->locations.create(Map.of("site","MX","name","墨西哥交集柜","requestId","intersection-local-mx")));
+  var input=input(10,"intersection-mixed-receipt");input.put("locationId",cn.get("id"));input.put("location",cn.get("name"));
+  var batch=tx.execute(t->samples.create(input));long id=number(batch.get("id")),identity=number(batch.get("sampleIdentityId"));
+  var extra=input(3,"intersection-voided-receipt");extra.put("locationId",cn.get("id"));extra.put("location",cn.get("name"));
+  var voided=tx.execute(t->samples.create(extra));long voidedId=number(voided.get("id"));assertThat(voided.get("sampleIdentityId")).isEqualTo(identity);
+  tx.execute(t->actions.action(identity,"void_receipt",receiptCorrection(voided,"intersection-void-before-shipping")));
+  long voidedVersion=number(samples.detail(voidedId).get("version"));
+  var parcels=new SampleShipmentService(store,registry,mock(SupplierProfileService.class));
+  var planned=tx.execute(t->parcels.create(Map.of("direction","mexico_outbound","destination","墨西哥样品间","receiverUserId",2,"requestId","intersection-mixed-parcel","rows",List.of(Map.of("sampleIdentityId",identity,"qty",2,"site","CN","locationId",cn.get("id"),"location",cn.get("name"))))));
+  long parcel=number(planned.get("id"));
+  var dispatched=tx.execute(t->parcels.action(parcel,"dispatched",Map.of("version",planned.get("version"),"requestId","intersection-mixed-dispatch","date",date,"tracking","PRIVATE-CN-TRACKING")));
+  role="mexico";user=2;
+  tx.execute(t->parcels.action(parcel,"receive",Map.of("version",dispatched.get("version"),"requestId","intersection-mixed-arrival","date",date,"site","MX","locationId",mx.get("id"),"rows",List.of(Map.of("rowId",maps(dispatched.get("rows")).get(0).get("rowId"),"goodQty",2)))));
+  long batchVersion=jdbc.queryForObject("select version from plm_partner_record where record_id=?",Long.class,id);
+  var local=registry.detail(identity);assertThat(map(local.get("balances"))).containsEntry("onhand",2L);
+  assertThat(maps(local.get("positions"))).singleElement().satisfies(p->assertThat(p).containsEntry("site","MX").containsEntry("locationId",mx.get("id")).containsEntry("onhand",2L));
+  assertThat(maps(local.get("batches"))).singleElement().satisfies(b->assertThat(b).containsEntry("id",id).doesNotContainKeys("receivedQty","effectiveReceivedQty","sourceSnapshot","events"));
+  assertThat(local).doesNotContainKeys("receivedQty","effectiveReceivedQty","sourceSnapshot","events");
+  assertThat(local.toString()).doesNotContain("不可公开国内交集柜","PRIVATE-CN-TRACKING","receiptChangeBlockedReason","receiverUserId");
+  var scanned=registry.resolve(text(batch.get("sampleCode")));assertThat(map(map(scanned.get("identity")).get("balances"))).containsEntry("onhand",2L);
+  assertThat(scanned.toString()).doesNotContain("不可公开国内交集柜","PRIVATE-CN-TRACKING","sourceSnapshot","receivedQty","effectiveReceivedQty");
+  String records=jdbc.queryForObject("select jsonb_agg(to_jsonb(r) order by record_id)::text from plm_partner_record r where record_id in (?,?,?)",String.class,id,voidedId,identity);
+  String events=jdbc.queryForObject("select jsonb_agg(to_jsonb(e) order by event_id)::text from plm_partner_event e",String.class);
+  for(String action:List.of("correct_receipt","void_receipt")){
+   var denied=new LinkedHashMap<String,Object>(Map.of("site","MX","version",local.get("version"),"batchId",id,"batchVersion",batchVersion,"requestId","intersection-mx-"+action,"reason","墨西哥不更改国内收样","qty",12L));
+   assertThatThrownBy(()->tx.execute(t->actions.action(identity,action,denied))).hasMessageContaining("墨西哥库存仅能办理本站移库");
+  }
+  var restore=Map.<String,Object>of("site","MX","version",local.get("version"),"batchId",voidedId,"batchVersion",voidedVersion,"requestId","intersection-mx-count","actual",1,"date",date,"reason","不能用盘点恢复作废登记");
+  assertThatThrownBy(()->tx.execute(t->actions.action(identity,"count",restore))).hasMessageContaining("墨西哥库存仅能办理本站移库");
+  assertThatThrownBy(()->tx.execute(t->samples.action(voidedId,"count",Map.of("version",voidedVersion,"requestId","intersection-mx-direct-count","actual",1,"date",date,"reason","不能用原批次入口恢复作废登记")))).hasMessageContaining("permission forbidden");
+  assertThat(jdbc.queryForObject("select jsonb_agg(to_jsonb(r) order by record_id)::text from plm_partner_record r where record_id in (?,?,?)",String.class,id,voidedId,identity)).isEqualTo(records);
+  assertThat(jdbc.queryForObject("select jsonb_agg(to_jsonb(e) order by event_id)::text from plm_partner_event e",String.class)).isEqualTo(events);
+  var finalBalance=SampleLedger.replay(store.events(id)).view();assertThat(finalBalance).containsEntry("onhand",10L);
+  assertThat(maps(finalBalance.get("positions")).stream().filter(p->"CN".equals(p.get("site"))).mapToLong(p->number(p.get("onhand"))).sum()).isEqualTo(8L);
+  assertThat(SampleLedger.replay(store.events(voidedId)).view()).containsEntry("onhand",0L);
+ }
+
 
 }

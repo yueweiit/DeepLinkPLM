@@ -57,4 +57,20 @@ class SampleShipmentLedgerTest {
   var parcel=new LinkedHashMap<String,Object>(Map.of("rows",List.of(first,second),"status","dispatched"));SampleShipmentService.setReceiptState(parcel);assertThat(parcel).containsEntry("status","partially_received");assertThat(SampleShipmentService.totals(parcel)).containsEntry("dispatched",8L).containsEntry("inTransit",5L);
   first.put("confirmedLoss",2L);second.put("receivedGood",3L);SampleShipmentService.setReceiptState(parcel);assertThat(parcel).containsEntry("status","received");assertThat(SampleShipmentService.totals(parcel)).containsEntry("inTransit",0L);
  }
+ @Test void siteAndDirectoryIdDefineBucketsWhileLegacySitesOnlyProjectKnownValues(){
+  var historical=List.of(Map.<String,Object>of("id",1L,"action","receive","data",data("qty",2,"location","cn")),Map.<String,Object>of("id",2L,"action","receive","data",data("qty",3,"location","mx")),Map.<String,Object>of("id",3L,"action","receive","data",data("qty",4,"location","未识别旧柜")));
+  var positions=maps(SampleLedger.replay(historical).view().get("positions"));assertThat(positions).anySatisfy(p->assertThat(p).containsEntry("site","CN").containsEntry("name",""));assertThat(positions).anySatisfy(p->assertThat(p).containsEntry("site","MX").containsEntry("name",""));assertThat(positions).anySatisfy(p->assertThat(p).containsEntry("site","").containsEntry("name","未识别旧柜"));
+  assertThat(new SampleLocations.Position("CN",1,"旧名","01-02-03-04-05")).isEqualTo(new SampleLocations.Position("CN",1,"改名",""));assertThat(new SampleLocations.Position("CN",1,"同名","01-02-03-04-05")).isNotEqualTo(new SampleLocations.Position("MX",2,"同名","01-02-03-04-05"));
+  var blank=data("locationParts",Map.of("area","","rack","","shelf","","box","","sequence",""));SampleLocations.normalize(blank,"location");assertThat(blank).containsEntry("locationCode","");assertThatThrownBy(()->SampleLocations.normalize(data("locationParts",Map.of("area","01")),"location")).hasMessageContaining("完整填写");
+ }
+
+ @Test void legacySitePlaceholderNeverAllocatesFromTheOtherCountriesOnlyBucket(){
+  for(String occupied:List.of("CN","MX")){
+   String requested=occupied.equals("CN")?"MX":"CN";var historical=List.of(Map.<String,Object>of("id",1L,"action","receive","data",data("qty",3,"location",occupied.toLowerCase(Locale.ROOT))));var command=data("qty",1,"location",requested,"person","借用人","due","2026-01-02");
+   assertThatThrownBy(()->SampleLedger.prepare(SampleLedger.replay(historical),"SP-1","loan",command)).hasMessageContaining("数量不足");assertThat(SampleLedger.replay(historical).view()).containsEntry("onhand",3L).containsEntry("borrowed",0L);
+   command.put("location",occupied);var same=SampleLedger.prepare(SampleLedger.replay(historical),"SP-1","loan",command);assertThat(same).containsEntry("site",occupied).containsEntry("location","").containsEntry("qty",1L);assertThat(map(historical.get(0).get("data"))).containsEntry("location",occupied.toLowerCase(Locale.ROOT));
+   var loaned=new ArrayList<Map<String,Object>>(historical);loaned.add(Map.of("id",2L,"action","loan","data",same));assertThatThrownBy(()->SampleLedger.prepare(SampleLedger.replay(loaned),"SP-1","return",data("qty",1,"loanId",2L,"location",requested))).hasMessageContaining("跨站点归还");assertThat(SampleLedger.replay(loaned).view()).containsEntry("onhand",2L).containsEntry("borrowed",1L);var returned=SampleLedger.prepare(SampleLedger.replay(loaned),"SP-1","return",data("qty",1,"loanId",2L,"location",occupied));assertThat(returned).containsEntry("site",occupied);
+  }
+ }
+
 }

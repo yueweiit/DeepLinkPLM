@@ -11,9 +11,11 @@ import static com.yuewei.plm.module.partner.PartnerValues.*;
 
 @RestController @RequiredArgsConstructor @RequestMapping("/api/v1/sample-identities")
 public class SampleIdentityController {
- private final SampleIdentityRegistry identities;private final SampleIdentityActions actions;private final PartnerSampleService samples;private final PartnerVisibility visibility;
+ private final SampleIdentityRegistry identities;private final SampleIdentityActions actions;private final PartnerSampleService samples;private final PartnerVisibility visibility;private final com.yuewei.plm.module.attachment.service.AttachmentService attachments;
  private Object ok(Object data,HttpServletRequest r){return ResponseVO.success(visibility.redact(data),RequestIdUtil.getRequestId(r),OffsetDateTime.now());}
  @GetMapping public Object page(@RequestParam Map<String,String> query,HttpServletRequest r){return ok(identities.page(query),r);}
+ @GetMapping("/options") public Object options(@RequestParam Map<String,String> query,HttpServletRequest r){return ok(identities.options(query),r);}
+ @GetMapping("/{id}/photos/{fileId}/preview") public org.springframework.http.ResponseEntity<org.springframework.core.io.Resource> photo(@PathVariable long id,@PathVariable long fileId,HttpServletRequest r){var photo=attachments.previewSamplePhoto(id,fileId,r);return org.springframework.http.ResponseEntity.ok().contentType(org.springframework.http.MediaType.parseMediaType(photo.contentType())).body(photo.resource());}
  @GetMapping("/resolve") public Object resolve(@RequestParam String code,HttpServletRequest r){return ok(identities.resolve(code),r);}
  @GetMapping("/candidates") public Object candidates(@RequestParam Map<String,String> input,HttpServletRequest r){var request=new LinkedHashMap<String,Object>(input);if(number(input.get("batchId"))>0){var b=samples.detail(number(input.get("batchId")));return ok(identities.candidates(b,request),r);}return ok(identities.candidates(samples.identitySource(request),request),r);}
  @PostMapping("/bulk-actions/{action}") public Object bulk(@PathVariable String action,@RequestBody Map<String,Object> input,HttpServletRequest r){return ok(actions.bulk(action,input),r);}

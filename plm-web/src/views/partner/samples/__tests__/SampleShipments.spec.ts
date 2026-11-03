@@ -6,17 +6,17 @@ import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
 import {useUserStore} from '@/stores/user'
 import Shipments from '../SampleShipments.vue'
 const api=vi.hoisted(()=>Object.fromEntries(['sampleShipments','sampleShipment','sampleIdentities','sampleIdentity','sampleShipmentOptions','saveSampleShipment','deleteSampleShipment','sampleShipmentAction','createSampleIdentity'].map(key=>[key,vi.fn()])))
-const source=vi.hoisted(()=>({head:vi.fn(),row:vi.fn()}));vi.mock('@/api/modules/sampleManagement',()=>api)
-vi.mock('@/api/modules/partner',()=>({newRequestId:()=>crypto.randomUUID(),partnerOptions:async()=>({suppliers:[{code:'SUP-X',name:'真实供应商'}]})}))
+const source=vi.hoisted(()=>({head:vi.fn(),row:vi.fn(),options:vi.fn()}));vi.mock('@/api/modules/sampleManagement',()=>api)
+vi.mock('@/api/modules/partner',()=>({newRequestId:()=>crypto.randomUUID(),partnerOptions:source.options}))
 vi.mock('@/api/modules/partnerSelections',()=>({selectionDetail:source.head,selectionRow:source.row}))
-vi.mock('../../PartnerFiles.vue',()=>({default:{template:'<div>原授权图片附件组件</div>'}}))
+vi.mock('../../PartnerFiles.vue',()=>({default:{name:'PartnerFiles',template:'<div>原授权图片附件组件</div>'}}))
 vi.mock('../../selection/SelectionReceiptDialog.vue',()=>({default:{name:'SelectionReceiptDialog',props:['id','version','rows','supplierShipmentId'],template:'<div>原批量实际收样表</div>'}}))
 vi.mock('../SampleShipmentActionDialog.vue',()=>({default:{name:'SampleShipmentActionDialog',props:['shipment','action'],template:'<div>实际动作表</div>'}}))
 const shipment=(status='draft')=>({id:9,code:'SJ-000009',name:'供应商寄样5件',version:1,status,direction:'supplier_inbound',selectionId:7,supplierCode:'SUP-X',rows:[{rowId:'parcel-1',selectionRowId:'row-1',name:'透明壳',specName:'A40',qty:5,receivedGood:3,receivedDamaged:0,confirmedLoss:0,inTransit:2}],totals:{planned:5,dispatched:status==='draft'?0:5,receivedGood:status==='draft'?0:3,receivedDamaged:0,confirmedLoss:0,inTransit:status==='draft'?0:2},receiptContext:{selectionId:7,supplierShipmentId:9,rows:[{rowId:'parcel-1',selectionRowId:'row-1',remainingQty:2}]},events:[{id:1,action:'dispatched',data:{date:'2026-10-27',tracking:'TRACK-9'}}]})
 let wrapper:VueWrapper
-beforeEach(()=>{vi.clearAllMocks();setActivePinia(createPinia());const user=useUserStore();user.token='engineer';user.profile={userId:1} as never;user.permissions=['samples:write'];api.sampleShipments.mockResolvedValue({content:[shipment()],page:1,size:50,totalElements:1,totalPages:1});api.sampleShipment.mockResolvedValue(shipment());api.sampleShipmentOptions.mockResolvedValue({receivers:[{id:81,name:'墨西哥工程师'}]});api.sampleIdentities.mockResolvedValue({content:[]});api.saveSampleShipment.mockImplementation(async data=>({...shipment(),...data,id:9,version:1}));source.head.mockResolvedValue({id:7,version:3,name:'原选品目录'});source.row.mockResolvedValue({rowId:'row-1',rowVersion:2,name:'透明壳',supplierCode:'SUP-X',modelText:'A40',phoneModelIds:[40],catalogStyleId:3})})
+beforeEach(()=>{vi.clearAllMocks();setActivePinia(createPinia());const user=useUserStore();user.token='engineer';user.profile={userId:1} as never;user.permissions=['samples:write'];source.options.mockResolvedValue({suppliers:[{code:'SUP-X',name:'真实供应商'}]});api.sampleShipments.mockResolvedValue({content:[shipment()],page:1,size:50,totalElements:1,totalPages:1});api.sampleShipment.mockResolvedValue(shipment());api.sampleShipmentOptions.mockResolvedValue({receivers:[{id:81,name:'墨西哥工程师'}]});api.sampleIdentities.mockResolvedValue({content:[]});api.saveSampleShipment.mockImplementation(async data=>({...shipment(),...data,id:9,version:1}));source.head.mockResolvedValue({id:7,version:3,name:'原选品目录'});source.row.mockResolvedValue({rowId:'row-1',rowVersion:2,name:'透明壳',supplierCode:'SUP-X',modelText:'A40',phoneModelIds:[40],catalogStyleId:3})})
 afterEach(()=>{wrapper?.unmount();document.body.innerHTML=''})
-async function start(path='/partner-samples?view=shipments'){const router=createRouter({history:createMemoryHistory(),routes:[{path:'/partner-samples',component:Shipments},{path:'/partner-selections',component:{template:'<div>原选品目录</div>'}}]});await router.push(path);wrapper=mount({template:'<router-view/>'},{global:{plugins:[router,ElementPlus],stubs:{Teleport:true,ElSelect:{props:['modelValue','placeholder'],emits:['update:modelValue','change'],template:'<select :value="modelValue" @change="$emit(\'update:modelValue\',$event.target.value);$emit(\'change\',$event.target.value)"><slot/></select>'},ElOption:{props:['value','label'],template:'<option :value="value">{{label}}</option>'}}},attachTo:document.body});await flushPromises();return router}
+async function start(path='/partner-samples?view=shipments'){const router=createRouter({history:createMemoryHistory(),routes:[{path:'/samples',component:Shipments},{path:'/partner-samples',component:Shipments},{path:'/partner-selections',component:{template:'<div>原选品目录</div>'}}]});await router.push(path);wrapper=mount({template:'<router-view/>'},{global:{plugins:[router,ElementPlus],stubs:{Teleport:true,ElSelect:{props:['modelValue','placeholder'],emits:['update:modelValue','change'],template:'<select :value="modelValue" @change="$emit(\'update:modelValue\',$event.target.value);$emit(\'change\',$event.target.value)"><slot/></select>'},ElOption:{props:['value','label'],template:'<option :value="value">{{label}}</option>'}}},attachTo:document.body});await flushPromises();return router}
 const click=async(text:string)=>{await wrapper.findAll('button').find(b=>b.text()===text)!.trigger('click');await flushPromises()}
 describe('supplier source and sample parcel UI',()=>{
  it('starts an inbound record from its original selected source without a pre-existing SY or a physical receipt',async()=>{const router=await start('/partner-samples?view=shipments&newShipment=supplier_inbound&selectionId=7&selectionRowIds=row-1');expect(wrapper.findAllComponents(ElInput).some(i=>i.props('modelValue')==='原选品目录 · 供应商寄样')).toBe(true);const quantity=wrapper.findAllComponents(ElInput).find(i=>String(i.props('ariaLabel')||'').startsWith('拟寄数量'))!;expect(quantity.props('modelValue')).toBe('');quantity.vm.$emit('update:modelValue','5');await click('保存草稿');expect(api.saveSampleShipment).toHaveBeenCalledWith(expect.objectContaining({direction:'supplier_inbound',selectionId:7,supplierCode:'SUP-X',origin:'',destination:'',rows:[expect.objectContaining({selectionRowId:'row-1',qty:5})]}),undefined);expect(api.createSampleIdentity).not.toHaveBeenCalled();expect(api.sampleShipmentAction).not.toHaveBeenCalled();expect(router.currentRoute.value.query.newShipment).toBeUndefined();expect(router.currentRoute.value.query.selectionRowIds).toBeUndefined();expect(router.currentRoute.value.query.shipmentId).toBe('9');expect(wrapper.findComponent({name:'SelectionReceiptDialog'}).exists()).toBe(false)})
@@ -42,6 +42,29 @@ describe('supplier source and sample parcel UI',()=>{
   expect(reopened).toContain('中国工程室 B柜');expect(reopened).toContain('墨西哥验证室')
   await click('保存草稿')
   expect(api.saveSampleShipment).toHaveBeenLastCalledWith(expect.objectContaining({origin:'中国工程室 B柜',destination:'墨西哥验证室',version:2}),9)
+ })
+
+ it.each(['dispatched','partially_received'])('lets the real Mexico receiver sign a scoped %s parcel without domestic options or private panels',async status=>{
+  const user=useUserStore();user.profile={userId:81,roleCode:'mexico'} as never;user.permissions=['pilot:tasks','task:arrival','task:acceptance','file:read']
+  const parcel={...shipment(status),direction:'mexico_outbound',minimal:true,origin:'私有中国源',rows:[{...shipment(status).rows[0],location:'国内柜不可见',receivedBatches:[{sampleCode:'私有SP批次'}]}],events:[{id:99,action:'save',time:'私有事件日期',data:{note:'私有事件说明'}}]}
+  api.sampleShipments.mockResolvedValue({content:[parcel],totalElements:1});api.sampleShipment.mockResolvedValue(parcel)
+  await start('/samples?view=shipments&newShipment=supplier_inbound&selectionId=7&selectionRowIds=row-1');await click('查看／办理')
+  expect(api.sampleShipments).toHaveBeenCalledWith(expect.objectContaining({direction:'mexico_outbound'}));expect(api.sampleShipmentOptions).not.toHaveBeenCalled();expect(source.options).not.toHaveBeenCalled();expect(source.head).not.toHaveBeenCalled();expect(api.sampleIdentities).not.toHaveBeenCalled()
+  const buttons=wrapper.findAll('button').map(button=>button.text())
+  for(const label of ['编辑草稿','删除草稿','登记实际寄出','记录物流节点','登记国内实际收样','确认在途短少','从选品目录登记寄样','新建发墨草稿'])expect(buttons).not.toContain(label)
+  for(const text of ['私有中国源','国内柜不可见','私有SP批次','私有事件日期','私有事件说明','实际流转记录'])expect(wrapper.text()).not.toContain(text)
+  expect(wrapper.findComponent({name:'PartnerFiles'}).exists()).toBe(false);expect(wrapper.findAll('select').some(select=>select.attributes('placeholder')==='全部方向')).toBe(false)
+  await click('登记实际签收');expect(wrapper.getComponent({name:'SampleShipmentActionDialog'}).props()).toMatchObject({action:'receive',shipment:expect.objectContaining({id:9,minimal:true})});expect(api.sampleShipmentAction).not.toHaveBeenCalled()
+ })
+ it('does not offer receiving for a completed local parcel or an account without arrival permission',async()=>{
+  const user=useUserStore();user.profile={userId:81,roleCode:'mexico'} as never;user.permissions=['pilot:tasks','task:arrival','task:acceptance','file:read']
+  api.sampleShipment.mockResolvedValue({...shipment('received'),direction:'mexico_outbound'});await start('/samples?view=shipments&shipmentId=9');expect(wrapper.findAll('button').map(button=>button.text())).not.toContain('登记实际签收')
+  wrapper.unmount();user.permissions=['pilot:tasks','task:acceptance','file:read'];api.sampleShipment.mockResolvedValue({...shipment('dispatched'),direction:'mexico_outbound'});await start('/samples?view=shipments&shipmentId=9');expect(wrapper.findAll('button').map(button=>button.text())).not.toContain('登记实际签收')
+ })
+ it('keeps a denied receiver detail closed and does not replace the server receiver gate',async()=>{
+  const user=useUserStore();user.profile={userId:81,roleCode:'mexico'} as never;user.permissions=['pilot:tasks','task:arrival','task:acceptance','file:read']
+  api.sampleShipment.mockRejectedValue(new Error('仅可查看本人待收包裹'));await start('/samples?view=shipments&shipmentId=99')
+  expect(wrapper.text()).toContain('仅可查看本人待收包裹');expect(wrapper.find('.shipment-detail').exists()).toBe(false);expect(wrapper.findAll('button').map(button=>button.text())).not.toContain('登记实际签收')
  })
 
 })

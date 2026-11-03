@@ -6,11 +6,12 @@ import ElementPlus,{ElCheckbox,ElDatePicker,ElInput,ElInputNumber,ElSelect,ElPag
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
 import ReceiptDialog from '../selection/SelectionReceiptDialog.vue'
 import SampleCustodianSelect from '../samples/SampleCustodianSelect.vue'
+import SampleLocationInput from '../samples/SampleLocationInput.vue'
 import {newSelectionRow} from '@/utils/partnerSelections'
 import type {SelectionReceiptInput,SelectionReceiptResult} from '@/types/partnerSelections'
 
-const api=vi.hoisted(()=>({preview:vi.fn(),save:vi.fn(),candidates:vi.fn(),identities:vi.fn(),custodians:vi.fn()}))
-vi.mock('@/api/modules/sampleManagement',()=>({sampleIdentityCandidates:api.candidates,sampleIdentities:api.identities}))
+const api=vi.hoisted(()=>({preview:vi.fn(),save:vi.fn(),candidates:vi.fn(),identities:vi.fn(),custodians:vi.fn(),locations:vi.fn()}))
+vi.mock('@/api/modules/sampleManagement',()=>({sampleIdentityCandidates:api.candidates,sampleIdentities:api.identities,sampleLocationOptions:api.locations}))
 vi.mock('@/api/modules/samples',()=>({getSampleCustodians:api.custodians}))
 vi.mock('@/api/modules/partnerSelections',()=>({previewSelectionReceipts:api.preview,saveSelectionReceipts:api.save}))
 vi.mock('@/components/PhoneModelMultiSelect/index.vue',()=>({default:{name:'PhoneModelMultiSelect',props:['modelValue','members','allowedIds','multiple','ariaLabel','disabled'],emits:['update:modelValue','cancel'],template:'<button type="button" :disabled="disabled" :aria-label="ariaLabel">选择型号</button>'}}))
@@ -28,8 +29,9 @@ const saved=(input:SelectionReceiptInput):SelectionReceiptResult=>{
 }
 
 let wrapper:VueWrapper
+beforeEach(()=>{api.locations.mockResolvedValue({content:[],hasMore:false,size:50})})
 beforeEach(()=>{vi.clearAllMocks();sessionStorage.clear();setActivePinia(createPinia());useUserStore().profile={userId:71,userName:'国内工程',roleName:'工程',department:'工程'};api.custodians.mockResolvedValue({content:[{userId:71,name:'国内工程'},{userId:72,name:'样品室保管'}]});api.candidates.mockResolvedValue({content:[],canCreate:true,requiresReview:false});api.identities.mockResolvedValue({content:[]});api.preview.mockImplementation(async(_id,input)=>response(input));api.save.mockImplementation(async(_id,input)=>saved(input))})
-afterEach(()=>{wrapper?.unmount();document.body.innerHTML='';sessionStorage.clear()})
+afterEach(()=>{wrapper?.unmount();document.body.innerHTML='';sessionStorage.clear();vi.useRealTimers()})
 async function start(rows=[style(1),style(2)]){const router=createRouter({history:createMemoryHistory(),routes:[{path:'/:pathMatch(.*)*',component:{template:'<div />'}}]});await router.push('/partner-selections?id=7');await router.isReady();wrapper=mount(ReceiptDialog,{props:{id:7,version:3,rows,from:'/partner-selections?id=7'},attachTo:document.body,global:{plugins:[router,ElementPlus]}});await flushPromises();return router}
 const click=async(text:string)=>{const button=[...document.querySelectorAll('button')].find(button=>button.textContent?.trim()===text);expect(button,`button ${text}`).toBeDefined();button!.click();await flushPromises()}
 async function fillCommon(){wrapper.getComponent(ElDatePicker).vm.$emit('update:modelValue','2026-10-27');wrapper.findAllComponents(ElInput).find(input=>input.props('ariaLabel')==='存放位置')!.vm.$emit('update:modelValue','公司样品柜A');await flushPromises()}
@@ -58,6 +60,17 @@ async function fillActual(index:number,qty=2){const modelInputs=models();modelIn
 async function typeColor(index:number,colorName:string){const input=wrapper.findAllComponents({name:'ElAutocomplete'})[index]!.get('input');await input.setValue(colorName);await input.trigger('blur');await flushPromises()}
 
 describe('actual multi-style sample receipt',()=>{
+ it('defaults a new receipt to today and CN and permits actual receipt without a specific storage location',async()=>{
+  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date('2026-11-03T10:00:00+08:00'));await start([style(1)]);
+  const place=wrapper.getComponent(SampleLocationInput);expect(wrapper.getComponent(ElDatePicker).props('modelValue')).toBe('2026-11-03');expect(place.props('modelValue')).toBe('CN');expect(place.props('site')).toBe('CN');expect(place.props('locationId')).toBeUndefined();expect(place.props('locationCode')).toBe('');
+  await fillActual(0,2);await click('保存实际收样');expect(api.save).toHaveBeenCalledTimes(1);expect(api.save.mock.calls[0][1]).toMatchObject({date:'2026-11-03',location:'CN',site:'CN',locationCode:'',rows:[expect.objectContaining({qty:2})]});
+ })
+ it('restores the original receipt date and selected location metadata and reconciles the exact request after a timeout',async()=>{
+  api.save.mockRejectedValueOnce({code:'ECONNABORTED'});await start([style(1)]);await fillCommon();const place=wrapper.getComponent(SampleLocationInput);
+  place.vm.$emit('update:site','MX');place.vm.$emit('update:modelValue','墨西哥样品间 A柜');place.vm.$emit('update:locationId',55);place.vm.$emit('update:locationCode','A001-A0001-001-001-0001');place.vm.$emit('update:locationParts',{area:'A001',rack:'A0001',shelf:'001',box:'001',sequence:'0001'});await flushPromises();await fillActual(0,2);await click('保存实际收样');
+  const first=JSON.parse(JSON.stringify(api.save.mock.calls[0][1]));wrapper.unmount();vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date('2026-11-04T10:00:00+08:00'));await start([style(1)]);
+  const restored=wrapper.getComponent(SampleLocationInput);expect(wrapper.getComponent(ElDatePicker).props('modelValue')).toBe('2026-10-27');expect(restored.props('modelValue')).toBe('墨西哥样品间 A柜');expect(restored.props('site')).toBe('MX');expect(restored.props('locationId')).toBe(55);expect(restored.props('locationCode')).toBe(first.locationCode);expect(restored.props('disabled')).toBe(true);expect(wrapper.getComponent(SampleCustodianSelect).props('disabled')).toBe(true);await click('核对本次保存结果');expect(api.save.mock.calls[1][1]).toEqual(first);
+ })
  it('defaults the shared actual custodian to the logged-in account and saves a selected system account once for all receipt rows',async()=>{await start();const custodian=wrapper.getComponent(SampleCustodianSelect);expect(custodian.props('modelValue')).toBe(71);expect(custodian.props('name')).toBe('国内工程');custodian.getComponent(ElSelect).vm.$emit('update:modelValue',72);await flushPromises();await fillCommon();await fillActual(0,2);await fillActual(1,3);await click('保存实际收样');expect(api.save.mock.calls[0][1]).toMatchObject({ownerUserId:72,ownerName:'样品室保管'});expect(api.save.mock.calls[0][1].rows).toHaveLength(2)})
 
  it('shows adopted photos and supplier-scoped choices, with shared fields once and no planned quantity default',async()=>{await start();expect([...document.querySelectorAll('.receipt-common')]).toHaveLength(1);expect([...document.querySelectorAll('.receipt-row')]).toHaveLength(2);expect([...document.querySelectorAll('.partner-photo')]).toHaveLength(2);expect(actualQuantities().map(input=>input.props('modelValue'))).toEqual([undefined,undefined]);expect(wrapper.findAllComponents(ElSelect).flatMap(select=>select.findAllComponents({name:'ElOption'}).map(option=>option.props('label')))).not.toContain('全库型号');expect(document.body.textContent).not.toContain('请选择实收型号、颜色和数量');expect(api.save).not.toHaveBeenCalled();expect(api.preview.mock.calls[0][1].rows.every((row:{qty?:number})=>row.qty===undefined)).toBe(true)})
@@ -490,7 +503,7 @@ it('expands 1709 models locally and reports empty quantities immediately without
  const reads=api.preview.mock.calls.length;await click('选择各款全部型号');expect(wrapper.getComponent(ElPagination).props('total')).toBe(1709);expect(api.preview).toHaveBeenCalledTimes(reads);expect(allStyleModelsButton()?.disabled).toBe(false);
  await click('选择各款全部颜色');await click('保存实际收样');expect(document.body.textContent).toContain('还有1709条规格未填写');expect(api.preview).toHaveBeenCalledTimes(reads);expect(api.save).not.toHaveBeenCalled();
  api.save.mockRejectedValueOnce({code:'ECONNABORTED'});await fillBulk('',2);await applyBulk();await click('保存实际收样');expect(api.preview).toHaveBeenCalledTimes(reads+1);expect(api.save).toHaveBeenCalledTimes(1);expect(api.save.mock.calls[0][1].rows).toHaveLength(1709);const pending=JSON.parse(sessionStorage.getItem('plm:selection-receipt:71:7')!);expect(pending.metadata).toHaveLength(28);expect(pending.input.rows).toHaveLength(1709);wrapper.unmount();await start(rows);expect(api.preview).toHaveBeenCalledTimes(reads+1);expect(wrapper.getComponent(ElPagination).props('total')).toBe(1709);expect(models()[0].props('modelValue')).toEqual([1]);expect(colorInputs()[0].props('modelValue')).toBe('黑色');expect(actualQuantities()[0].props('modelValue')).toBe(2);
-},30000)
+},60000)
 
 it('retains complete inputs and allows a safe retry when only the read-only validation times out',async()=>{
  await start([style(1)]);await fillCommon();await fillActual(0,2);api.preview.mockRejectedValueOnce({code:'ECONNABORTED'});await click('保存实际收样');

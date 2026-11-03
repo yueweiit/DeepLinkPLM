@@ -20,7 +20,7 @@ import static com.yuewei.plm.module.partner.PartnerValues.*;
 /** Random owned schema only; no writes to the restored clone's real business schema. */
 @EnabledIfEnvironmentVariable(named="PLM_SAMPLE_IDENTITY_TEST_URL",matches="(?:jdbc:postgresql://127\\.0\\.0\\.1:15486/plm_sample_qr_kwhvfzrr(?:\\?currentSchema=plm)?|jdbc:postgresql://127\\.0\\.0\\.1:15504/plm_sales_policy_qa\\?currentSchema=plm)")
 class SampleShipmentLocalIntegrationTest {
- JdbcTemplate admin,jdbc;String schema;PartnerStore store;SampleShipmentService service;TransactionTemplate tx;SampleIdentityRegistry registry;
+ JdbcTemplate admin,jdbc;String schema;PartnerStore store;SampleShipmentService service;TransactionTemplate tx;SampleIdentityRegistry registry,warehouse;
  String role="administrator";long actorId=1;
  @BeforeEach void setup(){
   String url=System.getenv("PLM_SAMPLE_IDENTITY_TEST_URL"),password=System.getenv("PLM_SAMPLE_IDENTITY_TEST_PASSWORD");String base=url.split("\\?")[0];admin=new JdbcTemplate(new DriverManagerDataSource(base,"postgres",password));if(url.contains(":15504/")){assertThat(admin.queryForObject("select current_database()",String.class)).isEqualTo("plm_sales_policy_qa");assertThat(admin.queryForObject("select system_identifier::text from pg_control_system()",String.class)).isNotEqualTo("7651923859845308451");}schema="sample_shipment_qa_"+UUID.randomUUID().toString().replace("-","");admin.execute("create schema "+schema);
@@ -31,6 +31,7 @@ class SampleShipmentLocalIntegrationTest {
    create table plm_pilot_scope(user_id bigint,entity_type text,entity_id bigint,unique(user_id,entity_type,entity_id));
    create table plm_partner_record(record_id bigserial primary key,kind text,code text unique,name text,status text default 'draft',version bigint default0,data jsonb default '{}',site text default '',external_id text default '',customer_id bigint,source_project_id bigint,supplier_code text,parent_record_id bigint,owner_user_id bigint,created_by text,updated_by text,updated_at timestamp default now(),deleted_flag int default0,sample_identity_id bigint);
    create table plm_sample_identity(identity_id bigint primary key,identity_key text,source_type text,basis jsonb);
+   create table plm_supplier_profile(supplier_code text primary key,supplier_name text,short_code text,deleted_flag int default 0);
    create table plm_partner_event(event_id bigserial primary key,record_id bigint,action text,data jsonb,request_id text,created_at timestamp default now(),created_by text,actor_id bigint,unique(record_id,request_id));
    create table plm_partner_revision(revision_id bigserial primary key,record_id bigint,revision bigint,data jsonb,created_by text,created_at timestamp default now(),unique(record_id,revision));
    create table plm_partner_create_request(actor_id bigint,kind text,request_id text,object_id bigint,primary key(actor_id,kind,request_id));
@@ -47,7 +48,7 @@ class SampleShipmentLocalIntegrationTest {
   doAnswer(i->{if(!access.hasPermission(i.getArgument(0)))throw new BusinessException(40103,"not authorized");return null;}).when(access).requirePermission(anyString());
   doAnswer(i->{if(role.equals("mexico"))throw new BusinessException(40103,"not partner-authorized");return null;}).when(access).requirePartner(anyLong());
   when(access.visibleSqlClause(anyString(),anyString())).thenReturn("true");when(access.isPilot()).thenReturn(false);
-  store=new PartnerStore(jdbc,new ObjectMapper().findAndRegisterModules(),access,mock(OperationLogService.class));registry=mock(SampleIdentityRegistry.class);
+  store=new PartnerStore(jdbc,new ObjectMapper().findAndRegisterModules(),access,mock(OperationLogService.class));registry=mock(SampleIdentityRegistry.class);warehouse=new SampleIdentityRegistry(store);
   when(registry.requireVisible(anyLong(),anyBoolean())).thenAnswer(i->{long id=i.getArgument(0);require(Set.of(101L,102L,103L).contains(id),"identity forbidden");return Map.of("id",id,"code","SY-"+String.format("%06d",id),"name","测试手机壳","specName","实际型号／颜色","domain","partner");});
   when(registry.visibleBatches(anyLong(),anyBoolean())).thenAnswer(i->jdbc.queryForList("select record_id as id from plm_partner_record where kind='sample' and deleted_flag=0 and sample_identity_id=? order by record_id",i.<Long>getArgument(0)));
   var suppliers=mock(SupplierProfileService.class);when(suppliers.requireSupplier(anyString())).thenReturn(Map.of("code","SUP-QA"));service=new SampleShipmentService(store,registry,suppliers);
@@ -63,7 +64,7 @@ class SampleShipmentLocalIntegrationTest {
  private long aggregate(String field){return jdbc.queryForList("select record_id from plm_partner_record where kind='sample'").stream().mapToLong(r->number(SampleLedger.replay(store.events(number(r.get("record_id")))).view().get(field))).sum();}
  @Test void allocatedReceiverCanPartiallyReceiveGoodDamagedAndLossWithoutADomesticPartnerGrant(){
   var d=dispatch(draft(8));long id=number(d.get("id"));assertThat(aggregate("inTransit")).isEqualTo(8);role="mexico";actorId=2;
-  var scan=service.scan("SY-000101");assertThat(scan.get("type")).isEqualTo("assigned_shipments");assertThat(scan.toString()).doesNotContain("priceCents","sourceSnapshot","customerName","revisions");
+  var scan=warehouse.resolve("SY-000101");assertThat(scan.get("type")).isEqualTo("identity");assertThat(map(map(scan.get("identity")).get("balances"))).containsEntry("onhand",0L).containsEntry("inTransit",8L);assertThat(scan.toString()).doesNotContain("priceCents","sourceSnapshot","customerName","revisions","shipments","receiverUserId");
   var input=data("requestId","arrive-one","version",d.get("version"),"date","2026-01-02","location","墨西哥办公室","rows",List.of(data("rowId","line-a","goodQty",3L,"damagedQty",1L)));
   d=run(()->service.action(id,"receive",input));assertThat(d).containsEntry("status","partially_received");assertThat(aggregate("inTransit")).isEqualTo(4);assertThat(aggregate("damaged")).isEqualTo(1);assertThat(aggregate("onhand")).isEqualTo(6);
   run(()->service.action(id,"receive",input));assertThat(aggregate("inTransit")).isEqualTo(4);
@@ -72,10 +73,10 @@ class SampleShipmentLocalIntegrationTest {
   role="administrator";actorId=1;var loss=data("requestId","loss-one","version",d.get("version"),"date","2026-01-02","reason","确认短少","rows",List.of(data("rowId","line-a","qty",1L)));d=run(()->service.action(id,"loss",loss));
   var finalReceive=data("requestId","arrive-two","version",d.get("version"),"date","2026-01-03","location","墨西哥办公室","rows",List.of(data("rowId","line-a","goodQty",3L,"damagedQty",0L)));d=run(()->service.action(id,"receive",finalReceive));assertThat(d).containsEntry("status","received");assertThat(aggregate("inTransit")).isZero();assertThat(aggregate("onhand")).isEqualTo(9);assertThat(aggregate("available")).isEqualTo(8);
  }
- @Test void unknownAndOtherReceiversParcelAreUniformlyForbiddenAndNoFinancialDataCanBeScanned(){
+ @Test void otherReceiversCannotOpenParcelsButSharedWarehouseScanStaysNarrow(){
   var d=dispatch(draft(3));role="mexico";actorId=3;
   assertThatThrownBy(()->service.detail(number(d.get("id")))).isInstanceOf(BusinessException.class).hasMessage("样品或寄样包裹不存在或未获授权");
-  assertThatThrownBy(()->service.scan("SY-000101")).hasMessage("样品或寄样包裹不存在或未获授权");assertThatThrownBy(()->service.scan("SY-999999")).hasMessage("样品或寄样包裹不存在或未获授权");
+  var local=warehouse.resolve("SY-000101");assertThat(map(map(local.get("identity")).get("balances"))).containsEntry("inTransit",3L).containsEntry("onhand",0L);assertThat(local.toString()).doesNotContain("shipments","QA-TRACK-1","receiverUserId","sourceSnapshot");assertThatThrownBy(()->warehouse.resolve("SY-999999")).hasMessageContaining("不存在或未获授权");
   actorId=2;assertThatThrownBy(()->run(()->service.action(number(d.get("id")),"tracking",data("requestId","bad","version",d.get("version"))))).hasMessageContaining("仅能登记");
  }
  @Test void dispatchFailureRollsBackEveryBatchAndReservedPiecesCannotBeTaken(){
@@ -114,28 +115,29 @@ class SampleShipmentLocalIntegrationTest {
  }
  @Test void oldPrintedIdentityAndExistingParcelRowsResolveToTheSameExplicitCanonicalIdentity(){
   var d=dispatch(draft(3));record(103,"sample_identity",null,Map.of("redirectIdentityId",101L));jdbc.update("insert into plm_sample_identity values(103,'legacy-alias','catalog','{}')");jdbc.update("update plm_partner_record set data=jsonb_set(data,'{rows,0,sampleIdentityId}','103') where record_id=?",d.get("id"));
-  role="mexico";actorId=2;var scanned=service.scan("SY-000103");assertThat(scanned).containsEntry("sampleIdentityId",101L).containsEntry("sampleCode","SY-000101");assertThat(maps(scanned.get("shipments"))).hasSize(1);actorId=3;assertThatThrownBy(()->service.scan("SY-000103")).hasMessage("样品或寄样包裹不存在或未获授权");
+  role="mexico";actorId=2;var scanned=warehouse.resolve("SY-000103");assertThat(scanned).containsEntry("sampleIdentityId",101L).containsEntry("sampleCode","SY-000101");assertThat(scanned).doesNotContainKey("shipments");actorId=3;assertThat(warehouse.resolve("SY-000103")).containsEntry("sampleIdentityId",101L);assertThatThrownBy(()->service.detail(number(d.get("id")))).hasMessage("样品或寄样包裹不存在或未获授权");
  }
  @Test void assignedMexicoSupplierLabelUsesTheTypeOriginInsteadOfTheParcelSupplier(){
   jdbc.update("update plm_partner_record set data='{\"supplierCode\":\"SUP-ORIGINAL\",\"supplierName\":\"原样品供应商\"}'::jsonb where record_id=101");var d=dispatch(draft(2));jdbc.update("update plm_partner_record set data=jsonb_set(data,'{supplierCode}','\"SUP-UNRELATED\"') where record_id=?",d.get("id"));role="mexico";actorId=2;
-  var scan=service.scan("SY-000101");assertThat(scan).containsEntry("supplierCode","SUP-ORIGINAL").containsEntry("supplierName","原样品供应商");assertThat(maps(service.detail(number(d.get("id"))).get("rows")).get(0)).containsEntry("supplierCode","SUP-ORIGINAL").containsEntry("supplierName","原样品供应商");assertThat(scan.toString()).doesNotContain("SUP-UNRELATED","sourceSnapshot");
+  var scan=warehouse.resolve("SY-000101");assertThat(map(scan.get("identity"))).containsEntry("supplierCode","SUP-ORIGINAL").containsEntry("supplierName","原样品供应商");assertThat(maps(service.detail(number(d.get("id"))).get("rows")).get(0)).containsEntry("supplierCode","SUP-ORIGINAL").containsEntry("supplierName","原样品供应商");assertThat(scan.toString()).doesNotContain("SUP-UNRELATED","sourceSnapshot");
  }
  @Test void assignedReceiptLocationsRemainParcelHistoryAfterARealMixedBatchMoveWithoutLeakingOtherStock(){
   var own=dispatch(draft(3));long ownId=number(own.get("id"));
   var other=run(()->service.create(data("requestId","other-person-parcel","direction","mexico_outbound","destination","墨西哥样品间","receiverUserId",3L,"rows",List.of(data("rowId","line-a","sampleIdentityId",101L,"qty",2L)))));long otherId=number(other.get("id"));var otherDraftVersion=other.get("version");other=run(()->service.action(otherId,"dispatched",data("requestId","dispatch-other-parcel","version",otherDraftVersion,"date","2026-01-01","tracking","QA-OTHER-TRACK")));
   var ownVersion=own.get("version");run(()->service.action(ownId,"receive",data("requestId","own-actual-receipt","version",ownVersion,"date","2026-01-02","location","墨西哥样品间 A柜／2层／3格","rows",List.of(data("rowId","line-a","goodQty",3L)))));
   var otherVersion=other.get("version");run(()->service.action(otherId,"receive",data("requestId","other-actual-receipt","version",otherVersion,"date","2026-01-02","location","他人包裹私有柜","rows",List.of(data("rowId","line-a","goodQty",2L)))));
-  var move=SampleLedger.prepare(SampleLedger.replay(store.events(201)),"SP-000201","move",data("date","2026-01-03","location","墨西哥样品间 A柜／2层／3格","to","墨西哥样品间 B柜／1层／2格","qty",3L));store.event(201,"move",move,"after-receipt-move");
-  var realPositions=maps(SampleLedger.replay(store.events(201)).view().get("positions"));assertThat(realPositions).anySatisfy(position->assertThat(position).containsEntry("name","墨西哥样品间 B柜／1层／2格").containsEntry("onhand",3L));
-  role="mexico";actorId=2;var scan=service.scan("SY-000101");var parcels=maps(scan.get("shipments"));assertThat(parcels).hasSize(1);assertThat(parcels.get(0)).containsEntry("id",ownId);var row=maps(parcels.get(0).get("rows")).get(0);
-  assertThat(maps(row.get("receiptLocations"))).containsExactly(Map.of("date","2026-01-02","location","墨西哥样品间 A柜／2层／3格","goodQty",3L,"damagedQty",0L));
-  assertThat(scan.toString()).doesNotContain("他人包裹私有柜","深圳办公室","B柜","sourceSnapshot","batchId","positions");assertThat(row).containsEntry("inTransit",0L);
+  var sampleActions=new PartnerSampleService(store,mock(PartnerProductService.class),mock(PartnerMaterialService.class));var moved=run(()->sampleActions.action(201,"move",data("version",store.load(201,"sample",false).get("version"),"requestId","after-receipt-move","date","2026-01-03","location","墨西哥样品间 A柜／2层／3格","to","墨西哥样品间 B柜／1层／2格","qty",3L)));
+  var realPositions=maps(map(moved.get("balances")).get("positions"));assertThat(realPositions).anySatisfy(position->assertThat(position).containsEntry("name","墨西哥样品间 B柜／1层／2格").containsEntry("onhand",3L));
+  role="mexico";actorId=2;var assigned=service.detail(ownId);var row=maps(assigned.get("rows")).get(0);
+  assertThat(maps(row.get("receiptLocations"))).singleElement().satisfies(receipt->assertThat(receipt).containsAllEntriesOf(Map.of("date","2026-01-02","location","墨西哥样品间 A柜／2层／3格","goodQty",3L,"damagedQty",0L,"site","MX")));
+  assertThat(assigned.toString()).doesNotContain("他人包裹私有柜","深圳办公室","B柜","sourceSnapshot","batchId","positions");assertThat(row).containsEntry("inTransit",0L);assertThatThrownBy(()->service.detail(otherId)).hasMessage("样品或寄样包裹不存在或未获授权");
+  var scan=warehouse.resolve("SY-000101");assertThat(maps(map(scan.get("identity")).get("positions"))).allSatisfy(p->assertThat(p).containsEntry("site","MX"));assertThat(maps(map(scan.get("identity")).get("positions"))).anySatisfy(p->assertThat(p).containsEntry("name","墨西哥样品间 B柜／1层／2格").containsEntry("onhand",3L));assertThat(maps(map(scan.get("identity")).get("positions"))).anySatisfy(p->assertThat(p).containsEntry("name","他人包裹私有柜").containsEntry("onhand",2L));assertThat(map(map(scan.get("identity")).get("balances"))).containsEntry("onhand",5L);assertThat(scan.toString()).doesNotContain("QA-OTHER-TRACK","QA-TRACK-1","receiverUserId","shipments","深圳办公室","sourceSnapshot","priceCents","customerName");
  }
  @Test void correctedReceiptsAreRemovedFromTheAssignedLocationHistoryAndInTransitIsNotAStoredLocation(){
   var parcel=dispatch(draft(3));long id=number(parcel.get("id"));role="mexico";actorId=2;assertThat(maps(service.detail(id).get("rows")).get(0).get("receiptLocations")).isEqualTo(List.of());
   var version=parcel.get("version");parcel=run(()->service.action(id,"receive",data("requestId","receipt-to-correct","version",version,"date","2026-01-02","location","错误签收位置","rows",List.of(data("rowId","line-a","goodQty",2L)))));
   role="administrator";actorId=1;long receipt=store.events(id).stream().filter(event->"sample_shipment_receive".equals(event.get("action"))).mapToLong(event->number(event.get("id"))).findFirst().orElseThrow();var receivedVersion=parcel.get("version");parcel=run(()->service.action(id,"undo",data("requestId","correct-location","version",receivedVersion,"date","2026-01-03","targetEventId",receipt,"reason","签收位置录错")));
-  role="mexico";actorId=2;var scan=service.scan("SY-000101");assertThat(scan.toString()).doesNotContain("错误签收位置");var row=maps(maps(scan.get("shipments")).get(0).get("rows")).get(0);assertThat(maps(row.get("receiptLocations"))).isEmpty();assertThat(row).containsEntry("inTransit",3L);
+  role="mexico";actorId=2;var scan=warehouse.resolve("SY-000101");assertThat(scan.toString()).doesNotContain("错误签收位置","shipments");var local=map(scan.get("identity"));assertThat(maps(local.get("positions"))).isEmpty();assertThat(map(local.get("balances"))).containsEntry("inTransit",3L).containsEntry("onhand",0L);var row=maps(service.detail(id).get("rows")).get(0);assertThat(maps(row.get("receiptLocations"))).isEmpty();assertThat(row).containsEntry("inTransit",3L);
  }
 
 }

@@ -141,4 +141,14 @@ class PartnerSelectionServiceTest {
   for(Object invalid:List.of("黑色",List.of(1),List.of(""),List.of("黑色\n白色"),List.of("色".repeat(256))))assertThrows(BusinessException.class,()->row(values("sampleColors",invalid)));
   assertEquals(List.of("Black"),row(values("sampleColors",List.of("Black","black"))).get("sampleColors"));noProductWrites();
  }
+ @Test void activeSelectionFiltersExcludeCancelledRowsButLegacyAndAllQueriesKeepTheirOriginalScope(){
+  for(String state:List.of("active","selected","confirmed","draft")){Map<String,String> q=ReflectionTestUtils.invokeMethod(service,"query",Map.of("state",state));assertEquals("false",q.get("discarded"),state);}
+  Map<String,String> cancelled=ReflectionTestUtils.invokeMethod(service,"query",Map.of("state","discarded"));assertEquals("true",cancelled.get("discarded"));
+  for(var raw:List.of(Map.<String,String>of(),Map.of("state","all"))){Map<String,String> q=ReflectionTestUtils.invokeMethod(service,"query",raw);assertFalse(q.containsKey("discarded"));}
+ }
+ @Test void receivedSelectionCanBeCancelledAndRestoredWithoutGrantingPermissionToRewriteItsFacts(){
+  var original=values("rowId",UUID.randomUUID().toString(),"confirmed",true,"selected",true,"productId",7L,"productCode","PP-7","confirmationSnapshot",Map.of("name","原选品"));
+  Map<String,Object> active=ReflectionTestUtils.invokeMethod(service,"enrich",original);assertEquals(false,active.get("canReviseSelection"));assertEquals(true,active.get("canCancelSelection"));assertEquals(false,active.get("canRestoreSelection"));
+  original.put("discarded",true);original.put("selected",false);Map<String,Object> cancelled=ReflectionTestUtils.invokeMethod(service,"enrich",original);assertEquals(false,cancelled.get("canReviseSelection"));assertEquals(false,cancelled.get("canCancelSelection"));assertEquals(true,cancelled.get("canRestoreSelection"));assertEquals(original.get("confirmationSnapshot"),cancelled.get("confirmationSnapshot"));noProductWrites();
+ }
 }

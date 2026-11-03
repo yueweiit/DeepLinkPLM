@@ -2,10 +2,12 @@ package com.yuewei.plm.module.partner;
 
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.regex.Pattern;
 import static com.yuewei.plm.module.partner.PartnerValues.*;
 
 /** Actual receipt text resolves to the existing supplier-colour identity, never a company colour code. */
 final class PartnerReceiptColors {
+ private static final Pattern NAME_SEPARATOR=Pattern.compile("[、，,;；\\r\\n]+"),SPACE_SEPARATOR=Pattern.compile("\\h+"),CHINESE_COLOUR=Pattern.compile("\\p{IsHan}+(?:[+＋]\\p{IsHan}+)*"),COLOUR_COUNT_NOTE=Pattern.compile(".*[0-9０-９一二三四五六七八九十两]+\\h*色(?:库存|可选|任选).*");
  private final PartnerStore store;
  PartnerReceiptColors(PartnerStore store){this.store=store;}
  record Resolution(long id,String name,boolean proposed){
@@ -14,8 +16,9 @@ final class PartnerReceiptColors {
  }
  static String fold(String value){return text(value).strip().toLowerCase(Locale.ROOT);}
  static String name(Object value){
-  String result=text(value).strip();require(!Set.of("图片色","如图","见图","看图","待定","待确认","多色可选").contains(result),"请填写实际收到的颜色，不能使用图片色、如图或待定");require(result.length()<=255,"实收颜色名称不能超过255字");
-  require(result.codePoints().noneMatch(Character::isISOControl),"一条实收规格只填写一个颜色，不要粘贴多行");return result;
+  String result=text(value).strip();require(result.length()<=255,"实收颜色名称不能超过255字");
+  require(result.codePoints().noneMatch(Character::isISOControl),"一条实收规格只填写一个颜色，不要粘贴多行");
+  require(result.isEmpty()||singleName(result),"请填写实际收到的单个颜色，颜色清单请按颜色分行，不能使用图片色、库存色数或待定");return result;
  }
  /** Only the per-row frozen catalogue text is an all-colours basis; supplier suggestions are broader. */
  static List<String> sourceNames(Map<String,Object> frozen){
@@ -23,15 +26,19 @@ final class PartnerReceiptColors {
  }
  static List<String> explicitNames(Object input){
   var result=new LinkedHashMap<String,String>();
-  for(String part:text(input).split("[、，,;；\\r\\n]+")){
+  for(String part:NAME_SEPARATOR.split(text(input))){
    String value=part.strip();if(value.isEmpty())continue;
    if(value.length()>255||value.codePoints().anyMatch(Character::isISOControl)
        ||value.matches("(?i).*(待定|待确认|待核实|未提供|未记录|未注明|未知|多色|多种颜色|随机|图片色|如图|见图|看图|见色卡|见目录|详见|以实物).*")
-       ||Set.of("-","—","/","null","n/a","tbd","unknown","various","assorted").contains(fold(value)))return List.of();
-   result.putIfAbsent(fold(value),value);
+       ||COLOUR_COUNT_NOTE.matcher(value).matches()||Set.of("-","—","/","null","n/a","tbd","unknown","various","assorted").contains(fold(value)))return List.of();
+   var words=SPACE_SEPARATOR.split(value);
+   // Supplier sheets separate Chinese colour options with spaces; English and two-tone names keep their word boundaries.
+   var names=words.length>1&&Arrays.stream(words).allMatch(word->CHINESE_COLOUR.matcher(word).matches())?List.of(words):List.of(value);
+   for(String name:names)result.putIfAbsent(fold(name),name);
   }
   return new ArrayList<>(result.values());
  }
+ private static boolean singleName(Object input){String value=text(input).strip();var names=explicitNames(value);return names.size()==1&&names.get(0).equals(value);}
  /** Acquired before snapshot colour locks; generic colour maintenance takes the supplier UPDATE lock. */
  void lockNames(long selection,Map<String,Object> input){
   var keys=new TreeSet<String>();var sources=new HashMap<String,Map<String,Object>>();
@@ -43,13 +50,13 @@ final class PartnerReceiptColors {
  }
  static boolean atReceipt(Map<String,Object> snapshot){return "at_receipt".equals(text(snapshot.get("receiptColorMode")))&&maps(snapshot.get("selectedPairs")).isEmpty();}
  static List<Map<String,Object>> choices(Map<String,Object> snapshot,long phone){
-  if(atReceipt(snapshot))return maps(snapshot.get("receiptColors"));
+  if(atReceipt(snapshot))return maps(snapshot.get("receiptColors")).stream().filter(color->singleName(color.get("name"))).toList();
   var result=new LinkedHashMap<Long,Map<String,Object>>();
   for(var pair:maps(snapshot.get("selectedPairs")))if(phone<=0||number(pair.get("phoneModelId"))==phone){
    var color=new LinkedHashMap<>(map(pair.get("colorSnapshot")));color.put("id",number(pair.get("colorId")));
    color.put("name",text(pair.getOrDefault("colorName",color.get("name"))));result.put(number(pair.get("colorId")),color);
   }
-  return new ArrayList<>(result.values());
+  return result.values().stream().filter(color->singleName(color.get("name"))).toList();
  }
  Resolution resolve(Map<String,Object> snapshot,long phone,Map<String,Object> row){
   String value=name(row.get("colorName"));long id=number(row.get("colorId"));var allowed=choices(snapshot,phone);

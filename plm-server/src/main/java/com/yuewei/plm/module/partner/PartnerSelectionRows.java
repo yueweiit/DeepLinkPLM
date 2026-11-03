@@ -18,7 +18,7 @@ final class PartnerSelectionRows {
  static String styleIdentitySql(String alias){return "coalesce('CP:'||nullif(nullif("+alias+".data->>'catalogStyleId',''),'0'),'row:'||"+alias+".row_id::text)";}
  static String activeSelectedSql(String alias){return "coalesce("+alias+".data->>'discarded','false')<>'true' and ("+alias+".confirmed or "+alias+".data->>'selected'='true')";}
  static String receivedQuantitySql(String alias){
-  return "(select coalesce(sum((e.data->>'qty')::bigint),0) from plm_partner_event e where e.record_id="+alias+".record_id and e.action in ('receive','opening') and not exists(select 1 from plm_partner_event u where u.record_id=e.record_id and u.action='undo' and u.data->>'targetEventId'=e.event_id::text))";
+  return SampleReceiptCorrections.effectiveSql(alias);
  }
  Map<Long,Map<String,Object>> summaries(List<Long> ids){
   if(ids.isEmpty())return Map.of();
@@ -30,13 +30,13 @@ final class PartnerSelectionRows {
    ), received as (
     select r.data->>'selectionId' as selection_id,r.data->>'selectionRowId' as row_id,%s as qty
     from plm_partner_record r where r.kind='sample' and r.deleted_flag=0
-      and r.data->>'selectionId' in (%s) and (%s)
+      and r.data->>'selectionId' in (%s) and (%s) and %s
    ) select s.record_id,count(distinct s.style_key) as "selectedStyleCount",
      count(distinct s.style_key) filter(where coalesce(received.qty,0)>0) as "receivedStyleCount",
      coalesce(sum(received.qty),0)::bigint as "receivedQuantity"
    from selected s left join received on received.selection_id=s.record_id::text and received.row_id=s.row_id::text
    group by s.record_id
-   """.formatted(styleIdentitySql("s"),marks,activeSelectedSql("s"),receivedQuantitySql("r"),marks,store.access.visibleSqlClause("partner","r.record_id"));
+   """.formatted(styleIdentitySql("s"),marks,activeSelectedSql("s"),receivedQuantitySql("r"),marks,store.access.visibleSqlClause("partner","r.record_id"),SampleReceiptCorrections.activeSql("r"));
   var args=new ArrayList<Object>(ids);args.addAll(ids.stream().map(String::valueOf).toList());
   var result=new HashMap<Long,Map<String,Object>>();
   for(var row:store.jdbc.queryForList(sql,args.toArray())){long id=number(row.remove("record_id"));result.put(id,row);}

@@ -38,6 +38,8 @@ public interface AttachmentService {
 
     AttachmentDownloadResource preview(Long attachmentId, HttpServletRequest request);
 
+    AttachmentDownloadResource previewSamplePhoto(Long sampleIdentityId, Long attachmentId, HttpServletRequest request);
+
     AttachmentDownloadResource download(Long attachmentId, HttpServletRequest request);
 
     void delete(Long attachmentId, HttpServletRequest request);

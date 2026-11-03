@@ -7,6 +7,16 @@ import static com.yuewei.plm.module.partner.PartnerValues.*;
 public final class SampleShipmentReceipts {
  private SampleShipmentReceipts() {}
  public static void lockInbound(PartnerStore store,long shipmentId){require(shipmentId>0,"寄样包裹无效");var shipment=store.load(shipmentId,"sample_shipment",true);require("supplier_inbound".equals(shipment.get("direction")),"此包裹不是供应商寄样");}
+ static void correctInbound(PartnerStore store,Map<String,Object> batch,long before,long after,String reason,String request){
+  long shipmentId=number(batch.get("supplierShipmentId"));if(shipmentId==0)return;var shipment=store.load(shipmentId,"sample_shipment",true);require("supplier_inbound".equals(shipment.get("direction")),"原收样包裹类型不符");
+  var rows=SampleShipmentService.copyRows(store,shipment);long id=number(batch.get("id")),allocated=0;var matches=new ArrayList<Map<String,Object>>();var owners=new ArrayList<Map<String,Object>>();
+  for(var row:rows)for(var allocation:maps(row.get("receivedBatches")))if(number(allocation.get("batchId"))==id){allocated=add(allocated,number(allocation.get("qty")));matches.add(allocation);owners.add(row);}
+  require(allocated==before&&!matches.isEmpty(),"原包裹实收分配已变化，请核对寄样记录");long difference=after-before;
+  if(difference>0){var first=owners.get(0);require(SampleShipmentService.remaining(first)>=difference,"更正后的实收数量超过原包裹未收数量，请核对寄样单");matches.get(0).put("qty",add(number(matches.get(0).get("qty")),difference));first.put("receivedGood",add(number(first.get("receivedGood")),difference));}
+  else {long remaining=-difference;for(int index=matches.size()-1;index>=0&&remaining>0;index--){var allocation=matches.get(index);var row=owners.get(index);long remove=Math.min(remaining,number(allocation.get("qty")));allocation.put("qty",number(allocation.get("qty"))-remove);row.put("receivedGood",number(row.get("receivedGood"))-remove);remaining-=remove;}}
+  for(var row:rows){var active=maps(row.get("receivedBatches")).stream().filter(a->number(a.get("qty"))>0).toList();row.put("receivedBatches",active);row.put("actualIdentityIds",active.stream().map(a->number(a.get("sampleIdentityId"))).distinct().toList());}
+  store.revision(shipmentId,shipment);shipment.put("rows",rows);SampleShipmentService.setReceiptState(shipment);store.event(shipmentId,"sample_inbound_receipt_correction",Map.of("batchId",id,"beforeQty",before,"afterQty",after,"reason",reason),"receipt-correction-"+UUID.nameUUIDFromBytes((store.access.actorId()+":"+request+":"+id).getBytes(java.nio.charset.StandardCharsets.UTF_8)));store.save(shipmentId,shipment);
+ }
  public static void recordInbound(PartnerStore store,long shipmentId,List<Map<String,Object>> batches,String requestId){
   require(shipmentId>0,"寄样包裹无效");
   var shipment=store.load(shipmentId,"sample_shipment",true);

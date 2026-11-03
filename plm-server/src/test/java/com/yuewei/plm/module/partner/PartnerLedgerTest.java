@@ -20,6 +20,23 @@ class PartnerLedgerTest {
   sample("undo",Map.of("targetEventId",3L,"reason","wrong return"));sample("undo",Map.of("targetEventId",2L,"reason","wrong loan"));assertEquals(10L,SampleLedger.replay(events).view().get("available"));
   assertThrows(RuntimeException.class,()->sample("undo",Map.of("targetEventId",2L,"reason","twice")));
  }
+@Test void receiptQuantityCorrectionsKeepTheOriginalEventAndCannotBeUndoneAsOrdinaryStock(){
+  sample("receive",Map.of("qty",4,"location","A","sourceSnapshot",Map.of("original","kept")));
+  var original=events.get(0);sample("receipt_correction",Map.of("targetEventId",1L,"beforeQty",4,"afterQty",2,"reason","登记多了"));
+  assertEquals(2L,SampleLedger.replay(events).view().get("onhand"));assertEquals(2L,SampleReceiptCorrections.quantity(SampleLedger.replay(events)));assertEquals(original,events.get(0));
+  assertThrows(RuntimeException.class,()->sample("undo",Map.of("targetEventId",1L,"reason","不能再减原4件")));
+  assertThrows(RuntimeException.class,()->sample("undo",Map.of("targetEventId",2L,"reason","通过更正入口办理")));
+  assertThrows(RuntimeException.class,()->sample("receipt_correction",Map.of("targetEventId",1L,"beforeQty",4,"afterQty",1,"reason","旧原值")));
+  sample("receipt_correction",Map.of("targetEventId",1L,"beforeQty",2,"afterQty",0,"reason","重复登记"));
+  assertEquals(0L,SampleReceiptCorrections.quantity(SampleLedger.replay(events)));assertEquals(0L,SampleLedger.replay(events).view().get("onhand"));
+ }
+ @Test void legacyUndoAndOrdinaryMovementDoNotConfuseReceivedQuantityWithCurrentStock(){
+  sample("receive",Map.of("qty",4,"location","A"));sample("loan",Map.of("qty",4,"location","A","person","client","due","2026-01-05"));
+  assertEquals(0L,SampleLedger.replay(events).view().get("onhand"));assertEquals(4L,SampleReceiptCorrections.quantity(SampleLedger.replay(events)));
+  sample("undo",Map.of("targetEventId",2L,"reason","错借"));
+  sample("undo",Map.of("targetEventId",1L,"reason","原始登记错了"));assertEquals(0L,SampleReceiptCorrections.quantity(SampleLedger.replay(events)));
+ }
+
  @Test void settlementReversalsRestoreOnlyOriginalBalances(){
   var s=Map.<String,Object>of("lines",List.of(Map.of("id","L","qty",100,"priceCents",1000,"supplierCode","S")),"agreements",List.of(Map.of("supplierCode","S","grossCents",100000,"feeCents",10000,"mode","net")));
   var e=new ArrayList<Map<String,Object>>();e.add(Map.of("id",1,"action","supplierpay","data",Map.of("supplierCode","S","amountCents",90000,"offsetCents",10000)));

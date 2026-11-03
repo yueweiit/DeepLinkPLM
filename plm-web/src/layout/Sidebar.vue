@@ -9,6 +9,7 @@ import { t } from '@/locales'
 import brandLogo from '@/assets/brand/deeplinkplm-logo.png'
 import type { MenuGroup, MenuItem } from '@/types/common'
 import { RESEARCH_BUSINESS } from '@/utils/researchNavigation'
+import { canAccessLocalSamples } from '@/utils/sampleLocation'
 
 const route = useRoute()
 const router = useRouter()
@@ -83,7 +84,7 @@ const visibleMenus = computed(() =>
   menuGroups
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => userStore.hasPermission(item.permission)
+      items: group.items.filter((item) => (userStore.hasPermission(item.permission) || item.path === '/samples' && canAccessLocalSamples(userStore))
         && (item.path !== '/partner-selections' || !external.value)
         && (!RESEARCH_BUSINESS.some(entry=>entry.path===item.path) || userStore.hasPermission('project:view'))
         && (item.path !== '/market-watch' || appStore.phoneWatchEnabled || appStore.moldApplicationEnabled)

@@ -4,6 +4,7 @@ import { t as uiText } from '@/locales'
 import {computed,onBeforeUnmount,reactive,ref,watch} from 'vue'
 import {ElMessage} from 'element-plus'
 import {useRouter} from 'vue-router'
+import dayjs from 'dayjs'
 import {newRequestId} from '@/api/modules/partner'
 import {previewSelectionReceipts,saveSelectionReceipts} from '@/api/modules/partnerSelections'
 import type {SelectionReceiptInput,SelectionReceiptInputRow,SelectionReceiptPreview,SelectionReceiptPreviewRow,SelectionReceiptResult,SelectionRow} from '@/types/partnerSelections'
@@ -13,15 +14,16 @@ import PartnerPhoto from '../PartnerPhoto.vue'
 import PhoneModelMultiSelect from '@/components/PhoneModelMultiSelect/index.vue'
 import {unavailablePhone} from '@/components/PhoneModelMultiSelect/selection'
 import {sampleIdentityCandidates,sampleIdentities} from '@/api/modules/sampleManagement'
-import type {SampleIdentity,SampleLabel} from '@/types/sampleManagement'
+import type {SampleIdentity,SampleLabel,SampleLocationParts,SampleLocationSite} from '@/types/sampleManagement'
 import SampleLabelPrint from '../samples/SampleLabelPrint.vue'
 import SampleCustodianSelect from '../samples/SampleCustodianSelect.vue'
+import SampleLocationInput from '../samples/SampleLocationInput.vue'
 
 const props=defineProps<{id:number;version:number;rows:SelectionRow[];from:string;supplierShipmentId?:number}>()
 const emit=defineEmits<{close:[];saved:[result:SelectionReceiptResult];busy:[value:boolean]}>()
 const user=useUserStore(),actor=String(user.profile?.userId||''),actorChanged=ref(false)
 const router=useRouter(),busy=ref(false),loading=ref(true),error=ref(''),unknown=ref(false),phase=ref<'edit'|'saved'>('edit'),result=ref<SelectionReceiptResult>(),preview=ref<SelectionReceiptPreview>(),showIssues=ref(false)
-const shared=reactive({date:'',location:'',ownerUserId:user.profile?.userId as number|undefined,ownerName:user.profile?.userName||''}),lines=ref<SelectionReceiptInputRow[]>([]),metadata=ref(new Map<string,SelectionReceiptPreviewRow>()),requestId=ref<string>(newRequestId())
+const shared=reactive({date:dayjs().format('YYYY-MM-DD'),location:'CN',site:'CN' as SampleLocationSite|'',locationId:undefined as number|undefined,locationCode:'',locationParts:{} as Partial<SampleLocationParts>,ownerUserId:user.profile?.userId as number|undefined,ownerName:user.profile?.userName||''}),lines=ref<SelectionReceiptInputRow[]>([]),metadata=ref(new Map<string,SelectionReceiptPreviewRow>()),requestId=ref<string>(newRequestId())
 const page=ref(1),pageSize=50
 const visibleLines=computed(()=>lines.value.slice((page.value-1)*pageSize,page.value*pageSize))
 watch(()=>lines.value.length,count=>{page.value=Math.min(page.value,Math.max(1,Math.ceil(count/pageSize)))})
@@ -221,8 +223,8 @@ function invalidate(){if(initializing||unknown.value||actorChanged.value||phase.
 watch([shared,lines],invalidate,{deep:true})
 function acceptOptions(data:SelectionReceiptPreview){preview.value=data;for(const item of data.rows)metadata.value.set(item.clientRowId,{...item,phones:item.phones||[],colors:item.colors||[],refs:item.refs||[],messages:item.messages||[]})}
 async function options(){const seq=++sequence;loading.value=true;error.value='';try{const data=await previewSelectionReceipts(props.id,payload());if(seq!==sequence)return;acceptOptions(data);for(const line of lines.value){const phones=info(line)?.phones||[];if(!line.phoneModelId&&phones.length===1)line.phoneModelId=phones[0].phoneModelId}}catch(e){if(seq===sequence)error.value=partnerError(e)}finally{if(seq===sequence)loading.value=false}}
-async function initialize(){if(!actor){loading.value=false;initializing=false;actorChanged.value=true;error.value='登录身份尚未就绪，请重新进入收样。';return}lines.value=props.rows.map(row=>({clientRowId:newRequestId(),rowId:row.rowId,rowVersion:row.rowVersion||0}));selectInitialLines();try{const stored=sessionStorage.getItem(pendingKey);if(stored){const pending=JSON.parse(stored) as {actor:string;input:SelectionReceiptInput;metadata:SelectionReceiptPreviewRow[]};if(pending.actor!==actor)throw new Error('收样身份不符');pendingPayload=pending.input;requestId.value=pending.input.requestId;Object.assign(shared,{date:pending.input.date,location:pending.input.location,ownerUserId:pending.input.ownerUserId,ownerName:pending.input.ownerName});lines.value=pending.input.rows;selectInitialLines();const exact=new Map(pending.metadata.map(row=>[row.clientRowId,row])),sources=new Map(pending.metadata.filter(row=>row.receiptColorMode==='at_receipt').map(row=>[styleKey(row),row]));metadata.value=new Map(lines.value.flatMap(line=>{const data=exact.get(line.clientRowId)||sources.get(styleKey(line));return data?[[line.clientRowId,{...data,clientRowId:line.clientRowId}]as const]:[]}));unknown.value=true;phase.value='edit';loading.value=false;error.value='上次保存结果尚未核对，请先核对本次保存结果。';emit('busy',true);initializing=false;return}}catch{clearPending()}await options();prefillColors();selectInitialLines();initializing=false;preview.value=undefined;for(const line of lines.value)if(line.phoneModelId&&line.colorId)void identitiesFor(line)}
-watch(()=>user.profile?.userId,value=>{if(String(value||'')!==actor){actorChanged.value=true;unknown.value=false;lines.value=[];checkedLines.value.clear();bulkSpecs.value=[blankBulkSpec()];bulkPhoneIds.value=[];metadata.value=new Map();Object.assign(shared,{date:'',location:'',ownerUserId:undefined,ownerName:''});error.value='登录账号已改变，请重新进入收样。';emit('busy',false)}})
+async function initialize(){if(!actor){loading.value=false;initializing=false;actorChanged.value=true;error.value='登录身份尚未就绪，请重新进入收样。';return}lines.value=props.rows.map(row=>({clientRowId:newRequestId(),rowId:row.rowId,rowVersion:row.rowVersion||0}));selectInitialLines();try{const stored=sessionStorage.getItem(pendingKey);if(stored){const pending=JSON.parse(stored) as {actor:string;input:SelectionReceiptInput;metadata:SelectionReceiptPreviewRow[]};if(pending.actor!==actor)throw new Error('收样身份不符');pendingPayload=pending.input;requestId.value=pending.input.requestId;Object.assign(shared,{date:pending.input.date,location:pending.input.location,site:pending.input.site||'',locationId:pending.input.locationId,locationCode:pending.input.locationCode||'',locationParts:pending.input.locationParts||{},ownerUserId:pending.input.ownerUserId,ownerName:pending.input.ownerName});lines.value=pending.input.rows;selectInitialLines();const exact=new Map(pending.metadata.map(row=>[row.clientRowId,row])),sources=new Map(pending.metadata.filter(row=>row.receiptColorMode==='at_receipt').map(row=>[styleKey(row),row]));metadata.value=new Map(lines.value.flatMap(line=>{const data=exact.get(line.clientRowId)||sources.get(styleKey(line));return data?[[line.clientRowId,{...data,clientRowId:line.clientRowId}]as const]:[]}));unknown.value=true;phase.value='edit';loading.value=false;error.value='上次保存结果尚未核对，请先核对本次保存结果。';emit('busy',true);initializing=false;return}}catch{clearPending()}await options();prefillColors();selectInitialLines();initializing=false;preview.value=undefined;for(const line of lines.value)if(line.phoneModelId&&line.colorId)void identitiesFor(line)}
+watch(()=>user.profile?.userId,value=>{if(String(value||'')!==actor){actorChanged.value=true;unknown.value=false;lines.value=[];checkedLines.value.clear();bulkSpecs.value=[blankBulkSpec()];bulkPhoneIds.value=[];metadata.value=new Map();Object.assign(shared,{date:'',location:'',site:'',locationId:undefined,locationCode:'',locationParts:{},ownerUserId:undefined,ownerName:''});error.value='登录账号已改变，请重新进入收样。';emit('busy',false)}})
 void initialize()
 function createLine(line:SelectionReceiptInputRow):SelectionReceiptInputRow{const clientRowId=newRequestId(),source=info(line);if(source)metadata.value.set(clientRowId,{...source,clientRowId,messages:[],canSave:false});return{clientRowId,rowId:line.rowId,rowVersion:line.rowVersion,phoneModelId:line.phoneModelId}}
 function prefillColors(){
@@ -263,8 +265,8 @@ onBeforeUnmount(()=>{sequence++;emit('busy',false)})
    <el-alert v-if="error" :title="error" type="error" :closable="false"/>
    <el-form label-position="top" class="receipt-common" :disabled="busy||loading||unknown">
     <el-form-item :label='uiText("实际入库日期 *")'><el-date-picker v-model="shared.date" type="date" value-format="YYYY-MM-DD" :placeholder='uiText("选择实际日期")' :aria-label='uiText("实际入库日期")'/></el-form-item>
-    <el-form-item :label='uiText("存放位置 *")'><el-input v-model="shared.location" :placeholder='uiText("实际存放在哪里")' :aria-label='uiText("存放位置")'/></el-form-item>
-    <el-form-item :label='uiText("保管人 *")'><SampleCustodianSelect v-model="shared.ownerUserId" v-model:name="shared.ownerName" aria-label="保管人"/></el-form-item>
+    <el-form-item :label='uiText("样品间／位置")'><SampleLocationInput v-model="shared.location" v-model:site="shared.site" v-model:location-id="shared.locationId" v-model:location-code="shared.locationCode" v-model:location-parts="shared.locationParts" :disabled="busy||loading||unknown||actorChanged" :placeholder='uiText("实际存放在哪里")' :aria-label='uiText("存放位置")'/></el-form-item>
+    <el-form-item :label='uiText("保管人 *")'><SampleCustodianSelect v-model="shared.ownerUserId" v-model:name="shared.ownerName" :disabled="busy||loading||unknown||actorChanged" aria-label="保管人"/></el-form-item>
    </el-form>
    <div v-if="showIssues&&preview?.messages?.length" class="receipt-errors" role="alert"><p v-for="message in preview.messages" :key="message">{{message}}</p></div>
    <div v-if="showBulk" class="receipt-bulk">

@@ -762,6 +762,7 @@ public class PartnerCatalogService {
             require(Set.of("quote","selection").contains(kind)&&record>0&&PartnerSelectionService.validRowId(row),"目录来源身份无效");
             row=UUID.fromString(row).toString();require(seen.add(kind+":"+record+":"+row),"本次选择含重复款式");
             var value=new LinkedHashMap<>(item);value.put("rowId",row);
+            if(item.containsKey("reselectCancelled"))require(item.get("reselectCancelled") instanceof Boolean,"重新选择已取消规格须明确勾选");
             String intent=text(item.get("selectionIntent"));require(intent.isEmpty()||intent.equals("style"),"选品方式无效");
             if(intent.equals("style")){require(PartnerSelectionService.scopeIds(item.get("phoneModelIds")).isEmpty()&&maps(item.get("selectedPairs")).isEmpty(),"仅选款式时请保留型号后补，明确型号请使用型号选品");String modelText=text(item.get("selectionModelText"));require(modelText.length()<=12000,"原选品型号要求过长");value.put("selectionModelText",modelText);}
             else require(text(item.get("selectionModelText")).isEmpty(),"原选品型号要求仅用于型号后补的款式选品");
@@ -797,6 +798,7 @@ public class PartnerCatalogService {
         for(var item:items){
             var view=new LinkedHashMap<String,Object>();for(String key:List.of("sourceKind","recordId","rowId","rowVersion","recordVersion"))view.put(key,item.get(key));
             var errors=new ArrayList<String>();view.put("messages",errors);view.put("name","");
+            boolean reselectCancelled=Boolean.TRUE.equals(item.get("reselectCancelled"));view.put("reselectCancelled",reselectCancelled);view.put("requiresReselect",false);view.put("cancelledMatches",List.of());
             try{
                 String kind=text(item.get("sourceKind")),rowId=text(item.get("rowId"));long record=number(item.get("recordId"));
                 require(!(kind.equals("selection")&&record==target),"供应商来源不能作为目标选品，请另建我方选品清单");
@@ -823,27 +825,35 @@ public class PartnerCatalogService {
                     &&number(item.get("rowVersion"))==number(row.get("rowVersion")),"目录来源版本已变化，请刷新后重新预览");
                 require(styleOnly||!chosen.isEmpty()&&PartnerSelectionService.scopeIds(row.get("phoneModelIds")).containsAll(chosen),"请明确选择来源可供型号的非空子集");
                 var pairs=styleOnly?List.<Map<String,Object>>of():selections.validateCatalogChoice(row,chosen,maps(item.get("selectedPairs")));if(pairs==null)pairs=List.of();
-                var existing=new ArrayList<Map<String,Object>>();
+                var history=new ArrayList<Map<String,Object>>();
                 if(target>0)for(var found:store.jdbc.queryForList("select row_id::text,row_version,data::text,confirmed from plm_partner_selection_row where record_id=? "
                     + "and data->'catalogSourceSnapshot'->>'sourceKind'=? and data->'catalogSourceSnapshot'->>'recordId'=? and data->'catalogSourceSnapshot'->>'rowId'=? order by row_id",target,kind,Long.toString(record),rowId)){
-                    var saved=decode(store.json,found.get("data"));saved.put("rowId",found.get("row_id"));saved.put("rowVersion",found.get("row_version"));saved.put("confirmed",found.get("confirmed"));existing.add(saved);
+                    var saved=decode(store.json,found.get("data"));saved.put("rowId",found.get("row_id"));saved.put("rowVersion",found.get("row_version"));saved.put("confirmed",found.get("confirmed"));history.add(saved);
                 }
-                var oldChosen=new LinkedHashSet<Long>();var oldView=new ArrayList<Map<String,Object>>();
+                var cancelledMatches=new ArrayList<Map<String,Object>>();var oldView=new ArrayList<Map<String,Object>>();
+                for(var saved:history){
+                    var savedPhones=PartnerSelectionService.scopeIds(saved.get("phoneModelIds"));var shared=savedPhones.stream().filter(chosen::contains).toList();
+                    if(cancelledSelection(saved)&&(styleOnly||!shared.isEmpty()||!sameSourceVersion(saved,row)))cancelledMatches.add(Map.of("rowId",saved.get("rowId"),"rowVersion",saved.get("rowVersion"),"phoneModelIds",savedPhones,"overlappingPhoneModelIds",shared,"discarded",Boolean.TRUE.equals(saved.get("discarded")),"selected",Boolean.TRUE.equals(saved.get("selected")),"confirmed",Boolean.TRUE.equals(saved.get("confirmed"))));
+                    oldView.add(Map.of("rowId",saved.get("rowId"),"rowVersion",saved.get("rowVersion"),"confirmed",Boolean.TRUE.equals(saved.get("confirmed")),"phoneModelIds",savedPhones,"selectedPairs",maps(saved.get("selectedPairs")),"sampleColors",saved.getOrDefault("sampleColors",List.of())));
+                }
+                view.put("cancelledMatches",cancelledMatches);view.put("requiresReselect",!reselectCancelled&&!cancelledMatches.isEmpty());view.put("existingRows",oldView);
+                // Explicit reselection creates a current draft; cancelled history never becomes a write target.
+                var existing=reselectCancelled?history.stream().filter(saved->!cancelledSelection(saved)).toList():history;
+                var oldChosen=new LinkedHashSet<Long>();
                 for(var saved:existing){
                     require(sameSourceVersion(saved,row)||!styleOnly&&PartnerSelectionService.awaitingFirstPhones(saved),"目标选品已采用该款另一来源版本，请先核对版本差异或另建选品");
                     var shared=PartnerSelectionService.scopeIds(saved.get("phoneModelIds")).stream().filter(chosen::contains).toList();
                     if(styleOnly||!shared.isEmpty()){
-                        require(!Boolean.TRUE.equals(saved.get("discarded"))&&!Boolean.FALSE.equals(saved.get("selected")),"已有选品中的型号已取消或排除，请在原选品明确处理，不能静默恢复");
+                        require(!cancelledSelection(saved),"已有选品中的型号已取消或排除，请在原选品明确处理，不能静默恢复");
                         for(var pair:pairs)if(shared.contains(number(pair.get("phoneModelId"))))require(maps(saved.get("selectedPairs")).stream().anyMatch(p->number(p.get("phoneModelId"))==number(pair.get("phoneModelId"))&&number(p.get("colorId"))==number(pair.get("colorId"))),"该型号已在选品，新增颜色请在已有选品核对，不能静默忽略");
                         oldChosen.addAll(shared);
                     }
-                    oldView.add(Map.of("rowId",saved.get("rowId"),"rowVersion",saved.get("rowVersion"),"confirmed",Boolean.TRUE.equals(saved.get("confirmed")),"phoneModelIds",PartnerSelectionService.scopeIds(saved.get("phoneModelIds")),"selectedPairs",maps(saved.get("selectedPairs")),"sampleColors",saved.getOrDefault("sampleColors",List.of())));
                 }
                 var newIds=chosen.stream().filter(id->!oldChosen.contains(id)).toList();
                 // An unspecified supplier scope is not a claim of full supply. A later new
                 // model gets its own draft row, except an active style-only draft awaiting its first model.
                 Map<String,Object> merge=newIds.isEmpty()?Map.of():existing.stream().filter(this::mergeable).filter(saved->!unspecified||("style".equals(text(map(saved.get("catalogSourceSnapshot")).get("selectionIntent")))&&PartnerSelectionService.scopeIds(saved.get("phoneModelIds")).isEmpty())).findFirst().orElse(Map.of());
-                Long planned=item.containsKey("sampleQty")?number(item.get("sampleQty")):null;var active=existing.stream().filter(saved->!Boolean.TRUE.equals(saved.get("discarded"))&&!Boolean.FALSE.equals(saved.get("selected"))).filter(saved->styleOnly||PartnerSelectionService.scopeIds(saved.get("phoneModelIds")).stream().anyMatch(chosen::contains)||(!merge.isEmpty()&&text(saved.get("rowId")).equals(text(merge.get("rowId"))))).toList();var quantities=active.stream().filter(saved->number(saved.get("sampleQty"))>0).toList();
+                Long planned=item.containsKey("sampleQty")?number(item.get("sampleQty")):null;var active=existing.stream().filter(saved->!cancelledSelection(saved)).filter(saved->styleOnly||PartnerSelectionService.scopeIds(saved.get("phoneModelIds")).stream().anyMatch(chosen::contains)||(!merge.isEmpty()&&text(saved.get("rowId")).equals(text(merge.get("rowId"))))).toList();var quantities=active.stream().filter(saved->number(saved.get("sampleQty"))>0).toList();
                 require(planned==null||newIds.isEmpty()||!merge.isEmpty()||active.isEmpty(),"本次同时含已有独立选样和新增型号，请分开选择并填写各次拟拿样合计，不能自动分配数量");
                 require(planned==null||quantities.size()<=1,"该款已有多行分别填写拟拿样数量，请在原选样清单明确调整，不能把本款合计数量重复填给每行");Map<String,Object> quantityTarget=!quantities.isEmpty()?quantities.get(0):active.stream().findFirst().orElse(Map.of());
                 @SuppressWarnings("unchecked") List<String> sampleColors=item.containsKey("sampleColors")?(List<String>)item.get("sampleColors"):null;
@@ -857,7 +867,7 @@ public class PartnerCatalogService {
                 if(sampleColors!=null)view.put("sampleColors",sampleColors);view.put("sampleColorsChanged",colorsChanged);view.put("colorTargetRowId",colorTarget.getOrDefault("rowId",""));
                 view.put("phoneModelIds",chosen);view.put("addedPhoneModelIds",newIds);view.put("reusedPhoneModelIds",new ArrayList<>(oldChosen));
                 view.put("action",styleOnly?(existing.isEmpty()?"new":"reused"):newIds.isEmpty()?"reused":merge.isEmpty()?"new":"merge");if(styleOnly){view.put("selectionIntent","style");view.put("selectionModelText",text(item.get("selectionModelText")));}view.put("mergeTargetRowId",merge.getOrDefault("rowId",""));
-                view.put("selectedPairs",pairs);view.put("availablePhoneModelIds",unspecified?List.of():PartnerSelectionService.scopeIds(row.get("phoneModelIds")));view.put("existingRows",oldView);
+                view.put("selectedPairs",pairs);view.put("availablePhoneModelIds",unspecified?List.of():PartnerSelectionService.scopeIds(row.get("phoneModelIds")));
                 view.put("phones",maps(row.get("phones")).stream().filter(phone->chosen.contains(number(phone.get("phoneModelId")))).toList());
                 choices.add(new Choice(row,chosen,newIds,new ArrayList<>(oldChosen),pairs,existing,merge,planned,quantityTarget,styleOnly,text(item.get("selectionModelText")),sampleColors,colorTarget));if(styleOnly&&existing.isEmpty())added++;else if(!newIds.isEmpty()){if(merge.isEmpty())added++;else updated++;}else if(quantityChanged||colorsChanged)updated++;newPhones+=newIds.size();reused+=styleOnly&&!existing.isEmpty()?1:oldChosen.size();
             }catch(com.yuewei.plm.common.exception.BusinessException e){errors.add(e.getMessage());allMessages.add(text(view.get("name"))+"："+e.getMessage());}
@@ -877,6 +887,7 @@ public class PartnerCatalogService {
         var baseline=map(map(row.get("catalogSourceSnapshot")).get("selectionBaseline"));
         var actual=new LinkedHashMap<>(PartnerSelectionService.catalogBaseline(row));var original=new LinkedHashMap<>(baseline);actual.remove("sampleQty");original.remove("sampleQty");return !baseline.isEmpty()&&signature(store.json,original).equals(signature(store.json,actual));
     }
+    private boolean cancelledSelection(Map<String,Object> row){return Boolean.TRUE.equals(row.get("discarded"))||Boolean.FALSE.equals(row.get("selected"));}
     private boolean sameSourceVersion(Map<String,Object> saved,Map<String,Object> source){var origin=map(saved.get("catalogSourceSnapshot"));return number(origin.get("rowVersion"))==number(source.get("rowVersion"))&&number(origin.get("recordVersion"))==number(source.get("recordVersion"));}
 
     @Transactional

@@ -34,6 +34,7 @@ public class SupplierRangeService {
         if(range&&!text(query.get("type")).isEmpty()){where.add("type=?");args.add(type(query.get("type")));}
         if(!text(query.get("status")).isEmpty()){where.add("status=?");args.add(query.get("status"));}
         if(!range&&"general".equals(query.get("scope")))where.add("style_key='' and config_key=''");
+        if(!range&&"applicable".equals(query.get("scope"))){where.add("(style_key='' or style_key=?) and (config_key='' or config_key=?)");args.add(text(query.get("styleKey")));args.add(text(query.get("configKey")));}
         long page=Math.max(1,number(query.getOrDefault("page","1"))),size=Math.max(1,Math.min(200,number(query.getOrDefault("size","50"))));
         require(page<=100000000,"页码超出范围");String condition=String.join(" and ",where);
         long total=store.jdbc.queryForObject("select count(*) from "+table+" where "+condition,Long.class,args.toArray());

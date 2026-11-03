@@ -32,6 +32,12 @@ public class PartnerStore {
   access.requireDomesticView();access.requirePermission(Set.of("sample","sample_identity","sample_shipment").contains(kind)?"samples:write":kind.equals("listing")?"partner:listing":"partner:write");
   return insert(kind,name,codePrefix);
  }
+ long createSampleLocation(String name){return insert("sample_location",name,prefix("sample_location"));}
+ Map<String,Object> loadSampleWarehouse(long id,boolean lock){
+  if(!SampleSiteAccess.mexico(this))return load(id,"sample",lock);
+  SampleSiteAccess.write(this,"MX");var rows=jdbc.queryForList("select record_id,code,name,status,version,data::text from plm_partner_record where record_id=? and kind='sample' and deleted_flag=0"+(lock?" for update":""),id);require(rows.size()==1,"样品不存在或未获授权");
+  var raw=rows.get(0);var d=decode(json,raw.get("data"));boolean mx=maps(SampleLedger.replay(events(id)).view().get("positions")).stream().anyMatch(p->"MX".equals(SampleLocations.site(p))&&number(p.get("onhand"))>0);require(mx,"样品不存在或未获授权");d.put("id",id);for(String key:List.of("code","name","status","version"))d.put(key,raw.get(key));return d;
+ }
  /** Only the validated catalogue listing action may create an internal business archive for sales. */
  long createListingProduct(String name){access.requireDomesticView();access.requirePermission("partner:view");access.requirePermission("partner:listing");return insert("product",name,prefix("product"));}
  private long insert(String kind,String name,String codePrefix){
@@ -40,7 +46,7 @@ public class PartnerStore {
   if(access.isPilot())jdbc.update("insert into plm_pilot_scope(user_id,entity_type,entity_id) values(?,'partner',?) on conflict do nothing",access.actorId(),id);
   return id;
  }
- static String prefix(String kind){return switch(kind){case "product"->"PP";case "sample"->"SP";case "sample_identity"->"SY";case "sample_shipment"->"SJ";case "sale"->"XS";case "supplier_quote"->"SQ";case "sample_fee"->"SF";case "inspection"->"QC";case "fulfilment"->"WF";case "listing"->"LS";case "selection"->"SL";default->throw invalid("业务记录类型无效");};}
+ static String prefix(String kind){return switch(kind){case "product"->"PP";case "sample"->"SP";case "sample_identity"->"SY";case "sample_shipment"->"SJ";case "sample_location"->"WL";case "sale"->"XS";case "supplier_quote"->"SQ";case "sample_fee"->"SF";case "inspection"->"QC";case "fulfilment"->"WF";case "listing"->"LS";case "selection"->"SL";default->throw invalid("业务记录类型无效");};}
  public void check(Map<String,Object> current,Long expected){require(expected!=null&&number(current.get("version"))==expected,"记录已变化，请重新载入后核对；本次输入未覆盖服务器");}
  public boolean repeated(long id,String key){return !text(key).isEmpty()&&Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from plm_partner_event where record_id=? and request_id=?)",Boolean.class,id,key));}
  public void save(long id,Map<String,Object> data){

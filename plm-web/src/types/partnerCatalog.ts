@@ -178,6 +178,7 @@ export interface CatalogPurposePreview {
 }
 
 export interface CatalogSelectionItem extends CatalogIdentity {
+  reselectCancelled?: boolean
   sampleColors?: string[]
   sampleQty?: number
   phoneModelIds: number[]
@@ -203,7 +204,7 @@ export interface CatalogAdditionPreview {
   targetName?: string
   canAdd: boolean
   previewToken: string
-  items: (CatalogSelectionItem & { name: string; phones?: CompatiblePhone[]; phoneScopeMode?: CatalogPhoneScopeMode; addedPhoneModelIds: number[]; reusedPhoneModelIds: number[]; messages: string[]; action?: 'new' | 'merge' | 'reused' })[]
+  items: (CatalogSelectionItem & { name: string; phones?: CompatiblePhone[]; phoneScopeMode?: CatalogPhoneScopeMode; addedPhoneModelIds: number[]; reusedPhoneModelIds: number[]; messages: string[]; requiresReselect:boolean; cancelledMatches:{rowId:string;rowVersion:number;phoneModelIds:number[];overlappingPhoneModelIds:number[];discarded:boolean;selected:boolean;confirmed:boolean}[]; action?: 'new' | 'merge' | 'reused' })[]
   addedCount: number
   reusedCount: number
   newPhoneCount: number
