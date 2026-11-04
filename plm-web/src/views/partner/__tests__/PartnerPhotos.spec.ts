@@ -23,7 +23,18 @@ afterEach(async()=>{for(const wrapper of wrappers.splice(0))if(wrapper.exists())
 function startPhoto(id=7,allowRetry=true){const wrapper=mount(PartnerPhoto,{props:{id,allowRetry}});wrappers.push(wrapper);return wrapper}
 
 describe('real authenticated photo states',()=>{
- it('loads sample ledger thumbnails through the narrow identity permission without calling the generic file route',async()=>{const wrapper=mount(PartnerPhoto,{props:{id:7,sampleIdentityId:71}});wrappers.push(wrapper);await flushPromises();expect(api.sampleIdentityPhoto).toHaveBeenCalledWith(71,7,{signal:expect.any(AbortSignal)});expect(api.fileBlob).not.toHaveBeenCalled();expect(wrapper.find('img').exists()).toBe(true);await wrapper.setProps({sampleIdentityId:72});await flushPromises();expect(api.sampleIdentityPhoto).toHaveBeenLastCalledWith(72,7,{signal:expect.any(AbortSignal)})})
+ it('previews the sample ledger photo through the same narrow identity permission and releases it without generic file access',async()=>{
+  const user=useUserStore();user.profile={userId:81,userName:'Angel',roleCode:'mexico'} as never;user.permissions=['task:arrival']
+  const wrapper=mount(PartnerPhoto,{props:{id:7,sampleIdentityId:71,previewable:true},global:{stubs:{ElEmpty:true,ElDialog:{props:['modelValue','title'],template:'<section v-if="modelValue"><h2>{{title}}</h2><slot/></section>'},ElButton:{template:'<button><slot/></button>'}}}});wrappers.push(wrapper)
+  await flushPromises();expect(api.sampleIdentityPhoto).toHaveBeenCalledWith(71,7,{signal:expect.any(AbortSignal)})
+  await wrapper.get('[aria-label="预览产品图片"]').trigger('click');await flushPromises()
+  expect(wrapper.getComponent(PartnerFilePreview).props('sampleIdentityId')).toBe(71);expect(wrapper.find('.preview-image').exists()).toBe(true)
+  expect(api.sampleIdentityPhoto).toHaveBeenCalledTimes(1);expect(api.fileBlob).not.toHaveBeenCalled();expect(api.metadata).not.toHaveBeenCalled();expect(wrapper.find('.preview-file-info').exists()).toBe(false)
+  await wrapper.setProps({sampleIdentityId:72});await flushPromises();expect(api.sampleIdentityPhoto).toHaveBeenLastCalledWith(72,7,{signal:expect.any(AbortSignal)})
+  const preview=wrapper.get('.preview-image').attributes('src');wrapper.getComponent(PartnerFilePreview).vm.$emit('close');await flushPromises()
+  expect(wrapper.find('.preview-image').exists()).toBe(false);expect(revoke).toHaveBeenCalledWith(preview);expect(wrapper.find('img').exists()).toBe(true)
+  expect(api.fileBlob).not.toHaveBeenCalled();expect(api.metadata).not.toHaveBeenCalled()
+ })
  it('opens the shared authorised gallery directly from a thumbnail and releases each previous image on navigation',async()=>{const wrapper=mount(PartnerPhoto,{props:{id:7,previewable:true,previewFiles:[{id:7,name:'第一张'},{id:8,name:'第二张'}]},global:{stubs:{ElEmpty:true,ElDialog:{props:['modelValue','title'],template:'<section v-if="modelValue"><h2>{{title}}</h2><slot/></section>'},ElButton:{template:'<button><slot/></button>'}}}});wrappers.push(wrapper);await flushPromises();await wrapper.get('[aria-label="预览产品图片"]').trigger('click');await flushPromises();expect(wrapper.findComponent(PartnerFilePreview).exists()).toBe(true);expect(wrapper.text()).toContain('第一张');expect(api.fileBlob).toHaveBeenCalledTimes(1);const previous=wrapper.get('.preview-image').attributes('src');await wrapper.findAll('button').find(button=>button.text()==='下一张')!.trigger('click');await flushPromises();expect(wrapper.text()).toContain('第二张');expect(api.fileBlob).toHaveBeenLastCalledWith(8,true,{signal:expect.any(AbortSignal)});expect(revoke).toHaveBeenCalledWith(previous)})
  it('keeps sized loading placeholders and downloads a shared file once for two mounted photos',async()=>{
   const pending=deferred();api.fileBlob.mockReturnValue(pending.promise)

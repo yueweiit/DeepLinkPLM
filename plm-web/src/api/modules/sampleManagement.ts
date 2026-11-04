@@ -1,6 +1,8 @@
 import request,{unwrapResponse,authorizedPreviewOptions} from '../request'
 import type {SampleCandidates,SampleIdentity,SamplePage,SampleResolution,SampleShipment,SampleShipmentInput,SampleLocationOption,SampleLocationInputData,SampleLocationMoveResult,SampleStyleGroup,SampleSupplierOption,SampleLocationReference} from '@/types/sampleManagement'
 export const sampleIdentities=async(params:Record<string,unknown>={})=>unwrapResponse<SamplePage<SampleIdentity>>(await request.get('/sample-identities',{params}))
+export interface SampleIdentityQueryInput {filters?:Record<string,unknown>;groupKeys?:string[];ids?:number[];details?:boolean}
+export const querySampleIdentities=async(data:SampleIdentityQueryInput)=>unwrapResponse<{content:SampleIdentity[];totalElements:number}>(await request.post('/sample-identities/query',data,{suppressErrorToast:true}))
 export const sampleIdentity=async(id:number)=>unwrapResponse<SampleIdentity>(await request.get(`/sample-identities/${id}`))
 export const sampleIdentityCandidates=async(params:Record<string,unknown>)=>unwrapResponse<SampleCandidates>(await request.get('/sample-identities/candidates',{params}))
 export const resolveSampleIdentity=async(code:string)=>unwrapResponse<SampleResolution>(await request.get('/sample-identities/resolve',{params:{code}}))

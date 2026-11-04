@@ -39,6 +39,7 @@ class SampleRouteSecurityTest {
   }
  }
  @Test void limitedDomesticReaderCanReadReviewedRoutesButCannotMutate()throws Exception{
+  ok(post("/api/v1/sample-identities/query"));
   for(String path:List.of("/api/v1/sample-identities","/api/v1/sample-identities/1","/api/v1/sample-identities/resolve","/api/v1/sample-identities/candidates","/api/v1/sample-shipments","/api/v1/sample-shipments/1","/api/v1/sample-shipments/options","/api/v1/sample-scan"))ok(get(path));
   for(String path:List.of("/api/v1/sample-identities","/api/v1/sample-identities/1/actions/loan","/api/v1/sample-identities/bulk-actions/loan","/api/v1/sample-identities/bulk-actions/return","/api/v1/sample-identities/bulk-actions/move","/api/v1/sample-identities/batches/1/identity","/api/v1/sample-shipments","/api/v1/sample-shipments/1/actions/receive","/api/v1/sample-shipments/1/files"))no(post(path));no(put("/api/v1/sample-shipments/1"));no(delete("/api/v1/sample-shipments/1"));
  }
@@ -59,6 +60,7 @@ class SampleRouteSecurityTest {
  }
  @Test void mexicoRoomAccessIsLocalAndDoesNotOpenBorrowingOrOtherSourceActions()throws Exception{
   role="mexico";permissions=List.of("task:arrival");
+  ok(post("/api/v1/sample-identities/query"));
   for(String path:List.of("/api/v1/sample-identities","/api/v1/sample-identities/1","/api/v1/sample-identities/options","/api/v1/sample-identities/resolve","/api/v1/sample-identities/1/photos/3/preview","/api/v1/sample-locations","/api/v1/sample-locations/options","/api/v1/sample-locations/3/references"))ok(get(path));
   for(String path:List.of("/api/v1/sample-locations","/api/v1/sample-identities/1/actions/move","/api/v1/sample-identities/bulk-actions/move"))ok(post(path));ok(put("/api/v1/sample-locations/1"));ok(delete("/api/v1/sample-locations/1"));
   for(String action:List.of("loan","return","count","undo","correct_color","source_resolve"))no(post("/api/v1/sample-identities/1/actions/"+action));
@@ -66,10 +68,10 @@ class SampleRouteSecurityTest {
   no(get("/api/v1/sample-identities/1/photos/3/download"));no(get("/api/v1/sample-identities/1/colors"));no(get("/api/v1/samples/1"));
  }
  @Test void mexicoCannotUseAnotherPermissionOrAHeadRequestAsArrival()throws Exception{
-  role="mexico";permissions=List.of("partner:view","samples:write");no(get("/api/v1/sample-scan"));no(get("/api/v1/sample-shipments"));no(post("/api/v1/sample-shipments/1/actions/receive"));for(String action:List.of("loan","return","move"))no(post("/api/v1/sample-identities/bulk-actions/"+action));permissions=List.of("task:arrival");no(head("/api/v1/sample-scan"));no(post("/api/v1/sample-scan"));
+  role="mexico";permissions=List.of("partner:view","samples:write");no(post("/api/v1/sample-identities/query"));no(get("/api/v1/sample-scan"));no(get("/api/v1/sample-shipments"));no(post("/api/v1/sample-shipments/1/actions/receive"));for(String action:List.of("loan","return","move"))no(post("/api/v1/sample-identities/bulk-actions/"+action));permissions=List.of("task:arrival");no(head("/api/v1/sample-scan"));no(post("/api/v1/sample-scan"));
  }
  @Test void supplierAndOverseasSalesDoNotGainThisWorkflowEvenWithCustomDomesticPermissionNames()throws Exception{
-  permissions=List.of("partner:view","samples:write","task:arrival");for(String external:List.of("supplier","overseas_sales")){role=external;no(get("/api/v1/sample-identities"));no(get("/api/v1/sample-shipments"));no(get("/api/v1/sample-scan"));no(post("/api/v1/sample-shipments/1/actions/receive"));for(String action:List.of("loan","return","move"))no(post("/api/v1/sample-identities/bulk-actions/"+action));}
+  permissions=List.of("partner:view","samples:write","task:arrival");for(String external:List.of("supplier","overseas_sales")){role=external;no(post("/api/v1/sample-identities/query"));no(get("/api/v1/sample-identities"));no(get("/api/v1/sample-shipments"));no(get("/api/v1/sample-scan"));no(post("/api/v1/sample-shipments/1/actions/receive"));for(String action:List.of("loan","return","move"))no(post("/api/v1/sample-identities/bulk-actions/"+action));}
  }
  @Test void unknownSubpathsAndMethodsRemainClosed()throws Exception{
   permissions=List.of("partner:view","samples:write");for(String path:List.of("/api/v1/sample-identities/1/secret","/api/v1/sample-shipments/options/private","/api/v1/sample-shipments/1/actions/receive/extra","/api/v1/sample-scan/private"))no(get(path));no(post("/api/v1/sample-identities/1/actions/print"));no(post("/api/v1/sample-shipments/1/actions/arbitrary"));no(patch("/api/v1/sample-shipments/1"));no(put("/api/v1/sample-identities/1"));no(post("/api/v1/sample-identities/bulk-actions/retain"));no(get("/api/v1/sample-identities/bulk-actions/move"));no(put("/api/v1/sample-identities/bulk-actions/move"));

@@ -52,8 +52,8 @@ describe('selected sample label Excel export',()=>{
   await expect(buildSampleLabelWorkbook([{...sample(),sampleCode:''}],origin)).rejects.toThrow('编码不完整')
   await expect(buildSampleLabelWorkbook([sample()],'http://example.com')).rejects.toThrow('HTTPS')
  })
- it('rejects more than 200 distinct types without silently exporting only part of the selection',async()=>{
-  await expect(buildSampleLabelWorkbook(Array.from({length:201},(_,i)=>sample(i+1)),origin)).rejects.toThrow('最多导出200种')
+ it('exports all 500 labels in one workbook with chunked QR progress',async()=>{
+  const progress:number[]=[];const blob=await buildSampleLabelWorkbook(Array.from({length:500},(_,i)=>sample(i+1)),origin,done=>progress.push(done));const book=new ExcelJS.Workbook();await book.xlsx.load(await blob.arrayBuffer());const sheet=book.worksheets[0]!;expect(sheet.rowCount).toBe(501);expect(sheet.getImages()).toHaveLength(500);expect(sheet.getCell('B2').value).toBe('SY-000001');expect(sheet.getCell('B501').value).toBe('SY-000500');expect(progress).toEqual(Array.from({length:21},(_,i)=>i*25))
  })
  it('rejects text that cannot fit an Excel row instead of generating a clipped or invalid workbook',async()=>{
   await expect(buildSampleLabelWorkbook([{...sample(),phoneName:'过长型号'.repeat(300)}],origin)).rejects.toThrow('无法在一行Excel中完整显示')

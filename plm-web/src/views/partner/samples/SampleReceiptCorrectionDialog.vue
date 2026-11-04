@@ -3,7 +3,7 @@ import {computed,onBeforeUnmount,onMounted,ref,watch} from 'vue'
 import {t as uiText} from '@/locales'
 import {useUserStore} from '@/stores/user'
 import {newRequestId} from '@/api/modules/partner'
-import {sampleIdentity,sampleIdentityAction,sampleIdentityBulkAction} from '@/api/modules/sampleManagement'
+import {querySampleIdentities,sampleIdentityAction,sampleIdentityBulkAction} from '@/api/modules/sampleManagement'
 import type {SampleBatch,SampleIdentity} from '@/types/sampleManagement'
 import {useSampleSubmission} from './useSampleSubmission'
 
@@ -24,7 +24,7 @@ function chooseBatch(id:number){chosenBatch.value=id;correctedQty.value=effectiv
 function close(){if(!busy.value&&!unknown.value)emit('close')}
 onMounted(async()=>{
  try{
-  const values=await Promise.all(props.samples.map(row=>sampleIdentity(row.sampleIdentityId)))
+  const {content:values}=await querySampleIdentities({ids:props.samples.map(row=>row.sampleIdentityId),details:true})
   if(disposed||auth!==user.token)return
   rows.value=values.flatMap(sample=>(sample.batches||[]).filter(batch=>batch.receiptStatus!=='voided'&&effectiveQty(batch)>0).map(batch=>({sample,batch,chosen:props.samples.length>1})))
   if(rows.value.length===1){rows.value[0]!.chosen=true;chooseBatch(rows.value[0]!.batch.id)}
@@ -36,7 +36,7 @@ async function save(){
  if(!canWrite.value||loading.value||busy.value)return
  if(!unknown.value){
   if(!selectedRows.value.length){error.value='请选择要'+(deleting.value?'删除':'修改')+'的收样登记';return}
-  if(selectedRows.value.length>100){error.value='一次最多办理100条收样登记，请分批选择';return}
+  
   if(blocked.value){error.value=blocked.value.sample.sampleCode+'：'+(blocked.value.batch.receiptChangeBlockedReason||'已有后续流转，请先查看原记录处理');return}
   if(!reason.value.trim()){error.value='请选择或填写更正原因';return}
   if(!deleting.value&&(!Number.isSafeInteger(correctedQty.value)||Number(correctedQty.value)<=0)){error.value='正确数量须为正整数；整次登记错误请使用删除登记';return}

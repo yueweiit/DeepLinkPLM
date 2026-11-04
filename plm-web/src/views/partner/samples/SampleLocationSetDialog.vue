@@ -4,7 +4,7 @@ import {ElMessage,ElMessageBox} from 'element-plus'
 import {t as uiText} from '@/locales'
 import {useUserStore} from '@/stores/user'
 import {newRequestId} from '@/api/modules/partner'
-import {sampleIdentity,setSampleLocations} from '@/api/modules/sampleManagement'
+import {querySampleIdentities,setSampleLocations} from '@/api/modules/sampleManagement'
 import type {SampleIdentity,SampleLocationOption,SampleLocationSite} from '@/types/sampleManagement'
 import {sampleLocationLabel,sampleLocationSites,sampleLocationAccess} from '@/utils/sampleLocation'
 import {partnerError} from '@/utils/partnerError'
@@ -26,7 +26,7 @@ function choose(id:number){target.value=id;chosen.value=options.rows.value.find(
 async function created(row:SampleLocationOption){editorOpen.value=false;site.value=row.site;keyword.value='';await options.reload();await loadOptions();chosen.value=row;target.value=row.id}
 watch(site,()=>{if(!unknown.value){target.value=undefined;chosen.value=undefined;sourceLocationId.value=undefined;keyword.value='';void loadOptions()}})
 watch(()=>user.token,()=>emit('close'))
-onMounted(async()=>{try{const actual=await Promise.all(ids.map(id=>sampleIdentity(id)));if(!disposed&&auth===user.token){rows.value=actual;ready.value=true}}catch(e){if(!disposed)error.value=partnerError(e)}finally{loading.value=false}if(!disposed)void loadOptions()})
+onMounted(async()=>{try{const {content:actual}=await querySampleIdentities({ids,details:true});if(!disposed&&auth===user.token){rows.value=actual;ready.value=true}}catch(e){if(!disposed)error.value=partnerError(e)}finally{loading.value=false}if(!disposed)void loadOptions()})
 onBeforeUnmount(()=>{disposed=true;clearTimeout(searchTimer)})
 async function close(){if(busy.value||unknown.value)return;if(target.value||reason.value)try{await ElMessageBox.confirm(uiText('放弃本次尚未保存的位置设置？'),uiText('保留填写'),{confirmButtonText:uiText('放弃'),cancelButtonText:uiText('继续填写')})}catch{return}emit('close')}
 async function save(){

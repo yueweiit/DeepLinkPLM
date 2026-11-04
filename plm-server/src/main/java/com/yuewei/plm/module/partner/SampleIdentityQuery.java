@@ -23,6 +23,24 @@ final class SampleIdentityQuery {
   var rows=load(Map.of("identityId",Long.toString(id),"receiptStatus","all"));require(rows.size()==1,"样品主码不存在或未获授权");return rows.get(0);
  }
 
+ Map<String,Object> query(Map<String,Object> input){
+  require(!(input.containsKey("ids")&&input.containsKey("groupKeys")),"请按样品或款式选择一种查询范围");
+  require(!input.containsKey("filters")||input.get("filters") instanceof Map<?,?>,"样品筛选格式无效");
+  require(!input.containsKey("details")||input.get("details") instanceof Boolean,"详情开关无效");
+  var filters=new LinkedHashMap<String,String>();
+  for(var entry:map(input.get("filters")).entrySet()){
+   require(Set.of("domain","supplierCode","site","locationId","unlocated","keyword","receiptStatus").contains(entry.getKey()),"样品筛选字段无效");
+   require(entry.getValue() instanceof String||entry.getValue() instanceof Number||entry.getValue() instanceof Boolean,"样品筛选值无效");filters.put(entry.getKey(),String.valueOf(entry.getValue()));
+  }
+  var ids=new LinkedHashSet<Long>();var keys=new LinkedHashSet<String>();
+  if(input.containsKey("ids")){require(input.get("ids") instanceof List<?>,"样品ID格式无效");for(Object value:(List<?>)input.get("ids")){long id=number(value);require(id>0&&Long.toString(id).equals(String.valueOf(value)),"样品ID无效");ids.add(id);}filters.putIfAbsent("receiptStatus","all");}
+  if(input.containsKey("groupKeys")){require(input.get("groupKeys") instanceof List<?>,"款式范围格式无效");for(Object value:(List<?>)input.get("groupKeys")){require(value instanceof String&&!text(value).isEmpty(),"款式范围无效");keys.add((String)value);}}
+  if(input.containsKey("ids")&&ids.isEmpty()||input.containsKey("groupKeys")&&keys.isEmpty())return Map.of("content",List.of(),"totalElements",0);
+  var rows=load(filters,ids,Boolean.TRUE.equals(input.get("details"))).stream().filter(row->keys.isEmpty()||keys.contains(text(row.get("groupKey")))).toList();
+  require(ids.isEmpty()||rows.size()==ids.size(),"所选样品已变化或未获授权，请刷新后重新选择");
+  return Map.of("content",rows,"totalElements",rows.size());
+ }
+
  Map<String,Object> options(Map<String,String> query){
   var rows=load(Map.of());var suppliers=new LinkedHashMap<String,Map<String,Object>>();String keyword=text(query.get("keyword")).toLowerCase(Locale.ROOT);
   for(var row:rows){String code=text(row.get("supplierCode"));if(code.isEmpty())continue;var value=Map.<String,Object>of("supplierCode",code,"supplierName",text(row.get("supplierName")),"shortName",text(row.get("supplierShortName")));
@@ -32,6 +50,9 @@ final class SampleIdentityQuery {
  }
 
  private List<Map<String,Object>> load(Map<String,String> query){
+  return load(query,Set.of(),false);
+ }
+ private List<Map<String,Object>> load(Map<String,String> query,Set<Long> selectedIds,boolean details){
   String site=SampleSiteAccess.read(store,query.get("site"));boolean mexico=SampleSiteAccess.mexico(store);String domain=text(query.get("domain")),supplier=text(query.get("supplierCode"));
   var args=new ArrayList<Object>();String where="r.kind='sample_identity' and r.deleted_flag=0 and coalesce(r.data->>'redirectIdentityId','')=''";
   if(!mexico)where+=" and ("+visible+")";
@@ -40,6 +61,7 @@ final class SampleIdentityQuery {
 
   if(!domain.isEmpty()){SampleDomains.validate(domain);where+=" and r.data->>'domain'=?";args.add(domain);}
   if(!supplier.isEmpty()){where+=" and coalesce(nullif(r.supplier_code,''),r.data->>'supplierCode')=?";args.add(supplier);}
+  if(!selectedIds.isEmpty()){where+=" and r.record_id in ("+marks(selectedIds.size())+")";args.addAll(selectedIds);}
   if(number(query.get("identityId"))>0){where+=" and r.record_id=?";args.add(number(query.get("identityId")));}
   var raw=store.jdbc.queryForList("select r.record_id as id,r.code,r.name,r.status,r.version,r.supplier_code,r.data::text from plm_partner_record r where "+where+" order by r.updated_at desc,r.record_id desc",args.toArray());
   if(raw.isEmpty())return List.of();
@@ -55,7 +77,8 @@ final class SampleIdentityQuery {
   if(!batches.isEmpty()){
    var bids=batches.stream().map(b->number(b.get("id"))).toList();String in=marks(bids.size());var missing=new ArrayList<Long>();
    for(var batch:batches){var cached=map(decode(store.json,batch.get("data")).get("balances"));if(cached.get("positions") instanceof List<?> && cached.get("loans") instanceof List<?> && cached.get("transits") instanceof List<?>)batch.put("ledgerBalance",cached);else missing.add(number(batch.get("id")));}
-   if(!missing.isEmpty())for(var e:store.jdbc.queryForList("select event_id as id,record_id,action,data::text from plm_partner_event where record_id in ("+marks(missing.size())+") order by event_id",missing.toArray())){e.put("data",decode(store.json,e.get("data")));events.computeIfAbsent(number(e.get("record_id")),k->new ArrayList<>()).add(e);}
+   var eventIds=details&&!mexico?bids:missing;
+   if(!eventIds.isEmpty())for(var e:store.jdbc.queryForList("select event_id as id,record_id,action,data::text from plm_partner_event where record_id in ("+marks(eventIds.size())+") order by event_id",eventIds.toArray())){e.put("data",decode(store.json,e.get("data")));events.computeIfAbsent(number(e.get("record_id")),k->new ArrayList<>()).add(e);}
    for(var batch:batches)if(!batch.containsKey("ledgerBalance"))batch.put("ledgerBalance",SampleLedger.replay(events.getOrDefault(number(batch.get("id")),List.of())).view());
    String fileScope=mexico?"pf.purpose='photo' and not exists(select 1 from plm_partner_file private_file where private_file.attachment_id=a.attachment_id and private_file.purpose in ('financial','cooperation_cost'))":"pf.purpose in ('photo','material') and ("+store.access.visibleSqlClause("file","a.attachment_id")+")";
    for(var f:store.jdbc.queryForList("select pf.record_id,a.attachment_id as id,a.file_name as name,a.content_type as type from plm_partner_file pf join plm_attachment a on a.attachment_id=pf.attachment_id where pf.record_id in ("+in+") and "+fileScope+" and a.deleted_flag=0 and a.content_type like 'image/%' order by a.attachment_id",bids.toArray()))files.computeIfAbsent(number(f.get("record_id")),k->new ArrayList<>()).add(f);
@@ -64,8 +87,10 @@ final class SampleIdentityQuery {
   }
   var byIdentity=new HashMap<Long,List<Map<String,Object>>>();for(var batch:batches)byIdentity.computeIfAbsent(number(batch.get("sample_identity_id")),k->new ArrayList<>()).add(batch);
   var result=new ArrayList<Map<String,Object>>();long locationId=number(query.get("locationId"));boolean unlocated="true".equals(query.get("unlocated"));String keyword=text(query.get("keyword")).toLowerCase(Locale.ROOT),groupKey=text(query.get("groupKey"));
+  var corrections=new SampleReceiptCorrections(store);var referenced=details&&!mexico?corrections.referenceBlocks(batches.stream().map(b->number(b.get("id"))).toList()):Set.<Long>of();
   for(var h:headers.values()){
    var row=project(h,byIdentity.getOrDefault(number(h.get("id")),List.of()),files,directions,locations,site,mexico,locationId,unlocated);
+   if(details&&!mexico)for(var batch:maps(row.get("batches"))){map(batch.get("balances")).put("positions",batch.get("positions"));corrections.enrich(batch,events.getOrDefault(number(batch.get("id")),List.of()),referenced.contains(number(batch.get("id"))));}
    if((mexico||!site.isEmpty()||locationId>0||unlocated)&&!hasStock(row))continue;
    if(!groupKey.isEmpty()&&!groupKey.equals(row.get("groupKey")))continue;
    if(!keyword.isEmpty()&&!search(row,keyword)&&!recordedSupplierNames.getOrDefault(number(h.get("id")),"").toLowerCase(Locale.ROOT).contains(keyword))continue;result.add(row);

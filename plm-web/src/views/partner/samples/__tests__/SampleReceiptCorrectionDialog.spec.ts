@@ -4,14 +4,14 @@ import ElementPlus,{ElCheckbox,ElInputNumber,ElRadio,ElSelect} from 'element-plu
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
 import {useUserStore} from '@/stores/user'
 import Dialog from '../SampleReceiptCorrectionDialog.vue'
-const api=vi.hoisted(()=>({sampleIdentity:vi.fn(),sampleIdentityAction:vi.fn(),sampleIdentityBulkAction:vi.fn()}))
+const api=vi.hoisted(()=>({querySampleIdentities:vi.fn(),sampleIdentity:vi.fn(),sampleIdentityAction:vi.fn(),sampleIdentityBulkAction:vi.fn()}))
 vi.mock('@/api/modules/sampleManagement',()=>api)
 vi.mock('@/api/modules/partner',()=>({newRequestId:()=>crypto.randomUUID()}))
 const balances={onhand:4,available:4,borrowed:0,damaged:0,retained:0,positions:[{name:'中国样品柜',onhand:4,available:4,damaged:0,retained:0}]}
 const batch=(id=91,qty=4)=>({id,code:'SP-'+id,version:2,receivedDate:'2026-11-02',receivedQty:qty,effectiveReceivedQty:qty,receiptStatus:'active' as const,canCorrectReceipt:true,balances})
 const sample=(id=71)=>({id,sampleIdentityId:id,sampleCode:'SY-'+id,code:'SY-'+id,name:'透明壳',phoneName:'Apple iPhone 18 Pro Max',colorName:'黑色',specName:'18 Pro Max 黑色',version:3,domain:'partner' as const,sourceType:'catalog',balances,batches:[batch()]})
 let wrapper:VueWrapper
-beforeEach(()=>{vi.clearAllMocks();sessionStorage.clear();setActivePinia(createPinia());const user=useUserStore();user.token='engineer';user.profile={userId:1} as never;user.permissions=['samples:write'];api.sampleIdentity.mockImplementation(async id=>sample(id));api.sampleIdentityAction.mockResolvedValue(sample());api.sampleIdentityBulkAction.mockResolvedValue({content:[sample()]})})
+beforeEach(()=>{vi.clearAllMocks();api.querySampleIdentities.mockImplementation(async({ids}:{ids:number[]})=>({content:await Promise.all(ids.map(id=>api.sampleIdentity(id)))}));sessionStorage.clear();setActivePinia(createPinia());const user=useUserStore();user.token='engineer';user.profile={userId:1} as never;user.permissions=['samples:write'];api.sampleIdentity.mockImplementation(async id=>sample(id));api.sampleIdentityAction.mockResolvedValue(sample());api.sampleIdentityBulkAction.mockResolvedValue({content:[sample()]})})
 afterEach(()=>{wrapper?.unmount();document.body.innerHTML='';sessionStorage.clear()})
 async function start(action:'correct_receipt'|'void_receipt'='correct_receipt',samples=[sample()]){wrapper=mount(Dialog,{props:{action,samples},global:{plugins:[ElementPlus],stubs:{Teleport:true,ElSelect:{name:'ElSelect',props:['modelValue','ariaLabel'],emits:['update:modelValue'],template:'<select :aria-label="ariaLabel" :value="modelValue" @change="$emit(\'update:modelValue\',$event.target.value)"><slot/></select>'},ElOption:{props:['value','label'],template:'<option :value="value">{{label}}</option>'}}},attachTo:document.body});await flushPromises()}
 async function click(label:string){await wrapper.findAll('button').find(button=>button.text()===label)!.trigger('click');await flushPromises()}

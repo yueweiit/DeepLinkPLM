@@ -63,6 +63,8 @@ public class SampleIdentityRegistry {
  @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
  public Map<String,Object> page(Map<String,String> query){return new SampleIdentityQuery(store,visible("r")).page(query);}
  @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+ public Map<String,Object> query(Map<String,Object> input){return new SampleIdentityQuery(store,visible("r")).query(input);}
+ @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
  public Map<String,Object> options(Map<String,String> query){return new SampleIdentityQuery(store,visible("r")).options(query);}
  public void requirePhoto(long identity,long file){store.access.requirePermission("file:read");var sample=new SampleIdentityQuery(store,visible("r")).detail(identity);require(maps(sample.get("files")).stream().anyMatch(f->number(f.get("id"))==file),"样品照片不存在或未获授权");}
  @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)

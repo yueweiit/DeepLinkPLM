@@ -3,29 +3,31 @@ import { t as uiText } from '@/locales'
 
 import {computed,ref,watch} from 'vue'
 import {fileBlob,saveBlob} from '@/api/modules/partner'
+import {sampleIdentityPhoto} from '@/api/modules/sampleManagement'
 import {getAttachmentPreviewMetadata,type AttachmentPreviewVO} from '@/api/modules/attachment'
 import {useBlobPreview} from '@/composables/useBlobPreview'
 import {useUserStore} from '@/stores/user'
 import {attachmentPreviewKey} from '@/utils/authorizedBlobQueue'
 import {partnerError} from '@/utils/partnerError'
 interface PreviewFile {id:number;name?:string;version?:string}
-const props=defineProps<{file:PreviewFile;files?:PreviewFile[];title?:string}>()
+const props=defineProps<{file:PreviewFile;files?:PreviewFile[];title?:string;sampleIdentityId?:number}>()
 const emit=defineEmits<{close:[]}>()
 const index=ref(0),items=computed(()=>props.files?.length?props.files:[props.file]),current=computed(()=>items.value[index.value]||props.file)
 watch(()=>props.file.id,id=>{index.value=Math.max(0,items.value.findIndex(file=>file.id===id))},{immediate:true})
 const heading=computed(()=>`${props.title||uiText('图片预览')} · ${index.value+1} / ${items.value.length}`)
 const user=useUserStore(),metadata=ref<AttachmentPreviewVO>(),metadataLoading=ref(false),metadataError=ref(''),metadataRetry=ref(0),downloading=ref(false),downloadError=ref('')
 let controller:AbortController|undefined
-watch(()=>[current.value.id,user.token,metadataRetry.value] as const,async([id,token],_,onCleanup)=>{
+watch(()=>[current.value.id,props.sampleIdentityId,user.token,metadataRetry.value] as const,async([id,identityId,token],_,onCleanup)=>{
   const request=new AbortController();controller=request;onCleanup(()=>request.abort())
-  metadata.value=undefined;metadataError.value='';downloadError.value='';downloading.value=false;metadataLoading.value=!!token
-  if(!token)return
+  metadata.value=undefined;metadataError.value='';downloadError.value='';downloading.value=false;metadataLoading.value=!!token&&!identityId
+  if(!token||identityId)return
   try{const result=await getAttachmentPreviewMetadata(id,{signal:request.signal});if(!request.signal.aborted)metadata.value=result}
   catch(cause){if(!request.signal.aborted)metadataError.value=partnerError(cause)}
   finally{if(!request.signal.aborted)metadataLoading.value=false}
 },{immediate:true})
 const blob=useBlobPreview(()=>{
   const id=current.value.id
+  if(props.sampleIdentityId){const identityId=props.sampleIdentityId;return {key:`sample:${identityId}:${id}`,fetch:(signal:AbortSignal)=>sampleIdentityPhoto(identityId,id,{signal})}}
   if(!metadata.value?.previewable||metadata.value.attachmentId!==id)return
   return {key:attachmentPreviewKey(id),fetch:(signal:AbortSignal)=>fileBlob(id,true,{signal})}
 },{imageOnly:false,priority:true})
@@ -51,7 +53,7 @@ async function download(){
    <iframe v-else-if="url&&(type.includes('pdf')||type.startsWith('text/'))" :src="url" class="preview-frame" :title="uiText('附件预览')"/>
    <el-empty v-else :description="uiText('此格式请下载查看')"/>
   </div>
-  <details class="preview-file-info"><summary>{{ uiText('原文件信息') }}</summary><div><span class="original-file-name">{{current.name||uiText('原文件')}}</span><span v-if="current.version">{{ uiText('版本') }} {{current.version}}</span><el-button v-if="metadata&&!unsupported&&!error" link :loading="downloading" @click="download">{{ uiText('下载原文件') }}</el-button><span v-if="downloadError&&!unsupported" role="alert">{{ uiText('原件下载失败') }}：{{downloadError}}</span></div></details>
+  <details v-if="!sampleIdentityId" class="preview-file-info"><summary>{{ uiText('原文件信息') }}</summary><div><span class="original-file-name">{{current.name||uiText('原文件')}}</span><span v-if="current.version">{{ uiText('版本') }} {{current.version}}</span><el-button v-if="metadata&&!unsupported&&!error" link :loading="downloading" @click="download">{{ uiText('下载原文件') }}</el-button><span v-if="downloadError&&!unsupported" role="alert">{{ uiText('原件下载失败') }}：{{downloadError}}</span></div></details>
  </el-dialog>
 </template>
 <style scoped>
