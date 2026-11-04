@@ -106,6 +106,8 @@ export default {
   "实际存放位置（库位选填）": "Lugar de almacenamiento real (ubicación específica opcional)",
   "寄样资料引用": "Referencia en documentación de envío de muestras",
   "展开明细": "Mostrar detalles",
+  "展开本页全部": "Mostrar todos los detalles de esta página",
+  "收起本页全部": "Ocultar todos los detalles de esta página",
   "已从可选位置移除，原样品记录保留": "Se quitó de las ubicaciones disponibles; se conservan los registros de las muestras",
   "已删除": "Eliminada",
   "已选 {count} 种样品": "{count} tipos de muestra seleccionados",
