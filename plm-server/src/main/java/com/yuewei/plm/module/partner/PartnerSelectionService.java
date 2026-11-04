@@ -312,17 +312,38 @@ public class PartnerSelectionService {
   long changed=0;for(var row:distinct.values())if(!confirmed(row)){permissions.engineer();freezeRow(id,head,row,request);changed++;}
   if(changed>0){saveHeader(id,head);store.event(id,"selection_receipt_freeze",Map.of("rowIds",distinct.keySet(),"rows",changed,"reason","保存实际收样时保留本次选样依据","createsProduct",false),request);}
  }
+ @Transactional(readOnly=true) public Map<String,Object> transitionPreview(long id,Map<String,Object> input){
+  permissions.engineer();require("cancel".equals(text(input.get("action"))),"请选择取消选品操作");var head=selection(id,false);store.check(head,number(input.get("version")));var targets=transitionTargets(id,input,false);for(var row:targets)require(!Boolean.TRUE.equals(row.get("discarded")),"此选样已取消，可先恢复");
+  boolean canVoid=store.access.hasPermission("samples:write");var receipts=new ArrayList<Map<String,Object>>();
+  for(var batch:new SampleReceiptCorrections(store).selectionReceipts(id,targets.stream().map(row->text(row.get("rowId"))).toList())){
+   var item=new LinkedHashMap<String,Object>();for(String field:List.of("id","version","code","selectionRowId","name","colorName","effectiveReceivedQty"))item.put(field,batch.getOrDefault(field,""));item.put("displayCode",batch.getOrDefault("displayLabel",batch.get("code")));item.put("date",batch.getOrDefault("receivedDate",""));
+   var snapshot=map(batch.get("sourceSnapshot"));long phone=number(batch.get("phoneModelId"));item.put("modelName",maps(snapshot.get("phones")).stream().filter(member->number(member.get("phoneModelId"))==phone).map(member->text(member.getOrDefault("displayName",member.get("modelName")))).findFirst().orElse(text(snapshot.get("modelText"))));
+   item.put("canVoid",canVoid&&Boolean.TRUE.equals(batch.get("canCorrectReceipt")));item.put("blockedReason",canVoid?batch.get("receiptChangeBlockedReason"):"没有删除收样登记权限，可仅取消选品并保留样品");receipts.add(item);
+  }
+  return Map.of("id",id,"version",head.get("version"),"rows",targets.stream().map(row->Map.of("rowId",row.get("rowId"),"name",text(row.get("name")))).toList(),"receipts",receipts,"canVoidReceipts",canVoid);
+ }
+ private List<Map<String,Object>> transitionTargets(long id,Map<String,Object> input,boolean lock){
+  require(input.get("rows") instanceof List<?> && !maps(input.get("rows")).isEmpty(),"请选择本次修改的选样");var seen=new HashSet<String>();var targets=new ArrayList<Map<String,Object>>();
+  for(var item:maps(input.get("rows"))){String rid=required(item.get("rowId"),"选样行");require(validRowId(rid)&&seen.add(rid),"选样行无效或重复");var row=rows().find(id,rid,lock);require(!row.isEmpty()&&number(item.get("rowVersion"))==number(row.get("rowVersion")),"选样资料已变化，请刷新后重试");targets.add(row);}return targets;
+ }
+ private List<Map<String,Object>> transitionReceipts(Map<String,Object> input,String action){
+  String handling=text(input.getOrDefault("receiptHandling","keep"));require(Set.of("keep","void").contains(handling),"请选择保留样品或删除误登记收样");var receipts=maps(input.get("receipts"));
+  if(handling.equals("keep")){require(receipts.isEmpty(),"保留样品时不提交删除登记，请重新核对");return List.of();}
+  require(action.equals("cancel"),"删除误登记收样只能随取消选品办理");store.access.requirePermission("samples:write");require(input.get("receipts") instanceof List<?> && !receipts.isEmpty(),"请选择本次需要删除的误登记收样");required(input.get("reason"),"更正原因");var ids=new HashSet<Long>();
+  for(var receipt:receipts)require(number(receipt.get("id"))>0&&ids.add(number(receipt.get("id")))&&receipt.containsKey("version")&&number(receipt.get("version"))>=0,"收样登记重复或版本无效，请重新载入");return receipts;
+ }
  @Transactional public Map<String,Object> transitionRows(long id,Map<String,Object> input){
-  permissions.engineer();String request=request(input),action=required(input.get("action"),"选样操作");require(Set.of("edit","cancel","restore").contains(action),"选样操作无效");var head=selection(id,true);
+  permissions.engineer();String request=request(input),action=required(input.get("action"),"选样操作");require(Set.of("edit","cancel","restore").contains(action),"选样操作无效");var receipts=transitionReceipts(input,action);if(!receipts.isEmpty())SampleReceiptCorrections.lockInbound(store,receipts.stream().map(row->number(row.get("id"))).sorted().toList());var head=selection(id,true);
   String key="transition-"+UUID.nameUUIDFromBytes((store.access.actorId()+":"+request).getBytes(java.nio.charset.StandardCharsets.UTF_8));String fingerprint=PartnerQualityRules.digest(store.json,input);var existing=store.jdbc.queryForList("select action,data::text from plm_partner_event where record_id=? and request_id=?",id,key);
   if(!existing.isEmpty()){require("selection_transition".equals(text(existing.get(0).get("action")))&&fingerprint.equals(text(decode(store.json,existing.get(0).get("data")).get("requestHash"))),"提交标识已用于不同选样操作，请核对原结果");return detail(id);}store.check(head,number(input.get("version")));
-  require(input.get("rows") instanceof List<?> && !maps(input.get("rows")).isEmpty(),"请选择本次修改的选样");var seen=new HashSet<String>();var changes=new ArrayList<Map<String,Object>>();var blocked=action.equals("edit")?downstreamRows(maps(input.get("rows")).stream().map(row->text(row.get("rowId"))).toList(),id):Set.<String>of();
-  for(var item:maps(input.get("rows"))){String rid=required(item.get("rowId"),"选样行");require(validRowId(rid)&&seen.add(rid),"选样行无效或重复");var row=rows().find(id,rid,true);require(!row.isEmpty()&&number(item.get("rowVersion"))==number(row.get("rowVersion")),"选样资料已变化，请刷新后重试");if(action.equals("edit"))requireNoDownstream(row,blocked);if(action.equals("restore"))require(Boolean.TRUE.equals(row.get("discarded")),"仅已取消的选样可恢复");else require(!Boolean.TRUE.equals(row.get("discarded")),"此选样已取消，可先恢复");if(action.equals("restore"))suppliers.requireSupplierForNewUse(required(row.get("supplierCode"),"供应商"));var next=copy(store.json,row);if(action.equals("edit")){for(String field:List.of("confirmationSnapshot","confirmedAt","selectionConfirmationVersion","receiptColorMode"))next.remove(field);next.put("confirmed",false);}next.put("selected",!action.equals("cancel"));next.put("discarded",action.equals("cancel"));changes.add(Map.of("before",row,"after",next));}
-  for(var change:changes)rows().put(id,map(change.get("after")),map(change.get("before")),key);saveHeader(id,head);String reason=text(input.get("reason"));if(reason.isEmpty())reason=switch(action){case "edit"->"修改选样";case "cancel"->"取消选样";default->"恢复选样";};store.event(id,"selection_transition",Map.of("action",action,"changes",changes,"reason",reason,"requestHash",fingerprint),key);return detail(id);
+  var targets=transitionTargets(id,input,true);var changes=new ArrayList<Map<String,Object>>();var blocked=action.equals("edit")?downstreamRows(targets.stream().map(row->text(row.get("rowId"))).toList(),id):Set.<String>of();
+  for(var row:targets){if(action.equals("edit"))requireNoDownstream(row,blocked);if(action.equals("restore"))require(Boolean.TRUE.equals(row.get("discarded")),"仅已取消的选样可恢复");else require(!Boolean.TRUE.equals(row.get("discarded")),"此选样已取消，可先恢复");if(action.equals("restore"))suppliers.requireSupplierForNewUse(required(row.get("supplierCode"),"供应商"));var next=copy(store.json,row);if(action.equals("edit")){for(String field:List.of("confirmationSnapshot","confirmedAt","selectionConfirmationVersion","receiptColorMode"))next.remove(field);next.put("confirmed",false);}next.put("selected",!action.equals("cancel"));next.put("discarded",action.equals("cancel"));changes.add(Map.of("before",row,"after",next));}
+  if(!receipts.isEmpty())new SampleReceiptCorrections(store).voidSelectionReceipts(id,targets.stream().map(row->text(row.get("rowId"))).toList(),receipts,key,text(input.get("reason")));
+  for(var change:changes)rows().put(id,map(change.get("after")),map(change.get("before")),key);saveHeader(id,head);String reason=text(input.get("reason"));if(reason.isEmpty())reason=switch(action){case "edit"->"修改选样";case "cancel"->"取消选样";default->"恢复选样";};store.event(id,"selection_transition",Map.of("action",action,"changes",changes,"reason",reason,"requestHash",fingerprint,"receiptHandling",text(input.getOrDefault("receiptHandling","keep")),"receipts",receipts),key);return detail(id);
  }
  private void requireNoDownstream(Map<String,Object> row,Set<String> blocked){
   boolean direct=directDownstream(row);String rid=text(row.get("rowId"));
-  require(!direct&&!blocked.contains(rid),"这条选样已有真实收样或后续业务记录，不能修改或取消原事实；可增选其他型号或登记再次收样");
+  require(!direct&&!blocked.contains(rid),"这条选样已有收样或后续业务历史，不能改写原选样依据；可以取消选用、重新选品或继续登记收样");
  }
  static List<String> sampleColors(Object input){
   if(input==null)return List.of();

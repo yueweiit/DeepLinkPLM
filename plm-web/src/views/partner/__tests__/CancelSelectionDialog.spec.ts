@@ -1,0 +1,20 @@
+import {flushPromises,mount,type VueWrapper} from '@vue/test-utils'
+import {createMemoryHistory,createRouter} from 'vue-router'
+import ElementPlus,{ElCheckbox,ElRadioGroup} from 'element-plus'
+import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
+import Dialog from '../selection/CancelSelectionDialog.vue'
+import {newSelectionRow} from '@/utils/partnerSelections'
+const api=vi.hoisted(()=>({previewSelectionCancellation:vi.fn(),transitionSelectionRows:vi.fn()}))
+vi.mock('@/api/modules/partnerSelections',()=>api)
+vi.mock('@/api/modules/partner',()=>({newRequestId:()=>crypto.randomUUID()}))
+const batch=(id=91,canVoid=true)=>({id,version:2,code:'SP-'+id,displayCode:'LZB-SP-'+id,selectionRowId:'row-1',name:'透明壳',date:'2026-11-04',modelName:'Apple iPhone 18 Pro Max',colorName:'黑色',effectiveReceivedQty:2,canVoid,blockedReason:canVoid?'':'已有借出，请先处理后续记录'})
+let wrapper:VueWrapper
+beforeEach(()=>{vi.clearAllMocks();api.previewSelectionCancellation.mockResolvedValue({id:7,version:3,rows:[{rowId:'row-1',name:'透明壳'}],receipts:[batch(),batch(92,false)],canVoidReceipts:true});api.transitionSelectionRows.mockResolvedValue({id:7,version:4})})
+afterEach(()=>{wrapper?.unmount();document.body.innerHTML=''})
+async function start(){const router=createRouter({history:createMemoryHistory(),routes:[{path:'/:pathMatch(.*)*',component:{template:'<div />'}}]});await router.push('/partner-selections?id=7');wrapper=mount(Dialog,{props:{id:7,version:3,rows:[{...newSelectionRow(),rowId:'row-1',rowVersion:2,name:'透明壳'}]},global:{plugins:[router,ElementPlus],stubs:{Teleport:true}},attachTo:document.body});await flushPromises()}
+async function click(text:string){await wrapper.findAll('button').find(button=>button.text()===text)!.trigger('click');await flushPromises()}
+describe('cancel selection with explicit receipt handling',()=>{
+ it('defaults to retaining physical samples and displays their exact batch details and blockers',async()=>{await start();expect(wrapper.text()).toContain('LZB-SP-91');expect(wrapper.text()).toContain('Apple iPhone 18 Pro Max');expect(wrapper.text()).toContain('已有借出，请先处理后续记录');expect(wrapper.findAll('a')[0].attributes('href')).toBe('/samples?id=91');await click('仅取消选品，保留样品');expect(api.transitionSelectionRows).toHaveBeenCalledWith(7,expect.objectContaining({action:'cancel',version:3,rows:[{rowId:'row-1',rowVersion:2}],receiptHandling:'keep'}));expect(api.transitionSelectionRows.mock.calls[0][1]).not.toHaveProperty('receipts');expect(wrapper.emitted('saved')).toHaveLength(1)})
+ it('requires an explicit eligible batch and reason and sends only the selected receipt in the same cancel command',async()=>{await start();wrapper.getComponent(ElRadioGroup).vm.$emit('update:modelValue','void');await flushPromises();expect(wrapper.findAllComponents(ElCheckbox).map(item=>item.props('modelValue'))).toEqual([false,false]);expect(wrapper.findAllComponents(ElCheckbox)[1].props('disabled')).toBe(true);await click('取消选品并删除勾选登记');expect(api.transitionSelectionRows).not.toHaveBeenCalled();expect(wrapper.text()).toContain('请勾选确实需要删除');wrapper.findAllComponents(ElCheckbox)[0].vm.$emit('update:modelValue',true);await flushPromises();await click('取消选品并删除勾选登记');expect(wrapper.text()).toContain('请填写删除误登记的原因');await wrapper.get('textarea').setValue('重复登记');await click('取消选品并删除勾选登记');expect(api.transitionSelectionRows).toHaveBeenCalledWith(7,expect.objectContaining({receiptHandling:'void',receipts:[{id:91,version:2}],reason:'重复登记'}))})
+ it('locks choices for an unknown result and checks the same original command without double deductions',async()=>{api.transitionSelectionRows.mockRejectedValueOnce(Object.assign(new Error('网络中断'),{code:'ERR_NETWORK'}));await start();await click('仅取消选品，保留样品');const original=structuredClone(api.transitionSelectionRows.mock.calls[0][1]);expect(wrapper.text()).toContain('保存结果待核对');expect(wrapper.getComponent(ElRadioGroup).props('disabled')).toBe(true);await click('核对取消结果');expect(api.transitionSelectionRows.mock.calls[1][1]).toEqual(original);expect(wrapper.emitted('saved')).toHaveLength(1)})
+})

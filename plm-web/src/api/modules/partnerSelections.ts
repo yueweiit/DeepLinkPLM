@@ -1,7 +1,7 @@
 import request, { unwrapResponse, authorizedPreviewOptions } from '../request'
 import { saveBlob } from './partner'
 import type {PartnerFile} from '@/types/partner'
-import type { SelectionConfirmation, SelectionConfirmationPreview, SelectionFileJob, SelectionFilter, SelectionMutation, SelectionPage, SelectionReceiptInput, SelectionReceiptPreview, SelectionReceiptResult, SelectionRow, SelectionRowPage, SelectionSave, SelectionSheet, SelectionStagedImage, SelectionStagedRow, SelectionUpload, SelectionTransition } from '@/types/partnerSelections'
+import type { SelectionConfirmation, SelectionConfirmationPreview, SelectionFileJob, SelectionFilter, SelectionMutation, SelectionPage, SelectionReceiptInput, SelectionReceiptPreview, SelectionReceiptResult, SelectionRow, SelectionRowPage, SelectionSave, SelectionSheet, SelectionStagedImage, SelectionStagedRow, SelectionUpload, SelectionTransition, SelectionCancellationPreview } from '@/types/partnerSelections'
 const root='/partner-selections'
 export const selectionPage=async(params:{keyword?:string;supplierCode?:string;purpose?:'my_selection'|'historical'|'all';page:number;size:number})=>unwrapResponse<SelectionPage>(await request.get(root,{params}))
 export const selectionDetail=async(id:number)=>unwrapResponse<SelectionSheet>(await request.get(`${root}/${id}`))
@@ -16,6 +16,7 @@ export const confirmSelection=async(id:number,data:SelectionConfirmation)=>unwra
 export const previewSelectionReceipts=async(id:number,data:SelectionReceiptInput)=>unwrapResponse<SelectionReceiptPreview>(await request.post(`${root}/${id}/sample-receipts/preview`,data))
 export const saveSelectionReceipts=async(id:number,data:SelectionReceiptInput)=>unwrapResponse<SelectionReceiptResult>(await request.post(`${root}/${id}/sample-receipts`,data,{timeout:180000}))
 export const transitionSelectionRows=async(id:number,data:SelectionTransition)=>unwrapResponse<SelectionSheet>(await request.post(`${root}/${id}/rows/transition`,data))
+export const previewSelectionCancellation=async(id:number,data:Pick<SelectionTransition,'version'|'rows'>)=>unwrapResponse<SelectionCancellationPreview>(await request.post(`${root}/${id}/rows/transition-preview`,{...data,action:'cancel'}))
 // One file contract serves source records and historical selections; ownership stays server-checked.
 export type PartnerFileContext='selection'|'catalog'
 function createFileClient(base:string,label:string){return {

@@ -36,12 +36,18 @@ const showBulk=computed(()=>lines.value.length>1||lines.value.some(line=>(metada
 const libraryModels=(line:SelectionReceiptInputRow)=>metadata.value.get(line.clientRowId)?.receiptPhoneScopeMode==='unspecified'
 const bulkLibraryModels=computed(()=>selectedBulkLines.value.some(libraryModels))
 const bulkPhones=computed(()=>[...new Map(selectedBulkLines.value.filter(line=>!libraryModels(line)).flatMap(line=>metadata.value.get(line.clientRowId)?.phones||[]).map(phone=>[phone.phoneModelId,phone])).values()])
-const bulkPhoneProblems=computed(()=>{
- const styles=[...new Map(selectedBulkLines.value.map(line=>[JSON.stringify([line.rowId,line.rowVersion]),line])).values()]
- return styles.flatMap(line=>{if(libraryModels(line))return[];const phones=metadata.value.get(line.clientRowId)?.phones||[],missing=bulkPhoneIds.value.filter(id=>{const phone=phones.find(phone=>phone.phoneModelId===id);return !phone||!!unavailablePhone(phone)})
-  return missing.length?[`${styleName(line)}：${missing.map(id=>{const phone=bulkPhones.value.find(phone=>phone.phoneModelId===id);return phone?.displayName||phone?.modelName||`#${id}`}).join('、')}`]:[]
- })
-})
+type SkippedStyle={key:string;name:string;phones:string[];lines:SelectionReceiptInputRow[]}
+const skippedStyles=ref<SkippedStyle[]>([]),bulkOutcome=ref(''),bulkOmissions=ref<{name:string;phones:string[]}[]>([]),quantityHints=ref(new Map<string,string>())
+const selectedStyleCount=computed(()=>new Set(selectedBulkLines.value.map(styleKey)).size)
+function restoreSkipped(key:string){
+ if(bulkDisabled.value)return
+ const group=skippedStyles.value.find(group=>group.key===key);if(!group)return
+ const order=new Map(props.rows.map((row,index)=>[row.rowId,index]))
+ lines.value=[...lines.value,...group.lines].sort((a,b)=>(order.get(a.rowId)??0)-(order.get(b.rowId)??0))
+ for(const line of group.lines)checkedLines.value.add(line.clientRowId)
+ skippedStyles.value=skippedStyles.value.filter(group=>group.key!==key)
+ bulkOutcome.value='';bulkOmissions.value=[]
+}
 const allBulkChecked=computed(()=>!!lines.value.length&&selectedBulkLines.value.length===lines.value.length),someBulkChecked=computed(()=>!!selectedBulkLines.value.length&&!allBulkChecked.value)
 const bulkDisabled=computed(()=>busy.value||loading.value||unknown.value||actorChanged.value||phase.value!=='edit')
 function checkBulkLine(id:string,checked:boolean){if(bulkDisabled.value)return;if(checked)checkedLines.value.add(id);else checkedLines.value.delete(id)}
@@ -127,67 +133,81 @@ async function selectAllStyleModels(){
  if(!targets.length){ElMessage.warning(uiText('请先勾选要填写的收样规格'));return}
  await applyBulkModels(targets,[],true)
 }
+type ModelSpec=BulkValues&{inherited?:boolean;quantityConflict?:boolean}
+function inheritedModelSpecs(selected:SelectionReceiptInputRow[]):ModelSpec[]{
+ const colors=new Map<string,SelectionReceiptInputRow[]>()
+ for(const line of selected){const name=colorValue(line).trim();if(!name)continue;const key=colorKey(name);if(!colors.has(key))colors.set(key,[]);colors.get(key)!.push(line)}
+ return [...colors.values()].map(rows=>{const quantities=new Set(rows.map(row=>row.qty));return{colorName:colorValue(rows[0]!).trim(),qty:quantities.size===1?rows[0]!.qty:undefined,inherited:true,quantityConflict:quantities.size>1}})
+}
 async function applyBulkModels(targets:SelectionReceiptInputRow[],specs:BulkValues[],allStyleModels=false){
- if(allStyleModels&&targets.some(libraryModels)){ElMessage.warning(uiText('供应商未注明型号，请手动选择实际收到的手机型号，不能按供方全选'));return}
- if(!allStyleModels&&bulkPhoneProblems.value.length){ElMessage.warning(uiText('部分款式不包含所选实收型号，请调整勾选款式或型号'));return}
  if(specs.length>1&&specs.some(spec=>!spec.colorName)){ElMessage.warning(uiText('多种颜色请逐行填写颜色名称'));return}
  if(new Set(specs.filter(spec=>spec.colorName).map(spec=>colorKey(spec.colorName))).size!==specs.filter(spec=>spec.colorName).length){ElMessage.warning(uiText('批量颜色重复，请合并为一行'));return}
- const styles=new Map<string,SelectionReceiptInputRow[]>()
- const sourceStyles=new Map<string,SelectionReceiptInputRow[]>()
+ const styles=new Map<string,SelectionReceiptInputRow[]>(),sourceStyles=new Map<string,SelectionReceiptInputRow[]>()
  for(const line of lines.value){const key=styleKey(line);if(!sourceStyles.has(key))sourceStyles.set(key,[]);sourceStyles.get(key)!.push(line)}
  for(const line of targets){const key=styleKey(line);if(!styles.has(key))styles.set(key,[]);styles.get(key)!.push(line)}
- const reserved=new Set<string>(),plan:{line?:SelectionReceiptInputRow;anchor:SelectionReceiptInputRow;phoneId:number;spec?:BulkValues}[]=[]
- for(const selected of styles.values()){
-  const anchor=selected[0]!,sourceLines=sourceStyles.get(styleKey(anchor))||[],byPhone=new Map<number|undefined,SelectionReceiptInputRow[]>()
-  for(const line of sourceLines){if(!byPhone.has(line.phoneModelId))byPhone.set(line.phoneModelId,[]);byPhone.get(line.phoneModelId)!.push(line)}
-  const intendedColors=info(anchor)?.receiptColorMode==='selected_pairs'?[]:[...new Map([...(info(anchor)?.sampleColors||[]),...selected.filter(line=>!line.phoneModelId).map(colorValue)].filter(name=>name.trim()).map(name=>[colorKey(name),name])).values()]
-  const styleSpecs:BulkValues[]=allStyleModels?intendedColors.map(colorName=>({colorName})):specs
-  const phoneIds=allStyleModels?[...new Set((info(anchor)?.phones||[]).filter(phone=>!unavailablePhone(phone)).map(phone=>phone.phoneModelId))]:[...new Set(bulkPhoneIds.value)]
-  if(allStyleModels&&!phoneIds.length){ElMessage.warning(uiText('所选款式暂无可用型号，请先核对型号资料'));return}
+ const reserved=new Set<string>(),plan:{line?:SelectionReceiptInputRow;anchor:SelectionReceiptInputRow;phoneId:number;spec?:ModelSpec}[]=[]
+ const skipped:SkippedStyle[]=[],omissions:{name:string;phones:string[]}[]=[]
+ let appliedStyles=0
+ for(const [key,selected] of styles){
+  const anchor=selected[0]!,sourceLines=sourceStyles.get(key)||[],available=(info(anchor)?.phones||[]).filter(phone=>!unavailablePhone(phone))
+  const availableIds=new Set(available.map(phone=>phone.phoneModelId))
+  const wanted=allStyleModels?(libraryModels(anchor)?[]:[...availableIds]):[...new Set(bulkPhoneIds.value)]
+  const phoneIds=wanted.filter(id=>libraryModels(anchor)||availableIds.has(id))
+  const missing=wanted.filter(id=>!phoneIds.includes(id)).map(id=>{const phone=bulkPhones.value.find(phone=>phone.phoneModelId===id);return phone?.displayName||phone?.modelName||`#${id}`})
+  if(allStyleModels&&libraryModels(anchor))missing.push(uiText('供应商未注明型号，不能按供方全选'))
+  if(missing.length&&(phoneIds.length||selected.every(line=>!!line.phoneModelId)))omissions.push({name:styleName(anchor),phones:missing})
+  if(!phoneIds.length){
+   const placeholders=selected.filter(line=>!line.phoneModelId)
+   if(placeholders.length)skipped.push({key,name:styleName(anchor),phones:missing.length?missing:[uiText('暂无可用型号')],lines:placeholders})
+   continue
+  }
+  appliedStyles++
+  const inherited=inheritedModelSpecs(selected),historical=info(anchor)?.receiptColorMode==='selected_pairs'
   for(const phoneId of phoneIds){
-   const scoped=byPhone.get(phoneId)||[],checked=scoped.filter(line=>checkedLines.value.has(line.clientRowId))
+   const scoped=sourceLines.filter(line=>line.phoneModelId===phoneId),checked=scoped.filter(line=>checkedLines.value.has(line.clientRowId))
+   // Confirmed historical colours remain specific to their original phone; never spread their union.
+   const templates=historical?inheritedModelSpecs(selected.filter(line=>line.phoneModelId===phoneId)):inherited
+   let styleSpecs:ModelSpec[]
+   const explicitColors=specs.some(spec=>!!spec.colorName)
+   if(explicitColors){styleSpecs=specs.map(spec=>{const previous=templates.find(item=>colorKey(item.colorName)===colorKey(spec.colorName));return {...spec,...(spec.qty==null&&previous?{qty:previous.qty,inherited:true,quantityConflict:previous.quantityConflict}:{})}})}
+   else{styleSpecs=templates.map(spec=>({...spec,...(specs[0]?.qty!=null?{qty:specs[0].qty,quantityConflict:false}:{} )}));if(!styleSpecs.length)styleSpecs=specs}
    if(!styleSpecs.length||styleSpecs.length===1&&!styleSpecs[0]!.colorName){
-    if(scoped.length){
-     if(!styleSpecs.length)continue
-     if(!checked.length){ElMessage.warning(uiText('该款该型号已有未勾选规格，请勾选后应用'));return}
-     for(const line of checked){reserved.add(line.clientRowId);plan.push({line,anchor,phoneId,spec:styleSpecs[0]})}
-    }else{
-     const blank=selected.find(line=>!line.phoneModelId&&!reserved.has(line.clientRowId))
-     if(blank)reserved.add(blank.clientRowId)
-     plan.push({line:blank,anchor,phoneId,spec:styleSpecs[0]})
-    }
+    if(scoped.length){if(specs[0]?.qty!=null)for(const line of checked){reserved.add(line.clientRowId);plan.push({line,anchor,phoneId,spec:specs[0]})}}
+    else{const blank=selected.find(line=>!line.phoneModelId&&!reserved.has(line.clientRowId));if(blank)reserved.add(blank.clientRowId);plan.push({line:blank,anchor,phoneId,spec:styleSpecs[0]})}
     continue
    }
-   const missing:BulkValues[]=[]
    for(const spec of styleSpecs){
     const matches=scoped.filter(line=>colorKey(colorValue(line))===colorKey(spec.colorName))
-    if(allStyleModels&&matches.length)continue
-    if(matches.some(line=>!checkedLines.value.has(line.clientRowId))){ElMessage.warning(uiText('该款已有未勾选的同色规格，请勾选后应用'));return}
-    if(matches.length>1){ElMessage.warning(uiText('该款有多条同名颜色规格，请先逐条核对'));return}
-    const line=matches[0]
-    if(line){reserved.add(line.clientRowId);plan.push({line,anchor,phoneId,spec})}else missing.push(spec)
-   }
-   for(const spec of missing){
-    const blank=selected.find(line=>!reserved.has(line.clientRowId)&&(!line.phoneModelId||line.phoneModelId===phoneId)&&!line.colorId&&(!colorValue(line).trim()||allStyleModels&&!line.phoneModelId&&colorKey(colorValue(line))===colorKey(spec.colorName)))
+    if(matches.length){
+     if(!explicitColors&&specs[0]?.qty==null)continue
+     // An unchecked exception stays untouched; an existing specification is never duplicated.
+     for(const line of matches.filter(line=>checkedLines.value.has(line.clientRowId))){reserved.add(line.clientRowId);plan.push({line,anchor,phoneId,spec:{...spec,inherited:false,qty:specs.find(value=>colorKey(value.colorName)===colorKey(spec.colorName))?.qty??(!explicitColors?specs[0]?.qty:undefined)}})}
+     continue
+    }
+    const blank=selected.find(line=>!reserved.has(line.clientRowId)&&(!line.phoneModelId||line.phoneModelId===phoneId)&&(!line.colorId&&!colorValue(line).trim()||!line.phoneModelId&&colorKey(colorValue(line))===colorKey(spec.colorName)))
     if(blank)reserved.add(blank.clientRowId)
     plan.push({line:blank,anchor,phoneId,spec})
    }
   }
  }
+ if(!appliedStyles){ElMessage.warning(uiText('本次没有可添加型号'));return}
  let phonesChanged=false
  const additions=new Map<string,SelectionReceiptInputRow[]>()
  for(const item of plan){
-  const line=item.line||createLine(item.anchor)
+  const line=item.line||createLine(item.anchor),newPhone=!item.line||line.phoneModelId!==item.phoneId
   if(!item.line){const key=styleKey(item.anchor);if(!additions.has(key))additions.set(key,[]);additions.get(key)!.push(line);checkedLines.value.add(line.clientRowId)}
-  if(line.phoneModelId!==item.phoneId){const name=colorValue(line);line.phoneModelId=item.phoneId;line.colorName=name;line.colorId=undefined;clearColorIdentity(line);phonesChanged=true}
-  else if(!item.line)phonesChanged=true
+  if(newPhone){const name=colorValue(line);line.phoneModelId=item.phoneId;line.colorName=name;line.colorId=undefined;clearColorIdentity(line);phonesChanged=true}
   if(item.spec?.colorName){if(item.spec.colorName===colorValue(line).trim())line.colorName=item.spec.colorName;else colorInput(line,item.spec.colorName)}
-  if(item.spec?.qty!=null)line.qty=item.spec.qty
+  if(item.spec?.qty!=null||newPhone&&item.spec?.inherited)line.qty=item.spec.qty
+  if(newPhone&&item.spec?.quantityConflict)quantityHints.value.set(line.clientRowId,'本款同色数量不一致，请填写本型号实际数量')
  }
  appendGroupedLines(additions,styleKey)
+ const skippedIds=new Set(skipped.flatMap(group=>group.lines.map(line=>line.clientRowId)))
+ if(skippedIds.size){lines.value=lines.value.filter(line=>!skippedIds.has(line.clientRowId));for(const id of skippedIds)checkedLines.value.delete(id);skippedStyles.value.push(...skipped)}
  if(allStyleModels)bulkPhoneIds.value=[]
  if(phonesChanged){if(targets.some(line=>info(line)?.receiptColorMode!=='at_receipt'))await options();preview.value=undefined}
- ElMessage.success(uiText(allStyleModels?'已按各款型号全选，已有规格保留，可继续填写颜色和数量':'实收型号已应用，已有规格保留，可继续逐条调整'))
+ bulkOmissions.value=omissions;bulkOutcome.value=uiText('已应用{value0}款，跳过{value1}款',{value0:appliedStyles,value1:styles.size-appliedStyles})
+ ElMessage.success(bulkOutcome.value)
 }
 const identityOptions=ref(new Map<string,SampleIdentity[]>()),exactIdentityIds=ref(new Map<string,Set<number>>()),identityLoading=ref(new Set<string>()),identityReview=ref(new Map<string,string>()),printOpen=ref(false)
 const printLabels=computed<SampleLabel[]>(()=>[...new Map((result.value?.batches||[]).filter(b=>b.sampleIdentityId&&b.sampleCode).map(b=>[b.sampleIdentityId,{sampleIdentityId:b.sampleIdentityId!,sampleCode:b.sampleCode!,name:b.name,supplierName:b.supplierName,phoneName:b.phoneName,colorName:b.colorName}])).values()])
@@ -200,7 +220,7 @@ async function identitiesFor(line:SelectionReceiptInputRow,keyword=''){
  catch(e){if(auth===user.token&&!actorChanged.value&&ticket===identityTickets.get(line.clientRowId))error.value=e instanceof Error?e.message:'样品码候选读取失败，可重试'}finally{if(ticket===identityTickets.get(line.clientRowId))identityLoading.value.delete(line.clientRowId)}
 }
 function clearColorIdentity(line:SelectionReceiptInputRow){line.sampleIdentityId=undefined;line.identityReason=undefined;identityOptions.value.delete(line.clientRowId);exactIdentityIds.value.delete(line.clientRowId);identityReview.value.delete(line.clientRowId);identityLoading.value.delete(line.clientRowId);identityTickets.set(line.clientRowId,++identityEpoch)}
-function colorInput(line:SelectionReceiptInputRow,value:string){line.colorName=value;line.colorId=undefined;clearColorIdentity(line)}
+function colorInput(line:SelectionReceiptInputRow,value:string){line.colorName=value;line.colorId=undefined;quantityHints.value.delete(line.clientRowId);clearColorIdentity(line)}
 type ColorSuggestion={value:string;id:number;name:string;description:string}
 function colorSuggestions(line:SelectionReceiptInputRow){return(query:string,done:(items:ColorSuggestion[])=>void)=>{
  const colors=info(line)?.colors||[],keyword=query.trim().toLocaleLowerCase(),counts=new Map<string,number>()
@@ -225,9 +245,9 @@ function setBusy(value:boolean){busy.value=value;emit('busy',!actorChanged.value
 function invalidate(){if(initializing||unknown.value||actorChanged.value||phase.value==='saved')return;preview.value=undefined;showIssues.value=false;error.value='';requestId.value=newRequestId();phase.value='edit'}
 watch([shared,lines],invalidate,{deep:true})
 function acceptOptions(data:SelectionReceiptPreview){preview.value=data;for(const item of data.rows)metadata.value.set(item.clientRowId,{...item,phones:item.phones||[],colors:item.colors||[],refs:item.refs||[],messages:item.messages||[]})}
-async function options(){const seq=++sequence;loading.value=true;error.value='';try{const data=await previewSelectionReceipts(props.id,payload());if(seq!==sequence)return;acceptOptions(data);for(const line of lines.value){const phones=info(line)?.phones||[];if(!line.phoneModelId&&!libraryModels(line)&&phones.length===1)line.phoneModelId=phones[0].phoneModelId}}catch(e){if(seq===sequence)error.value=partnerError(e)}finally{if(seq===sequence)loading.value=false}}
-async function initialize(){if(!actor){loading.value=false;initializing=false;actorChanged.value=true;error.value='登录身份尚未就绪，请重新进入收样。';return}lines.value=props.rows.map(row=>({clientRowId:newRequestId(),rowId:row.rowId,rowVersion:row.rowVersion||0,qty:2}));selectInitialLines();try{const stored=sessionStorage.getItem(pendingKey);if(stored){const pending=JSON.parse(stored) as {actor:string;input:SelectionReceiptInput;metadata:SelectionReceiptPreviewRow[]};if(pending.actor!==actor)throw new Error('收样身份不符');pendingPayload=pending.input;requestId.value=pending.input.requestId;Object.assign(shared,{date:pending.input.date,location:pending.input.location,site:pending.input.site||'',locationId:pending.input.locationId,locationCode:pending.input.locationCode||'',locationParts:pending.input.locationParts||{},ownerUserId:pending.input.ownerUserId,ownerName:pending.input.ownerName});lines.value=pending.input.rows;selectInitialLines();const exact=new Map(pending.metadata.map(row=>[row.clientRowId,row])),sources=new Map(pending.metadata.filter(row=>row.receiptColorMode==='at_receipt').map(row=>[styleKey(row),row]));metadata.value=new Map(lines.value.flatMap(line=>{const data=exact.get(line.clientRowId)||sources.get(styleKey(line));return data?[[line.clientRowId,{...data,clientRowId:line.clientRowId}]as const]:[]}));unknown.value=true;phase.value='edit';loading.value=false;error.value='上次保存结果尚未核对，请先核对本次保存结果。';emit('busy',true);initializing=false;return}}catch{clearPending()}await options();prefillColors();selectInitialLines();initializing=false;preview.value=undefined;for(const line of lines.value)if(line.phoneModelId&&line.colorId)void identitiesFor(line)}
-watch(()=>user.profile?.userId,value=>{if(String(value||'')!==actor){actorChanged.value=true;unknown.value=false;lines.value=[];checkedLines.value.clear();bulkSpecs.value=[blankBulkSpec()];bulkPhoneIds.value=[];metadata.value=new Map();Object.assign(shared,{date:'',location:'',site:'',locationId:undefined,locationCode:'',locationParts:{},ownerUserId:undefined,ownerName:''});error.value='登录账号已改变，请重新进入收样。';emit('busy',false)}})
+async function options(){const seq=++sequence;loading.value=true;error.value='';try{const data=await previewSelectionReceipts(props.id,payload());if(seq!==sequence)return;acceptOptions(data);for(const line of lines.value){const phones=info(line)?.phones||[];if(!line.phoneModelId&&!libraryModels(line)&&phones.length===1&&!unavailablePhone(phones[0]!))line.phoneModelId=phones[0].phoneModelId}}catch(e){if(seq===sequence)error.value=partnerError(e)}finally{if(seq===sequence)loading.value=false}}
+async function initialize(){if(!actor){loading.value=false;initializing=false;actorChanged.value=true;error.value='登录身份尚未就绪，请重新进入收样。';return}lines.value=props.rows.map(row=>({clientRowId:newRequestId(),rowId:row.rowId,rowVersion:row.rowVersion||0,qty:2}));selectInitialLines();try{const stored=sessionStorage.getItem(pendingKey);if(stored){const pending=JSON.parse(stored) as {actor:string;input:SelectionReceiptInput;metadata:SelectionReceiptPreviewRow[];skippedStyles?:SkippedStyle[]};if(pending.actor!==actor)throw new Error('收样身份不符');pendingPayload=pending.input;requestId.value=pending.input.requestId;Object.assign(shared,{date:pending.input.date,location:pending.input.location,site:pending.input.site||'',locationId:pending.input.locationId,locationCode:pending.input.locationCode||'',locationParts:pending.input.locationParts||{},ownerUserId:pending.input.ownerUserId,ownerName:pending.input.ownerName});lines.value=pending.input.rows;skippedStyles.value=pending.skippedStyles||[];selectInitialLines();const exact=new Map(pending.metadata.map(row=>[row.clientRowId,row])),sources=new Map(pending.metadata.filter(row=>row.receiptColorMode==='at_receipt').map(row=>[styleKey(row),row]));metadata.value=new Map([...lines.value,...skippedStyles.value.flatMap(group=>group.lines)].flatMap(line=>{const data=exact.get(line.clientRowId)||sources.get(styleKey(line));return data?[[line.clientRowId,{...data,clientRowId:line.clientRowId}]as const]:[]}));unknown.value=true;phase.value='edit';loading.value=false;error.value='上次保存结果尚未核对，请先核对本次保存结果。';emit('busy',true);initializing=false;return}}catch{clearPending()}await options();prefillColors();selectInitialLines();initializing=false;preview.value=undefined;for(const line of lines.value)if(line.phoneModelId&&line.colorId)void identitiesFor(line)}
+watch(()=>user.profile?.userId,value=>{if(String(value||'')!==actor){actorChanged.value=true;unknown.value=false;lines.value=[];checkedLines.value.clear();bulkSpecs.value=[blankBulkSpec()];bulkPhoneIds.value=[];metadata.value=new Map();skippedStyles.value=[];bulkOutcome.value='';bulkOmissions.value=[];quantityHints.value.clear();Object.assign(shared,{date:'',location:'',site:'',locationId:undefined,locationCode:'',locationParts:{},ownerUserId:undefined,ownerName:''});error.value='登录账号已改变，请重新进入收样。';emit('busy',false)}})
 void initialize()
 function createLine(line:SelectionReceiptInputRow):SelectionReceiptInputRow{const clientRowId=newRequestId(),source=info(line);if(source)metadata.value.set(clientRowId,{...source,clientRowId,messages:[],canSave:false});return{clientRowId,rowId:line.rowId,rowVersion:line.rowVersion,phoneModelId:line.phoneModelId,qty:2}}
 function prefillColors(){
@@ -244,7 +264,7 @@ function addLine(line:SelectionReceiptInputRow){lines.value.push(createLine(line
 function removeLine(line:SelectionReceiptInputRow){checkedLines.value.delete(line.clientRowId);lines.value=lines.value.filter(item=>item.clientRowId!==line.clientRowId)}
 async function setPhone(line:SelectionReceiptInputRow,ids:number[]){if(bulkDisabled.value)return;const next=ids[0];if(next===line.phoneModelId)return;const name=colorValue(line);line.phoneModelId=next;line.colorName=name;await phoneChanged(line)}
 async function phoneChanged(line:SelectionReceiptInputRow){line.colorId=undefined;clearColorIdentity(line);if(info(line)?.receiptColorMode!=='at_receipt')await options();preview.value=undefined}
-function persistPending(input:SelectionReceiptInput){pendingPayload=input;try{sessionStorage.setItem(pendingKey,JSON.stringify({actor,input,metadata:[...new Map(lines.value.flatMap(line=>{const data=info(line);return data?[[data.receiptColorMode==='at_receipt'?styleKey(line):line.clientRowId,data]as const]:[]})).values()]}))}catch{/* The in-memory request is retained if browser storage is unavailable. */}}
+function persistPending(input:SelectionReceiptInput){pendingPayload=input;try{sessionStorage.setItem(pendingKey,JSON.stringify({actor,input,skippedStyles:skippedStyles.value,metadata:[...new Map([...lines.value,...skippedStyles.value.flatMap(group=>group.lines)].flatMap(line=>{const data=info(line);return data?[[data.receiptColorMode==='at_receipt'?styleKey(line):line.clientRowId,data]as const]:[]})).values()]}))}catch{/* The in-memory request is retained if browser storage is unavailable. */}}
 function isUnknown(e:unknown){const failure=e as {code?:string;response?:{status?:number}};return ['ECONNABORTED','ETIMEDOUT','ERR_NETWORK'].includes(failure?.code||'')||Number(failure?.response?.status)>=500}
 function missingReceiptFields(){
  if(!shared.date||!shared.location.trim()||!shared.ownerName.trim())return uiText('请填写实际入库日期、存放位置和保管人')
@@ -264,17 +284,17 @@ onBeforeUnmount(()=>{sequence++;emit('busy',false)})
  <el-dialog :model-value="true" :title='uiText("登记实际收样")' class="selection-receipt-dialog" top="20px" width="min(1120px,96vw)" append-to-body :close-on-click-modal="false" :close-on-press-escape="!busy&&!unknown" :before-close="close">
   <el-alert v-if="actorChanged" :title="error" type="error" :closable="false"/>
   <section v-show="!actorChanged&&phase!=='saved'" class="receipt-form">
-   <p class="receipt-intro">{{ uiText("只登记实际收到的样品。日期、位置和保管人填写一次；各款填写实收型号、颜色和数量。") }}</p>
+   <p class="receipt-intro">{{ uiText("按实际收到的样品登记型号、颜色和数量。") }}</p>
    <el-alert v-if="error" :title="error" type="error" :closable="false"/>
    <el-form label-position="top" class="receipt-common" :disabled="busy||loading||unknown">
     <el-form-item :label='uiText("实际入库日期 *")'><el-date-picker v-model="shared.date" type="date" value-format="YYYY-MM-DD" :placeholder='uiText("选择实际日期")' :aria-label='uiText("实际入库日期")'/></el-form-item>
-    <el-form-item :label='uiText("样品间／位置")'><SampleLocationInput v-model="shared.location" v-model:site="shared.site" v-model:location-id="shared.locationId" v-model:location-code="shared.locationCode" v-model:location-parts="shared.locationParts" :disabled="busy||loading||unknown||actorChanged" :placeholder='uiText("实际存放在哪里")' :aria-label='uiText("存放位置")'/></el-form-item>
-    <el-form-item :label='uiText("保管人 *")'><SampleCustodianSelect v-model="shared.ownerUserId" v-model:name="shared.ownerName" :disabled="busy||loading||unknown||actorChanged" aria-label="保管人"/></el-form-item>
+    <el-form-item :label='uiText("保管人 *")' class="receipt-owner"><SampleCustodianSelect v-model="shared.ownerUserId" v-model:name="shared.ownerName" :disabled="busy||loading||unknown||actorChanged" aria-label="保管人"/></el-form-item>
+    <el-form-item :label='uiText("收样地点")' class="receipt-location"><div class="receipt-location-heading"><strong class="receipt-site">{{uiText(unknown?'原保存地点（待核对）':'中国样品间')}}</strong><span>{{uiText('具体库位（选填）')}}</span></div><SampleLocationInput v-model="shared.location" v-model:site="shared.site" v-model:location-id="shared.locationId" v-model:location-code="shared.locationCode" v-model:location-parts="shared.locationParts" compact site-locked :disabled="busy||loading||unknown||actorChanged" :placeholder='uiText("具体库位（选填，可选择或直接填写）")' :aria-label='uiText("存放位置")'/></el-form-item>
    </el-form>
    <div v-if="showIssues&&preview?.messages?.length" class="receipt-errors" role="alert"><p v-for="message in preview.messages" :key="message">{{message}}</p></div>
    <div v-if="showBulk" class="receipt-bulk">
     <div class="receipt-bulk-toolbar">
-     <div class="receipt-bulk-scope"><el-checkbox :model-value="allBulkChecked" :indeterminate="someBulkChecked" :disabled="bulkDisabled" :aria-label='uiText("全选本次收样规格")' @change="checkAllBulk(Boolean($event))">{{ uiText("全选") }}</el-checkbox><span>{{ uiText("已勾选 ") }}{{selectedBulkLines.length}}{{ uiText(" 条") }}</span></div>
+     <div class="receipt-bulk-scope"><el-checkbox :model-value="allBulkChecked" :indeterminate="someBulkChecked" :disabled="bulkDisabled" :aria-label='uiText("全选本次收样规格")' @change="checkAllBulk(Boolean($event))">{{ uiText("全选") }}</el-checkbox><span>{{ uiText("已勾选 ") }}{{selectedStyleCount}}{{ uiText(" 款 / ") }}{{selectedBulkLines.length}}{{ uiText(" 条规格") }}</span></div>
      <div class="receipt-bulk-shortcuts" role="group" :aria-label="uiText('按款快速填写')">
       <el-button size="small" :disabled="bulkDisabled||!selectedBulkLines.length" @click="selectAllStyleModels">{{ uiText("选择各款全部型号") }}</el-button>
       <el-button size="small" :disabled="bulkDisabled||!selectedBulkLines.length" @click="selectAllStyleColors">{{ uiText("选择各款全部颜色") }}</el-button>
@@ -284,16 +304,18 @@ onBeforeUnmount(()=>{sequence++;emit('busy',false)})
      <div class="receipt-bulk-model"><label>{{ uiText("实收型号（可多选）") }}</label><PhoneModelMultiSelect v-model="bulkPhoneIds" :members="bulkPhones" :allowed-ids="bulkLibraryModels?undefined:bulkPhones.map(phone=>phone.phoneModelId)" :disabled="bulkDisabled" :aria-label='uiText("批量实收型号")' :placeholder='uiText("选择本次实际收到的型号")'/></div>
      <div class="receipt-bulk-specs">
      <div v-for="(spec,index) in bulkSpecs" :key="spec.id" class="receipt-bulk-line">
-      <label class="receipt-bulk-color">{{ uiText("颜色") }}<el-input v-model="spec.colorName" size="small" clearable :placeholder='uiText("如：黑色")' :maxlength="255" :aria-label="uiText('批量实收颜色')+(index?index+1:'')" :disabled="bulkDisabled"/></label>
-      <label class="receipt-bulk-qty">{{ uiText("每条数量") }}<el-input-number v-model="spec.qty" :key="spec.id+':bulk-qty:'+bulkDisabled" size="small" :min="1" :max="Number.MAX_SAFE_INTEGER" :precision="0" :controls="false" :placeholder='uiText("选填")' :aria-label="uiText('批量实收数量')+(index?index+1:'')" :disabled="bulkDisabled"/></label>
+      <label class="receipt-bulk-color">{{ uiText("统一颜色（留空沿用本款）") }}<el-input v-model="spec.colorName" size="small" clearable :placeholder='uiText("如：黑色")' :maxlength="255" :aria-label="uiText('批量实收颜色')+(index?index+1:'')" :disabled="bulkDisabled"/></label>
+      <label class="receipt-bulk-qty">{{ uiText("统一数量（留空沿用本款）") }}<el-input-number v-model="spec.qty" :key="spec.id+':bulk-qty:'+bulkDisabled" size="small" :min="1" :max="Number.MAX_SAFE_INTEGER" :precision="0" :controls="false" :placeholder='uiText("选填")' :aria-label="uiText('批量实收数量')+(index?index+1:'')" :disabled="bulkDisabled"/></label>
       <el-button v-if="bulkSpecs.length>1" link type="danger" :aria-label="uiText('移除第{value0}条批量颜色',{value0:(index+1)})" :disabled="bulkDisabled" @click="removeBulkSpec(spec.id)">{{ uiText("删除") }}</el-button>
      </div>
      <el-button class="receipt-bulk-add" size="small" link type="primary" :disabled="bulkDisabled" @click="addBulkSpec">{{ uiText("增加颜色") }}</el-button>
      </div>
-     <el-button class="receipt-bulk-apply" size="small" type="primary" :disabled="bulkDisabled||!selectedBulkLines.length||!hasBulkValues" @click="applyBulk">{{ uiText("应用到已勾选（") }}{{selectedBulkLines.length}}）</el-button>
+     <el-button class="receipt-bulk-apply" size="small" type="primary" :disabled="bulkDisabled||!selectedBulkLines.length||!hasBulkValues" @click="applyBulk">{{ uiText("应用到已勾选（") }}{{selectedStyleCount}}{{uiText("款")}}）</el-button>
     </div>
-    <details v-if="bulkPhoneProblems.length" class="receipt-errors receipt-bulk-issues"><summary>{{ uiText("{value0}款的型号范围不同，查看说明",{value0:bulkPhoneProblems.length}) }}</summary><p>{{ uiText("以下款式不包含所选型号，尚未应用：") }}</p><p v-for="problem in bulkPhoneProblems" :key="problem">{{problem}}</p></details>
+    <p v-if="bulkOutcome" class="receipt-bulk-result" role="status">{{bulkOutcome}}</p>
+    <div v-if="bulkOmissions.length" class="receipt-errors"><p v-for="omission in bulkOmissions" :key="omission.name">{{omission.name}}：{{uiText('本次未添加')}} {{omission.phones.join('、')}}</p></div>
    </div>
+   <section v-if="skippedStyles.length" class="receipt-skipped" :aria-label="uiText('本次跳过')"><strong>{{uiText('本次跳过')}} {{skippedStyles.length}} {{uiText('款')}}</strong><div v-for="group in skippedStyles" :key="group.key"><span>{{group.name}} · {{group.phones.join('、')}}</span><el-button link type="primary" :disabled="bulkDisabled" @click="restoreSkipped(group.key)">{{uiText('恢复本次收样')}}</el-button></div></section>
    <div class="receipt-table" role="table" :aria-label='uiText("本次实际收样")' v-loading="loading">
     <div class="receipt-head" role="row"><span role="columnheader">{{ uiText("图片") }}</span><span role="columnheader">{{ uiText("款式") }}</span><span role="columnheader">{{ uiText("实收型号") }}</span><span role="columnheader">{{ uiText("实收颜色") }}</span><span role="columnheader">{{ uiText("实收数量") }}</span><span role="columnheader">{{ uiText("操作") }}</span></div>
     <article v-for="line in visibleLines" :key="line.clientRowId" class="receipt-row" role="row">
@@ -301,7 +323,7 @@ onBeforeUnmount(()=>{sequence++;emit('busy',false)})
      <div class="receipt-style" role="cell"><span>{{styleLabel(line)}}</span><el-checkbox v-if="showBulk" class="receipt-row-check" :model-value="checkedLines.has(line.clientRowId)" :aria-label="uiText('勾选{value0}收样规格',{value0:(styleName(line))})" :disabled="bulkDisabled" @change="checkBulkLine(line.clientRowId,Boolean($event))"><strong>{{styleName(line)}}</strong></el-checkbox><strong v-else>{{styleName(line)}}</strong></div>
      <div class="receipt-model" role="cell"><span class="receipt-label">{{ uiText("实收型号") }}</span><strong v-if="!libraryModels(line)&&info(line)?.phones.length===1" class="receipt-phone-value">{{phoneLabel(line)}}</strong><PhoneModelMultiSelect v-show="libraryModels(line)||info(line)?.phones.length!==1" :model-value="line.phoneModelId?[line.phoneModelId]:[]" :members="info(line)?.phones||[]" :allowed-ids="libraryModels(line)?undefined:(info(line)?.phones||[]).map(phone=>phone.phoneModelId)" :multiple="false" :placeholder="libraryModels(line)?uiText('选择本次实际收到的型号'):uiText('选择已选型号')" :aria-label="uiText('{value0}实收型号',{value0:(styleName(line))})" :disabled="busy||loading||unknown" @update:model-value="ids=>setPhone(line,ids)"/><small v-if="libraryModels(line)" class="receipt-library-hint">{{uiText('供应商未注明型号，请按实物选择；不会视为该款全部可供')}}</small></div>
      <div class="receipt-color" role="cell"><span class="receipt-label">{{ uiText("实收颜色") }}</span><el-autocomplete :model-value="colorValue(line)" :fetch-suggestions="colorSuggestions(line)" :debounce="0" clearable fit-input-width :highlight-first-item="false" :placeholder='uiText("直接填写，如：黑色")' :maxlength="255" :aria-label="uiText('{value0}实收颜色',{value0:(styleName(line))})" :disabled="busy||loading||unknown" @update:model-value="(value:string|number)=>colorInput(line,String(value??''))" @select="(color:Record<string,unknown>)=>selectColor(line,color)"><template #default="{item}"><span class="receipt-color-name">{{item.name}}</span><small v-if="item.description" class="receipt-color-detail">{{item.description}}</small></template></el-autocomplete></div>
-     <div class="receipt-qty" role="cell"><span class="receipt-label">{{ uiText("实收数量") }}</span><el-input-number v-model="line.qty" :key="line.clientRowId+':actual:'+(busy||loading||unknown)" :min="1" :max="Number.MAX_SAFE_INTEGER" :precision="0" :controls="false" :placeholder='uiText("实收")' :aria-label="uiText('{value0}实收数量',{value0:(styleName(line))})" :disabled="busy||loading||unknown"/></div>
+     <div class="receipt-qty" role="cell"><span class="receipt-label">{{ uiText("实收数量") }}</span><el-input-number v-model="line.qty" :key="line.clientRowId+':actual:'+(busy||loading||unknown)" :min="1" :max="Number.MAX_SAFE_INTEGER" :precision="0" :controls="false" :placeholder='uiText("实收")' :aria-label="uiText('{value0}实收数量',{value0:(styleName(line))})" :disabled="busy||loading||unknown"/><small v-if="line.qty==null&&quantityHints.has(line.clientRowId)" class="receipt-errors">{{uiText(quantityHints.get(line.clientRowId)!)}}</small></div>
      <div class="receipt-actions" role="cell"><div v-show="phase==='edit'" class="receipt-action-buttons"><el-button link type="primary" :disabled="busy||loading||unknown" @click="addLine(line)">{{ uiText("增加规格") }}</el-button><el-button v-if="lines.length>1" link type="danger" :disabled="busy||loading||unknown" @click="removeLine(line)">{{ uiText("本次不收") }}</el-button></div></div>
      <div v-if="line.phoneModelId&&line.colorId" class="receipt-identity"><label>{{ uiText("样品码 · 相同物品沿用同一码") }}</label><el-select v-model="line.sampleIdentityId" clearable filterable remote :remote-method="(keyword:string)=>identitiesFor(line,keyword)" :loading="identityLoading.has(line.clientRowId)" :disabled="busy||loading||unknown" :placeholder='uiText("按真实来源自动复用／保存时新建主码")' :aria-label="styleName(line)+uiText('样品码')"><el-option v-for="identity in identityOptions.get(line.clientRowId)||[]" :key="identity.sampleIdentityId" :value="identity.sampleIdentityId" :label="identity.sampleCode+' · '+identity.name+' · '+identity.specName"/></el-select><p v-if="identityReview.get(line.clientRowId)">{{identityReview.get(line.clientRowId)}}</p><el-input v-if="needsIdentityReason(line)" v-model="line.identityReason" :disabled="busy||loading||unknown" :placeholder='uiText("核对同款、型号、颜色及版本的原因")' :aria-label='uiText("同物核对原因")'/></div>
      <div v-if="showIssues&&info(line)?.messages.length" class="receipt-row-errors" role="alert"><p v-for="message in info(line)?.messages" :key="message">{{message}}</p></div>
@@ -321,16 +343,17 @@ onBeforeUnmount(()=>{sequence++;emit('busy',false)})
 </template>
 
 <style scoped>
-.receipt-bulk-issues>summary{cursor:pointer;font-size:12px;line-height:1.6}.receipt-pagination{margin-top:8px;min-width:0;flex-wrap:wrap}
+.receipt-pagination{margin-top:8px;min-width:0;flex-wrap:wrap}
 :global(.selection-receipt-dialog){display:flex;flex-direction:column;max-height:calc(100dvh - 40px);margin-top:20px;margin-bottom:20px;box-sizing:border-box}
 :global(.selection-receipt-dialog>.el-dialog__header),:global(.selection-receipt-dialog>.el-dialog__footer){flex:none}
 :global(.selection-receipt-dialog>.el-dialog__body){min-height:0;overflow-y:auto;overscroll-behavior:contain;container-type:inline-size}
-.receipt-footer{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px}.receipt-action-buttons{display:flex;flex-direction:column;align-items:flex-start;gap:4px}.receipt-intro{margin:0 0 12px;color:#586b80;font-size:13px;line-height:1.6}.receipt-common{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr) minmax(0,1fr);gap:12px;margin-top:12px}.receipt-common :deep(.el-form-item){margin-bottom:12px;min-width:0}.receipt-common :deep(.el-date-editor){width:100%}
+.receipt-footer{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px}.receipt-action-buttons{display:flex;flex-direction:column;align-items:flex-start;gap:4px}.receipt-intro{margin:0 0 12px;color:#586b80;font-size:13px;line-height:1.6}.receipt-common{display:grid;grid-template-columns:minmax(0,1fr);gap:0;margin-top:8px}.receipt-common :deep(.el-form-item){margin-bottom:9px;min-width:0}.receipt-common :deep(.el-date-editor){width:230px;max-width:100%}
 .receipt-table{border:1px solid #dce5ef;border-radius:5px;min-width:0}.receipt-head,.receipt-row{display:grid;grid-template-columns:66px minmax(0,1.2fr) minmax(0,1.45fr) minmax(0,1fr) 88px 76px;min-width:0}.receipt-head{background:#edf3f9;font-size:13px;color:#3a526d;font-weight:600}.receipt-head>span,.receipt-row>[role=cell]{padding:7px 8px;min-width:0;overflow-wrap:anywhere}.receipt-row{border-top:1px solid #dce5ef;align-items:center}.receipt-row:nth-child(odd){background:#fafcfe}.receipt-style{display:flex;flex-direction:column;gap:3px;font-size:14px}.receipt-style>span{color:#5a7898;font-size:12px}.receipt-phone-value{display:block;white-space:normal;overflow-wrap:anywhere;line-height:1.5}.receipt-model strong{color:#24466c;font-size:14px}.receipt-row :deep(.el-select),.receipt-row :deep(.el-autocomplete),.receipt-row :deep(.el-input-number){width:100%;min-width:0}.receipt-image{display:flex;justify-content:center}.receipt-placeholder{font-size:11px;color:#7c899b}.receipt-color,.receipt-actions{display:flex;flex-direction:column;align-items:flex-start;gap:4px}.receipt-row :deep(.el-button){margin:0;max-width:100%;height:auto;white-space:normal;line-height:1.5;font-size:12px;text-align:left}.receipt-row :deep(.el-button>span){white-space:normal;overflow-wrap:anywhere}.receipt-label{display:none}.receipt-errors,.receipt-row-errors{font-size:12px;color:#ad6713;line-height:1.6}.receipt-errors p,.receipt-row-errors p{margin:2px 0}.receipt-row-errors{grid-column:2/-1;padding:0 8px 7px}.receipt-summary{font-size:13px;color:#5c728b;margin:12px 0 0;line-height:1.6}.receipt-results{margin-top:10px}.receipt-results article{display:flex;flex-wrap:wrap;gap:5px 16px;align-items:center;border-bottom:1px solid #e3eaf3;padding:10px 0;font-size:14px}.receipt-results article>span{flex:1;min-width:160px;color:#536a84}.receipt-results :deep(.el-button){white-space:normal;height:auto;line-height:1.5}
-.receipt-bulk{display:flex;flex-direction:column;gap:10px;margin:0 0 8px;padding:10px;min-width:0;border:1px solid #dce5ef;border-radius:5px;background:#f8fafc;font-size:13px}.receipt-bulk-toolbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}.receipt-bulk-shortcuts{display:flex;flex-wrap:wrap;gap:8px;min-width:0}.receipt-bulk-scope{display:flex;flex-wrap:wrap;align-items:center;gap:8px;color:#536a84}.receipt-bulk-line>label{display:flex;flex-direction:column;gap:4px;min-width:0;color:#354d67;font-weight:600}.receipt-bulk :deep(.el-input-number){width:100%;min-width:0}.receipt-bulk :deep(.el-input__wrapper){min-height:32px;box-sizing:border-box}.receipt-bulk :deep(.el-input__inner){font-size:13px;font-weight:400}.receipt-bulk .el-button{min-height:28px;height:auto;margin:0;font-size:13px;white-space:normal;line-height:1.5}.receipt-bulk .el-button>span{white-space:normal;overflow-wrap:anywhere}.receipt-bulk-inputs{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr) auto;align-items:start;gap:10px;min-width:0}.receipt-bulk-model{display:flex;flex-direction:column;gap:4px;min-width:0;color:#354d67;font-weight:600;line-height:1.5}.receipt-bulk-model :deep(.el-select__wrapper){min-height:32px}.receipt-bulk-specs{display:flex;flex-direction:column;gap:6px;min-width:0}.receipt-bulk-line{display:grid;grid-template-columns:minmax(0,1fr) 104px;align-items:end;gap:8px;min-width:0}.receipt-bulk-line:has(>.el-button){grid-template-columns:minmax(0,1fr) 104px 32px}.receipt-bulk-line>label{line-height:1.5}.receipt-bulk-add{align-self:flex-start}.receipt-bulk-apply{align-self:start;margin-top:24px!important;min-height:32px!important}.receipt-bulk :deep(.el-checkbox){height:28px}.receipt-bulk :deep(.el-checkbox__label){font-size:13px}.receipt-style :deep(.receipt-row-check){height:auto;max-width:100%;align-items:flex-start;white-space:normal;margin:0}.receipt-style :deep(.receipt-row-check .el-checkbox__input){margin-top:3px}.receipt-style :deep(.receipt-row-check .el-checkbox__label){min-width:0;padding-left:6px;white-space:normal;overflow-wrap:anywhere;color:inherit;font-size:14px;line-height:1.5}
-@container(max-width:720px){.receipt-bulk-inputs{grid-template-columns:minmax(0,1fr)}.receipt-bulk-toolbar{align-items:flex-start}.receipt-bulk-shortcuts{gap:6px}.receipt-bulk-line{grid-template-columns:minmax(0,1fr) minmax(84px,.35fr)}.receipt-bulk-line:has(>.el-button){grid-template-columns:minmax(0,1fr) minmax(84px,.35fr) 32px}.receipt-bulk-apply{justify-self:end;margin-top:0!important}}
-@container(max-width:720px){.receipt-common{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.receipt-common :deep(.el-form-item):last-child{grid-column:1/-1}.receipt-head{display:none}.receipt-row{grid-template-columns:58px minmax(0,1.1fr) minmax(0,1fr);align-items:start}.receipt-image{grid-row:1/3}.receipt-style{grid-column:2/-1}.receipt-model{grid-column:2/-1}.receipt-color{grid-column:2}.receipt-qty{grid-column:3}.receipt-actions{grid-column:2/-1;flex-direction:row;flex-wrap:wrap}.receipt-label{display:block;color:#6b7d91;font-size:12px;margin-bottom:4px}.receipt-row-errors{grid-column:1/-1}}
+.receipt-bulk{display:flex;flex-direction:column;gap:10px;margin:0 0 8px;padding:10px;min-width:0;border:1px solid #dce5ef;border-radius:5px;background:#f8fafc;font-size:13px}.receipt-bulk-toolbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}.receipt-bulk-shortcuts{display:flex;flex-wrap:wrap;gap:8px;min-width:0}.receipt-bulk-scope{display:flex;flex-wrap:wrap;align-items:center;gap:8px;color:#536a84}.receipt-bulk-line>label{display:flex;flex-direction:column;gap:4px;min-width:0;color:#354d67;font-weight:600}.receipt-bulk :deep(.el-input-number){width:100%;min-width:0}.receipt-bulk :deep(.el-input__wrapper){min-height:32px;box-sizing:border-box}.receipt-bulk :deep(.el-input__inner){font-size:13px;font-weight:400}.receipt-bulk .el-button{min-height:28px;height:auto;margin:0;font-size:13px;white-space:normal;line-height:1.5}.receipt-bulk .el-button>span{white-space:normal;overflow-wrap:anywhere}.receipt-bulk-inputs{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr) auto;align-items:start;gap:10px;min-width:0}.receipt-bulk-model{display:flex;flex-direction:column;gap:4px;min-width:0;color:#354d67;font-weight:600;line-height:1.5}.receipt-bulk-model :deep(.el-select__wrapper){min-height:32px}.receipt-bulk-specs{display:flex;flex-direction:column;gap:6px;min-width:0}.receipt-bulk-line{display:grid;grid-template-columns:minmax(0,1fr) 170px;align-items:end;gap:8px;min-width:0}.receipt-bulk-line:has(>.el-button){grid-template-columns:minmax(0,1fr) 104px 32px}.receipt-bulk-line>label{line-height:1.5}.receipt-bulk-add{align-self:flex-start}.receipt-bulk-apply{align-self:start;margin-top:24px!important;min-height:32px!important}.receipt-bulk :deep(.el-checkbox){height:28px}.receipt-bulk :deep(.el-checkbox__label){font-size:13px}.receipt-style :deep(.receipt-row-check){height:auto;max-width:100%;align-items:flex-start;white-space:normal;margin:0}.receipt-style :deep(.receipt-row-check .el-checkbox__input){margin-top:3px}.receipt-style :deep(.receipt-row-check .el-checkbox__label){min-width:0;padding-left:6px;white-space:normal;overflow-wrap:anywhere;color:inherit;font-size:14px;line-height:1.5}
+@container(max-width:720px){.receipt-bulk-inputs{grid-template-columns:minmax(0,1fr)}.receipt-bulk-toolbar{align-items:flex-start}.receipt-bulk-shortcuts{gap:6px}.receipt-bulk-line{grid-template-columns:minmax(0,1fr) minmax(110px,.5fr)}.receipt-bulk-line:has(>.el-button){grid-template-columns:minmax(0,1fr) minmax(110px,.5fr) 32px}.receipt-bulk-apply{justify-self:end;margin-top:0!important}}
+@container(max-width:720px){.receipt-head{display:none}.receipt-row{grid-template-columns:58px minmax(0,1.1fr) minmax(0,1fr);align-items:start}.receipt-image{grid-row:1/3}.receipt-style{grid-column:2/-1}.receipt-model{grid-column:2/-1}.receipt-color{grid-column:2}.receipt-qty{grid-column:3}.receipt-actions{grid-column:2/-1;flex-direction:row;flex-wrap:wrap}.receipt-label{display:block;color:#6b7d91;font-size:12px;margin-bottom:4px}.receipt-row-errors{grid-column:1/-1}}
 .receipt-identity{grid-column:1/-1;display:flex;flex-direction:column;gap:5px;padding:5px 0;color:#5b7390;font-size:12px}.receipt-identity .el-select{width:100%}.receipt-identity p{margin:0;color:#9a6a27}
 .receipt-library-hint{display:block;color:#6b7d91;font-size:12px;line-height:1.5;margin-top:4px;overflow-wrap:anywhere}.receipt-color-name{display:block;white-space:normal;overflow-wrap:anywhere;line-height:1.5}.receipt-color-detail{display:block;color:#6b7d91;white-space:normal;overflow-wrap:anywhere;line-height:1.4}
+.receipt-common :deep(.el-form-item__label){color:#263f5b;font-size:12px;font-weight:700;line-height:1.5;margin-bottom:4px}.receipt-owner :deep(.el-form-item__content){max-width:420px}.receipt-common :deep(.el-input__wrapper),.receipt-common :deep(.el-select__wrapper){min-height:28px;font-size:12px}.receipt-location-heading{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.receipt-location-heading>span{font-size:12px;color:#536b83}.receipt-location :deep(.el-form-item__content){display:flex;flex-direction:column;align-items:flex-start;gap:5px}.receipt-location .sample-location-input{max-width:560px}.receipt-site{font-size:12px;color:#264f73;background:#edf4fa;border-radius:3px;padding:3px 7px}.receipt-bulk-result{margin:0;font-weight:600;color:#315d83}.receipt-skipped{padding:8px 10px;border:1px solid #e5d9c6;background:#fffaf2;border-radius:4px;font-size:12px;line-height:1.6;margin:8px 0}.receipt-skipped>strong{color:#805b29}.receipt-skipped>div{display:flex;align-items:center;gap:8px;justify-content:space-between}.receipt-skipped span{min-width:0;overflow-wrap:anywhere}.receipt-skipped .el-button{flex:none;margin-left:0}.receipt-qty>small{display:block;margin-top:3px}
 </style>
 

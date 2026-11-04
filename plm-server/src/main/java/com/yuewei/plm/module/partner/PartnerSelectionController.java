@@ -25,6 +25,7 @@ public class PartnerSelectionController {
  @PatchMapping("/{id}/rows") public ResponseVO<?> patchRows(@PathVariable long id,@RequestBody Map<String,Object> input,HttpServletRequest request){return ok(selections.patchRows(id,input),request);}
  @PostMapping("/{id}/batch") public ResponseVO<?> batch(@PathVariable long id,@RequestBody Map<String,Object> input,HttpServletRequest request){return ok(selections.batch(id,input),request);}
  @PostMapping("/{id}/rows/transition") public ResponseVO<?> transition(@PathVariable long id,@RequestBody Map<String,Object> input,HttpServletRequest request){return ok(selections.transitionRows(id,input),request);}
+ @PostMapping("/{id}/rows/transition-preview") public ResponseVO<?> transitionPreview(@PathVariable long id,@RequestBody Map<String,Object> input,HttpServletRequest request){return ok(selections.transitionPreview(id,input),request);}
  @PostMapping("/{id}/confirmation-preview") public ResponseVO<?> preview(@PathVariable long id,@RequestBody Map<String,Object> input,HttpServletRequest request){return ok(selections.confirmationPreview(id,input),request);}
  @PostMapping("/{id}/confirm") public ResponseVO<?> confirm(@PathVariable long id,@RequestBody Map<String,Object> input,HttpServletRequest request){return ok(selections.confirm(id,input),request);}
  @PostMapping("/{id}/sample-receipts/preview") public ResponseVO<?> receiptPreview(@PathVariable long id,@RequestBody Map<String,Object> input,HttpServletRequest request){return ok(samples.receiptPreview(id,input),request);}

@@ -32,6 +32,28 @@ final class SampleReceiptCorrections {
   if(batches.isEmpty())return Set.of();String scope=encode(store.json,batches.stream().map(id->Map.of("id",id)).toList());
   return new HashSet<>(store.jdbc.queryForList("select b.id from jsonb_to_recordset(?::jsonb) b(id bigint) where exists(select 1 from plm_partner_record r where r.deleted_flag=0 and ((r.kind='inspection' and r.parent_record_id=b.id) or (r.kind='listing' and (r.data->'basis'->'pairs' @> jsonb_build_array(jsonb_build_object('sampleId',b.id)) or r.data->'pairs' @> jsonb_build_array(jsonb_build_object('sampleId',b.id))))))",Long.class,scope));
  }
+ List<Map<String,Object>> selectionReceipts(long selection,List<String> rowIds){
+  String scope=encode(store.json,rowIds.stream().map(row->Map.of("row_id",row)).toList());
+  var found=store.jdbc.queryForList("select r.record_id,r.code,r.name,r.version,r.data::text from plm_partner_record r where r.kind='sample' and r.deleted_flag=0 and r.data->>'selectionId'=? and r.data->>'selectionRowId' in (select row_id from jsonb_to_recordset(?::jsonb) s(row_id text)) and "+store.access.visibleSqlClause("partner","r.record_id")+" order by r.record_id",Long.toString(selection),scope);
+  if(found.isEmpty())return List.of();
+  String batches=encode(store.json,found.stream().map(row->Map.of("id",number(row.get("record_id")))).toList());
+  var events=new HashMap<Long,List<Map<String,Object>>>();
+  for(var event:store.jdbc.queryForList("select record_id,event_id as id,action,data::text from plm_partner_event where record_id in (select id from jsonb_to_recordset(?::jsonb) b(id bigint)) order by event_id",batches)){
+   event.put("data",decode(store.json,event.get("data")));events.computeIfAbsent(number(event.get("record_id")),id->new ArrayList<>()).add(event);
+  }
+  var referenced=referenceBlocks(found.stream().map(row->number(row.get("record_id"))).toList());var result=new ArrayList<Map<String,Object>>();
+  for(var row:found){long id=number(row.get("record_id"));var batch=decode(store.json,row.get("data"));for(String field:List.of("code","name","version"))batch.put(field,row.get(field));batch.put("id",id);enrich(batch,events.getOrDefault(id,List.of()),referenced.contains(id));if(number(batch.get("effectiveReceivedQty"))>0)result.add(batch);}
+  return result;
+ }
+ void voidSelectionReceipts(long selection,List<String> rowIds,List<Map<String,Object>> requested,String request,String reason){
+  required(reason,"更正原因");var eligible=new HashMap<Long,Map<String,Object>>();for(var batch:selectionReceipts(selection,rowIds))eligible.put(number(batch.get("id")),batch);
+  for(var item:requested.stream().sorted(Comparator.comparingLong(row->number(row.get("id")))).toList()){
+   long id=number(item.get("id"));require(eligible.containsKey(id),"收样登记不属于本次取消的选品、已作废或未获授权，请重新核对");
+   var batch=store.load(id,"sample",true);store.check(batch,number(item.get("version")));
+   var command=Map.<String,Object>of("reason",reason,"requestId","selection-void-"+UUID.nameUUIDFromBytes((request+":"+id).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+   correct(id,batch,"void_receipt",command,PartnerQualityRules.digest(store.json,Map.of("action","void_receipt","input",command)));
+  }
+ }
  private String blockedReason(Map<String,Object> batch,SampleLedger.State state,boolean referenced){
   if(state.receiptQuantities.size()!=1)return "这次历史登记包含多个收样来源，请在原流转记录核对";
   for(var event:state.originals.entrySet())if(!state.undone.contains(event.getKey())&&!Set.of("receive","opening","receipt_correction").contains(text(event.getValue().get("action"))))return "已有借出、移库或其他样品流转，请先在详情处理后续记录";

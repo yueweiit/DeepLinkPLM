@@ -4,7 +4,7 @@ import {createPinia,setActivePinia} from 'pinia'
 import ElementPlus,{ElSelect} from 'element-plus'
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
 import {useUserStore} from '@/stores/user'
-import type {SampleIdentity,SampleLocationOption} from '@/types/sampleManagement'
+import type {SampleIdentity,SampleLocationOption,SampleLocationSite,SampleLocationParts} from '@/types/sampleManagement'
 import Input from '../SampleLocationInput.vue'
 import Editor from '../SampleLocationEditor.vue'
 import Manager from '../SampleLocationManager.vue'
@@ -18,7 +18,8 @@ const sample=(id=71):SampleIdentity=>({id,sampleIdentityId:id,sampleCode:'SY-'+i
 let wrapper:VueWrapper
 beforeEach(()=>{vi.clearAllMocks();api.query.mockImplementation(async({ids}:{ids:number[]})=>({content:await Promise.all(ids.map(id=>api.identity(id)))}));sessionStorage.clear();setActivePinia(createPinia());const user=useUserStore();user.token='engineer';user.profile={userId:1} as never;user.permissions=['samples:write'];api.options.mockResolvedValue({content:[location(),location(2,'MX')]});api.list.mockResolvedValue({content:[location()],totalElements:1});api.save.mockResolvedValue(location());api.remove.mockResolvedValue({...location(),deleted:true});api.identity.mockImplementation(async id=>sample(id));api.set.mockResolvedValue({content:[sample()],totals:{movedQty:5,unchangedQty:0}});api.refs.mockResolvedValue({id:1,referenced:true,referenceCount:1,onhand:5,records:1,events:2,batches:1,references:[{type:'sample',sampleIdentityId:71,sampleCode:'SY-71',name:'实际手机壳',onhand:5,site:'CN',locationId:1},{type:'event',sampleCode:'SY-71',date:'2026-11-02',action:'move',qty:2,site:'CN',locationId:1}]})})
 afterEach(()=>{wrapper?.unmount();document.body.innerHTML='';sessionStorage.clear()})
-async function start(component:Component,props:Record<string,unknown>={}){wrapper=mount(component as never,{props:props as never,attachTo:document.body,global:{plugins:[ElementPlus],stubs:{Teleport:true,ElSelect:{name:'ElSelect',props:['modelValue','placeholder','ariaLabel','disabled','remoteMethod'],emits:['update:modelValue','visible-change'],template:'<select :aria-label="ariaLabel" :disabled="disabled" :value="modelValue"><slot/></select>'},ElOption:{name:'ElOption',props:['value','label'],template:'<option :value="value">{{label}}</option>'}}}});await flushPromises()}
+const locationSelectStubs={Teleport:true,ElSelect:{name:'ElSelect',props:['modelValue','placeholder','ariaLabel','disabled','remoteMethod'],emits:['update:modelValue','visible-change'],template:'<select :aria-label="ariaLabel" :disabled="disabled" :value="modelValue"><slot/></select>'},ElOption:{name:'ElOption',props:['value','label'],template:'<option :value="value">{{label}}</option>'}}
+async function start(component:Component,props:Record<string,unknown>={}){wrapper=mount(component as never,{props:props as never,attachTo:document.body,global:{plugins:[ElementPlus],stubs:locationSelectStubs}});await flushPromises()}
 async function click(text:string){const button=wrapper.findAll('button').find(value=>value.text()===text);expect(button,text).toBeTruthy();await button!.trigger('click');await flushPromises()}
 const selector=(label:string)=>wrapper.findAllComponents(ElSelect).find(value=>(value.props() as {ariaLabel?:string}).ariaLabel===label)!
 describe('sample location directory and site-specific stock operations',()=>{
@@ -85,4 +86,34 @@ describe('sample location directory and site-specific stock operations',()=>{
   for(const input of wrapper.findAll<HTMLInputElement>('input'))expect(input.element.disabled).toBe(false)
  })
 
+})
+
+describe('compact fixed-site receipt location input',()=>{
+ async function compact(initial:{name?:string;site?:SampleLocationSite;id?:number;code?:string;parts?:Partial<SampleLocationParts>;disabled?:boolean}={}){
+  const disabled=ref(initial.disabled??false)
+  const Host=defineComponent({components:{Input},setup(){return{name:ref(initial.name??'CN'),site:ref<SampleLocationSite>(initial.site??'CN'),id:ref<number|undefined>(initial.id),code:ref(initial.code??''),parts:ref(initial.parts??{}),disabled}},template:'<el-form :disabled="disabled"><Input v-model="name" v-model:site="site" v-model:location-id="id" v-model:location-code="code" v-model:location-parts="parts" compact site-locked aria-label="具体库位（选填）"/></el-form>'})
+  wrapper=mount(Host,{attachTo:document.body,global:{plugins:[ElementPlus],stubs:locationSelectStubs}});await flushPromises();return disabled
+ }
+ const compactInput=()=>wrapper.get<HTMLInputElement>('input[aria-label="具体库位（选填）"]')
+ const compactProps=()=>wrapper.getComponent(Input).props()
+ it('renders one optional input without a site selector or raw CN field and keeps the internal CN default',async()=>{
+  await compact();expect(wrapper.findAll('input')).toHaveLength(1);expect(compactInput().element.value).toBe('');expect(compactInput().attributes('placeholder')).toBe('搜索库位或直接填写位置说明');expect(wrapper.find('input[aria-label="站点"]').exists()).toBe(false);expect(wrapper.text()).not.toContain('CN');expect(compactProps()).toMatchObject({modelValue:'CN',site:'CN',locationId:undefined,locationCode:''});expect(wrapper.getComponent(Input).emitted('update:modelValue')).toBeUndefined();expect(api.options).not.toHaveBeenCalled();expect(api.save).not.toHaveBeenCalled()
+ })
+ it('selects a real same-site ID and code from the existing remote directory using the single input',async()=>{
+  const row={...location(7),name:'A柜第二层',locationCode:'A001-A0001-002-001-0001',locationParts:{area:'A001',rack:'A0001',shelf:'002',box:'001',sequence:'0001'}}
+  api.options.mockResolvedValue({content:[row,location(2,'MX')]});await compact();const input=compactInput();input.element.focus();await input.trigger('click');await vi.waitFor(()=>expect(api.options).toHaveBeenCalledWith({site:'CN',size:50}));await flushPromises()
+  expect(document.body.textContent).not.toContain('墨西哥样品间');const option=[...document.querySelectorAll<HTMLElement>('[role="option"]')].find(value=>value.textContent?.trim()===row.locationCode+' · '+row.name);expect(option).toBeTruthy();option!.click();await flushPromises();expect(compactProps()).toMatchObject({modelValue:row.name,site:'CN',locationId:7,locationCode:row.locationCode,locationParts:row.locationParts});expect(compactInput().element.value).toBe(row.name);expect(api.save).not.toHaveBeenCalled()
+ })
+ it('lets typed notes replace a selected ID and clears the old code and all segments, then clears back to CN',async()=>{
+  await compact({name:'A柜',id:7,code:'A-B-C-D-E',parts:{area:'A',rack:'B',shelf:'C',box:'D',sequence:'E'}});await compactInput().setValue('门口临时样品盒');await flushPromises();expect(compactProps()).toMatchObject({modelValue:'门口临时样品盒',site:'CN',locationId:undefined,locationCode:'',locationParts:{area:'',rack:'',shelf:'',box:'',sequence:''}});await compactInput().setValue('');await flushPromises();expect(compactProps()).toMatchObject({modelValue:'CN',site:'CN',locationId:undefined,locationCode:'',locationParts:{area:'',rack:'',shelf:'',box:'',sequence:''}});expect(compactInput().element.value).toBe('');expect(api.save).not.toHaveBeenCalled()
+ })
+ it('preserves an unknown legacy MX request as read-only display without emitting replacements or forcing CN',async()=>{
+  await compact({name:'MX',site:'MX',disabled:true});expect(compactInput().element.disabled).toBe(true);expect(compactInput().element.value).toBe('墨西哥样品间未设库位');expect(compactProps()).toMatchObject({modelValue:'MX',site:'MX'});expect(wrapper.getComponent(Input).emitted()).toEqual({});expect(api.options).not.toHaveBeenCalled();expect(wrapper.get('button').element.disabled).toBe(true)
+ })
+ it('keeps manual entry available after a directory failure and retries the existing query',async()=>{
+  api.options.mockRejectedValue(new Error('位置读取失败'));await compact({name:'原手填盒'});const input=compactInput();input.element.focus();await input.trigger('click');await vi.waitFor(()=>expect(wrapper.text()).toContain('位置读取失败'));await input.setValue('原手填盒新说明');await flushPromises();expect(compactProps().modelValue).toBe('原手填盒新说明');api.options.mockResolvedValue({content:[location()]});await click('重试');expect(api.options.mock.calls.length).toBeGreaterThanOrEqual(2);expect(compactProps().modelValue).toBe('原手填盒新说明');expect(api.save).not.toHaveBeenCalled()
+ })
+ it('reuses the existing new-location editor and adopts its actual ID without editing another location',async()=>{
+  api.save.mockResolvedValue({...location(7),name:'新收样盒'});await compact();await click('新增库位并使用');await vi.waitFor(()=>expect(wrapper.find('input[aria-label="位置说明"]').exists()).toBe(true));await wrapper.get('input[aria-label="位置说明"]').setValue('新收样盒');await click('保存并使用');expect(api.save).toHaveBeenCalledWith(expect.objectContaining({name:'新收样盒',site:'CN',locationCode:''}),undefined);expect(compactProps()).toMatchObject({modelValue:'新收样盒',site:'CN',locationId:7,locationCode:''});expect(api.set).not.toHaveBeenCalled()
+ })
 })

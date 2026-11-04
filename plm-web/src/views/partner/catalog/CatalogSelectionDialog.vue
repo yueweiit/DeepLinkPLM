@@ -31,7 +31,6 @@ const valid=computed(()=>props.canWrite&&selectedItems.value.length>0)
 const hasUnsavedChoice=computed(()=>Object.keys(sampleColors.value).length>0||Object.values(reselected.value).some(Boolean)||excluded.value.size>0||commonColors.value.length>0)
 const validationIssues=computed(()=>preview.value&&!preview.value.canAdd?[...new Set([...(preview.value.messages||[]),...(preview.value.items||[]).flatMap(item=>(item.messages||[]).map(message=>`${item.name}：${message}`))])]:[])
 const issueItems=computed(()=>preview.value&&!preview.value.canAdd?(preview.value.items||[]).filter(item=>item.messages?.length&&props.items.some(row=>catalogKey(row)===catalogKey(item))):[])
-const reselectItems=computed(()=>(preview.value?.items||[]).filter(item=>item.requiresReselect===true&&selectedItems.value.some(selected=>catalogKey(selected)===catalogKey(item))))
 const photo=(row:CatalogStyle)=>row.fileDetails?.find(file=>file.type.startsWith('image/'))
 const suppliedCount=(row:CatalogStyle)=>catalogAllowedPhoneIds(row).filter(id=>{const phone=row.phones.find(phone=>phone.phoneModelId===id);return phone&&!unavailablePhone(phone)}).length
 const incompleteScope=(row:CatalogStyle)=>!!row.phoneMatchIssues?.length||!!row.phoneMatchSummary?.unresolvedCount
@@ -54,18 +53,41 @@ async function close(done?:()=>void){
 function payloadFingerprint(input:ReturnType<typeof payload>){return JSON.stringify({...input,items:[...input.items].sort((a,b)=>catalogKey(a).localeCompare(catalogKey(b)))})}
 function rememberRow(key:string,element:unknown){if(element instanceof HTMLElement)rowElements.set(key,element);else rowElements.delete(key)}
 async function locateIssue(item:CatalogSelectionItem){await nextTick();const element=rowElements.get(catalogKey(item));element?.scrollIntoView({block:'nearest'});element?.focus({preventScroll:true})}
-async function reselectCurrent(){if(busy.value||unknown.value||!props.canWrite||!valid.value||!reselectItems.value.length)return;for(const item of reselectItems.value)reselected.value[catalogKey(item)]=true;await nextTick();await submit()}
 function resultUnknown(cause:unknown){const failure=cause as {code?:string;response?:{status?:number}};return ['ECONNABORTED','ETIMEDOUT','ERR_NETWORK'].includes(failure?.code||'')||Number(failure?.response?.status)>=500}
+function samePreviewContext(serial:number,input:ReturnType<typeof payload>){
+ if(!props.modelValue)return false
+ if(serial===generation&&payloadFingerprint(input)===payloadFingerprint(payload()))return true
+ error.value='来源或选品目录已变化，请重新核对后保存。';return false
+}
+async function prepareAddition(serial:number,input:ReturnType<typeof payload>){
+ let checked=await previewCatalogSelection(input)
+ if(!samePreviewContext(serial,input))return
+ const cancelled=checked.items.filter(item=>item.requiresReselect&&selectedItems.value.some(selected=>catalogKey(selected)===catalogKey(item)))
+ if(cancelled.length){
+  try{await ElMessageBox.confirm(uiText('这 {value0} 款以前已取消。重新加入会建立本次选品，原选品、样品和操作历史保留，不自动恢复库存。',{value0:cancelled.length}),uiText('重新加入选品'),{confirmButtonText:uiText('重新加入'),cancelButtonText:uiText('暂不加入'),closeOnClickModal:false})}catch{return}
+  if(!samePreviewContext(serial,input))return
+  for(const item of cancelled)reselected.value[catalogKey(item)]=true
+  await nextTick();input=payload();checked=await previewCatalogSelection(input)
+  if(!samePreviewContext(serial,input))return
+ }
+ preview.value=checked
+ if(!checked.canAdd){if(!validationIssues.value.length)error.value='本次选品未通过核对，请检查款式后重试。';return}
+ if(!checked.previewToken){error.value='预览未返回保存凭证，请重试；本次填写已保留。';return}
+ return input
+}
 async function submit(){
  if(!props.canWrite||busy.value||(!unknown.value&&!valid.value))return
  if(pendingCommand&&(pendingCommand.supplierCode!==props.supplierCode||pendingCommand.targetSelectionId!==props.targetSelectionId||pendingCommand.targetVersion!==props.targetVersion)){error.value='待核对的保存属于原供应商或原选品目录，请返回原页面核对。';return}
- const serial=generation,input=payload(),fingerprint=payloadFingerprint(input);busy.value=true;error.value=''
+ const serial=generation;let input=payload();busy.value=true;error.value=''
  try{
-  if(!pendingCommand){if(!preview.value?.canAdd||!preview.value.previewToken){const checked=await previewCatalogSelection(input);if(!props.modelValue)return;if(serial!==generation||fingerprint!==payloadFingerprint(payload())){error.value='来源或选品目录已变化，请重新核对后保存。';return}preview.value=checked;if(!checked.canAdd){if(!validationIssues.value.length)error.value='本次选品未通过核对，请检查款式后重试。';return}if(!checked.previewToken){error.value='预览未返回保存凭证，请重试；本次填写已保留。';return}}pendingCommand=JSON.parse(JSON.stringify({...input,requestId:requestId.value,previewToken:preview.value.previewToken})) as CatalogAddition}
+  if(!pendingCommand){
+   if(!preview.value?.canAdd||!preview.value.previewToken){const prepared=await prepareAddition(serial,input);if(!prepared)return;input=prepared}
+   pendingCommand=JSON.parse(JSON.stringify({...input,requestId:requestId.value,previewToken:preview.value!.previewToken})) as CatalogAddition
+  }
   const result=await addCatalogSelection(pendingCommand)
   if(!props.modelValue)return
   if(serial!==generation){error.value='来源或选品目录已变化，请返回原目录核对保存结果。';return}
-  unknown.value=false;pendingCommand=undefined;emit('added',result);emit('update:modelValue',false);ElMessage.success(uiText('已加入选品目录；实际收样另行登记'))
+  unknown.value=false;pendingCommand=undefined;emit('added',result);emit('update:modelValue',false);ElMessage.success(result.addedCount===0&&result.reusedCount>0?uiText('本款已在选品目录，可继续登记收样；没有重复建档'):uiText('已加入选品目录；实际收样另行登记'))
  }catch(cause){if(props.modelValue){if(serial!==generation){error.value='来源或选品目录已变化，请返回原目录核对保存结果。';return}unknown.value=!!pendingCommand&&resultUnknown(cause);if(unknown.value)error.value='保存结果待核对，请点击“核对保存结果”；会沿用本次资料，不重复加入。';else{pendingCommand=undefined;preview.value=undefined;error.value=partnerError(cause)}}}finally{busy.value=false}
 }
 </script>
@@ -85,7 +107,7 @@ async function submit(){
    </article>
    <p class="selection-note">{{targetSelectionId?uiText('加入原选品目录，同款自动复用。'):uiText('加入本供应商的选品目录，同款自动复用。')}}{{uiText('此操作不生成实物样品。')}}</p>
   </div>
-  <template #footer><div v-if="error||validationIssues.length" class="selection-errors selection-save-error" role="alert"><p v-if="error">{{uiText(error)}}</p><p v-for="message in validationIssues" :key="message" class="selection-issue">{{message}}</p><el-button v-for="item in issueItems" :key="catalogKey(item)" link size="small" @click="locateIssue(item)">{{uiText('定位款式')}} · {{item.name}}</el-button></div><div v-if="reselectItems.length||Object.values(reselected).some(Boolean)" class="selection-reselection"><span>{{uiText('以前的选品已取消，重新加入将保留原历史')}}</span><el-button v-if="reselectItems.length" :disabled="busy||unknown||!canWrite||!valid" type="primary" plain @click="reselectCurrent">{{uiText('重新加入本次款式')}}</el-button></div><strong class="selection-total">{{uiText('已选 {value0} 款',{value0:selectedItems.length})}}</strong><el-button :disabled="busy||closing||unknown" @click="close()">{{uiText('取消')}}</el-button><el-button type="primary" :disabled="!canWrite||busy||closing||(!unknown&&!valid)" :loading="busy" @click="submit">{{unknown?uiText('核对保存结果'):uiText('加入选品目录')}}</el-button></template>
+  <template #footer><div v-if="error||validationIssues.length" class="selection-errors selection-save-error" role="alert"><p v-if="error">{{uiText(error)}}</p><p v-for="message in validationIssues" :key="message" class="selection-issue">{{message}}</p><el-button v-for="item in issueItems" :key="catalogKey(item)" link size="small" @click="locateIssue(item)">{{uiText('定位款式')}} · {{item.name}}</el-button></div><div v-if="Object.values(reselected).some(Boolean)" class="selection-reselection"><span>{{uiText('以前的选品已取消，重新加入将保留原历史')}}</span></div><strong class="selection-total">{{uiText('已选 {value0} 款',{value0:selectedItems.length})}}</strong><el-button :disabled="busy||closing||unknown" @click="close()">{{uiText('取消')}}</el-button><el-button type="primary" :disabled="!canWrite||busy||closing||(!unknown&&!valid)" :loading="busy" @click="submit">{{unknown?uiText('核对保存结果'):uiText('加入选品目录')}}</el-button></template>
  </el-dialog>
 </template>
 

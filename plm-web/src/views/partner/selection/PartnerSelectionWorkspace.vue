@@ -9,7 +9,7 @@ import PageContainer from '@/components/PageContainer/index.vue'
 import {fileBlob,newRequestId,partnerOptions,saveBlob} from '@/api/modules/partner'
 import {operationCapabilities} from '@/api/modules/partnerOperations'
 import {batchSelectionRows,transitionSelectionRows,patchSelectionRows,saveSelection,selectionDetail,selectionOriginals,selectionPage,selectionRows} from '@/api/modules/partnerSelections'
-import type {SelectionPage,SelectionRow,SelectionSheet,SelectionReceiptResult} from '@/types/partnerSelections'
+import type {SelectionPage,SelectionRow,SelectionSheet,SelectionReceiptResult,SelectionTransition} from '@/types/partnerSelections'
 import type {BusinessData,PartnerOptions,PartnerFile} from '@/types/partner'
 import {cloneSelection,fillableColumns,frozenSelectionRow,newSelectionRow,restrictedSelectionWriteFields,selectionRowFiles,selectionCatalogPhones} from '@/utils/partnerSelections'
 import {partnerError} from '@/utils/partnerError'
@@ -23,6 +23,7 @@ import SelectionPasteDialog from './SelectionPasteDialog.vue'
 import CatalogCurrentInfo from '../catalog/CatalogCurrentInfo.vue'
 import SelectionFileTasks from './SelectionFileTasks.vue'
 import SelectionReceiptDialog from './SelectionReceiptDialog.vue'
+import CancelSelectionDialog from './CancelSelectionDialog.vue'
 import CatalogListingDialog from '../operations/CatalogListingDialog.vue'
 const route=useRoute(),router=useRouter(),id=computed(()=>Number(route.query.id)||0),detail=ref<SelectionSheet>(),loading=ref(false),busy=ref(false),fileBusy=ref(false),error=ref('')
 const options=ref<PartnerOptions>({specs:[],suppliers:[],customers:[],canReadMoney:false,canWriteMoney:false,canConfirmMoney:false}),caps=ref({engineering:false,costs:false,listing:false}),sheets=ref<SelectionPage>({content:[],totalElements:0,page:1,size:30,totalPages:0}),sheetFilter=reactive({keyword:'',page:1,size:30,purpose:'my_selection' as 'my_selection'|'historical'})
@@ -31,6 +32,7 @@ const pasteOpen=ref(false),pasteSaveError=ref('')
 const bulkOpen=ref(false),bulkScope=ref<'checked'|'page'|'filter'>('checked'),bulk=reactive<Record<string,string>>({}),bulkFields=ref<string[]>([]),bulkClear=ref<string[]>([])
 const fileMode=ref<'import'|'export'>('import'),filesOpen=ref(false),listingRow=ref<SelectionRow>()
 const receivingRow=ref<SelectionRow>(),receivingSpec=ref<number>(),receiptRows=ref<SelectionRow[]>([]),checkedRows=ref(new Map<string,SelectionRow>())
+const cancellingRows=ref<SelectionRow[]>([])
 const materialsOpen=ref(false),materialsRow=ref<SelectionRow>(),rowPhotoVersions=reactive<Record<string,number>>({})
 const photoPreview=ref<{rowId:string;title:string;file:PartnerFile;files:PartnerFile[]}>()
 const originalsOpen=ref(false),originalsPage=ref(1),originals=ref<PartnerFile[]>([]),originalsTotal=ref(0)
@@ -90,10 +92,11 @@ async function transitionRows(targets:SelectionRow[],action:'edit'|'cancel'|'res
  if(!detail.value||locked.value||!canWrite.value||!targets.length||!await ensureSaved())return
  const current=targets.map(row=>rows.value.find(item=>item.rowId===row.rowId)||checkedRows.value.get(row.rowId))
  if(current.some(row=>!row||(action==='cancel'?!canCancelSelection(row):action==='restore'?!canRestoreSelection(row):!canReviseSelection(row)||row.discarded))){error.value='已勾选款式包含不适用的记录，请按当前状态分别操作；不会跳过任何款式。';return}
- if(action==='cancel')try{await ElMessageBox.confirm(targets.length===1?uiText('取消这款选品？供应商产品和已有样品保留。'):uiText('取消已勾选的 {value0} 款选品？供应商产品和已有样品保留。',{value0:targets.length}),uiText('取消选品'),{confirmButtonText:uiText('确认取消'),cancelButtonText:uiText('返回'),type:'warning'})}catch{return}
+ if(action==='cancel'){cancellingRows.value=(current as SelectionRow[]).map(cloneSelection);return}
  const values=current as SelectionRow[],key=action+':'+values.map(row=>`${row.rowId}:${row.rowVersion}`).sort().join('|'),request=transitionRequests.get(key)||newRequestId();transitionRequests.set(key,request);busy.value=true;error.value=''
- try{acceptHeader(await transitionSelectionRows(id.value,{version:detail.value.version,requestId:request,action,rows:values.map(row=>({rowId:row.rowId,rowVersion:row.rowVersion||0}))}));transitionRequests.delete(key);values.forEach(row=>checkRow(row,false));await fetchRows();if(!rows.value.length&&filter.page>1){filter.page=Math.max(1,Math.ceil(total.value/filter.size));await fetchRows()}if(action==='edit'){const fresh=rows.value.find(item=>item.rowId===values[0].rowId);if(fresh)edit(fresh)}ElMessage.success(action==='cancel'?uiText('已取消选品，已有样品和历史保留，可恢复'):action==='restore'?uiText('已恢复选品，原确认和收样历史保留'):uiText('可以修改本次选样'))}catch(e){error.value=partnerError(e)}finally{busy.value=false}
+ try{acceptHeader(await transitionSelectionRows(id.value,{version:detail.value.version,requestId:request,action,rows:values.map(row=>({rowId:row.rowId,rowVersion:row.rowVersion||0}))}));transitionRequests.delete(key);values.forEach(row=>checkRow(row,false));await fetchRows();if(!rows.value.length&&filter.page>1){filter.page=Math.max(1,Math.ceil(total.value/filter.size));await fetchRows()}if(action==='edit'){const fresh=rows.value.find(item=>item.rowId===values[0].rowId);if(fresh)edit(fresh)}ElMessage.success(action==='restore'?uiText('已恢复选品，原确认和收样历史保留'):uiText('可以修改本次选样'))}catch(e){error.value=partnerError(e)}finally{busy.value=false}
 }
+async function cancellationSaved(sheet:SelectionSheet,command:SelectionTransition){acceptHeader(sheet);cancellingRows.value=[];command.rows.forEach(row=>{checked.value.delete(row.rowId);checkedRows.value.delete(row.rowId)});try{await fetchRows();if(!rows.value.length&&filter.page>1){filter.page=Math.max(1,Math.ceil(total.value/filter.size));await fetchRows()}ElMessage.success(command.receiptHandling==='void'?uiText('已取消选品并删除勾选的误登记，历史保留'):uiText('已取消选品，已有样品和历史保留，可恢复'))}catch(cause){error.value=partnerError(cause)}}
 function transitionChecked(action:'cancel'|'restore'){if(action==='cancel'?!canCancelChecked.value:!canRestoreChecked.value)return;void transitionRows(checkedTargets.value,action)}
 function viewChecked(){if(singleChecked.value&&!locked.value)edit(singleChecked.value,true)}
 function reviseChecked(){if(singleChecked.value&&singleOnPage.value&&!locked.value)reviseSelection(singleChecked.value)}
@@ -180,6 +183,7 @@ function goToSample(row:SelectionRow,specId?:number){if(!specId)return;receiving
  <SelectionPasteDialog v-if="pasteOpen" :rows="rows" :busy="locked" :save-error="pasteSaveError" :field-label="fieldLabel" :can-edit="canReviseSelection" @close="pasteOpen=false" @apply="applyPaste"/>
  <el-dialog v-model="bulkOpen" :title='uiText("只修改指定字段，保留各行例外")' width="min(850px,96vw)" append-to-body><el-radio-group v-model="bulkScope"><el-radio value="checked">{{ uiText("已勾选 ") }}{{checked.size}}{{ uiText(" 行") }}</el-radio><el-radio value="page">{{ uiText("本页未确认行") }}</el-radio><el-radio value="filter">{{ uiText("全部筛选结果 ") }}{{total}}{{ uiText(" 行") }}</el-radio></el-radio-group><p>{{ uiText("请选择确实要统一的字段；未勾选字段不变。型号／颜色原文不会自动生成供货组合。实际配对的可供／不供结论仍逐项保留。") }}</p><div class="bulk-fields"><article v-for="key in fillableColumns" :key="key"><el-checkbox :model-value="bulkFields.includes(key)" @change="bulkFields=$event?[...bulkFields,key]:bulkFields.filter(value=>value!==key)">{{uiText(String((fieldLabel(key)) ?? ''))}}</el-checkbox><el-input v-model="bulk[key]" :disabled="!bulkFields.includes(key)||bulkClear.includes(key)"/><el-checkbox :model-value="bulkClear.includes(key)" :disabled="!bulkFields.includes(key)" @change="bulkClear=$event?[...bulkClear,key]:bulkClear.filter(value=>value!==key)">{{ uiText("明确清空") }}</el-checkbox></article></div><template #footer><el-button @click="bulkOpen=false">{{ uiText("取消") }}</el-button><el-button type="primary" :disabled="!bulkFields.length||busy||bulkScope!=='filter'&&!bulkTargets.length" @click="applyBulk">{{ uiText("预览目标并应用") }}</el-button></template></el-dialog>
  <SelectionReceiptDialog v-if="receiptRows.length&&detail" :id="id" :version="detail.version" :rows="receiptRows" :from="route.fullPath" @close="receiptRows=[]" @saved="receiptSaved" @busy="fileBusy=$event"/>
+ <CancelSelectionDialog v-if="cancellingRows.length&&detail" :id="id" :version="detail.version" :rows="cancellingRows" @close="cancellingRows=[]" @saved="cancellationSaved" @busy="fileBusy=$event"/>
  <el-dialog :model-value="!!receivingRow" :title='uiText("选择本次实际收到的规格")' width="min(650px,95vw)" append-to-body @update:model-value="!$event&&(receivingRow=undefined)"><p>{{ uiText("本行有多个真实型号／颜色配对。选择这次实际收到的规格；拟拿样合计不会被平均分配。") }}</p><el-select v-model="receivingSpec" filterable :placeholder='uiText("选择实际规格")'><el-option v-for="spec in receivingRow?.specLinks||[]" :key="spec.specId" :value="spec.specId" :label="spec.specName"/></el-select><template #footer><el-button @click="receivingRow=undefined">{{ uiText("取消") }}</el-button><el-button type="primary" :disabled="!receivingSpec" @click="receivingRow&&goToSample(receivingRow,receivingSpec)">{{ uiText("登记本次实际收样") }}</el-button></template></el-dialog>
  <CatalogListingDialog v-if="listingRow" :selection-id="id" :row="listingRow" @close="listingRow=undefined" @saved="listingRow=undefined;load()"/>
  <SelectionFileTasks v-if="id" :key="id" v-model="filesOpen" :id="id" :mode="fileMode" :suppliers="suppliers" :can-write="canWrite" @changed="load" @busy="fileBusy=$event"/>

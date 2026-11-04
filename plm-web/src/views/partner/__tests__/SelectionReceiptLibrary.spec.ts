@@ -42,7 +42,7 @@ describe('unspecified receipt reuses the real phone library picker',()=>{
   await button('保存实际收样');expect(api.save).toHaveBeenCalledTimes(1);expect(api.save.mock.calls[0][1]).toMatchObject({location:'CN',ownerUserId:71,rows:[{rowId:'row-1',rowVersion:2,phoneModelId:17,colorName:'黑色',qty:2,sourceScopeToken:'original-not-provided-source'}]});expect(api.save.mock.calls[0][1].rows[0]).not.toHaveProperty('phoneModelIds')
  })
  it('translates the unspecified-supplier hint while retaining original style and colour values',async()=>{
-  setLanguage('es');await start();expect(document.body.textContent).toContain('El proveedor no indicó modelos. Selecciónelos según las muestras físicas');expect(document.body.textContent).toContain('未注明款');expect(wrapper!.findComponent({name:'ElAutocomplete'}).props('modelValue')).toBe('黑色');expect(t('供应商明确未提供型号范围，请按实际收到的样品选择真实型号')).toContain('El proveedor indicó expresamente');expect(api.save).not.toHaveBeenCalled()
+  setLanguage('es');await start();expect(document.body.textContent).toContain('El proveedor no indicó modelos. Selecciónelos según las muestras físicas');expect(document.body.textContent).toContain('未注明款');expect(wrapper!.findAllComponents({name:'ElAutocomplete'}).find(component=>component.element.closest('.receipt-color'))!.props('modelValue')).toBe('黑色');expect(t('供应商明确未提供型号范围，请按实际收到的样品选择真实型号')).toContain('El proveedor indicó expresamente');expect(api.save).not.toHaveBeenCalled()
  })
 
 })

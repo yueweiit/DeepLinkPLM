@@ -68,4 +68,5 @@ export interface SelectionUpload { id:string;chunkSize:number;partCount:number;s
 export interface SelectionStagedRow {rowId:string;rowNumber:number;sourceSheet:string;action:SelectionImportAction;values:Partial<SelectionRow>;original?:Partial<SelectionRow>;messages:string[];version:number}
 export type SelectionImportAction = 'new'|'update'|'same'|'conflict'
 
-export interface SelectionTransition {version:number;requestId:string;action:'edit'|'cancel'|'restore';rows:{rowId:string;rowVersion:number}[];reason?:string}
+export interface SelectionTransition {version:number;requestId:string;action:'edit'|'cancel'|'restore';rows:{rowId:string;rowVersion:number}[];reason?:string;receiptHandling?:'keep'|'void';receipts?:{id:number;version:number}[]}
+export interface SelectionCancellationPreview {id:number;version:number;rows:{rowId:string;name:string}[];receipts:{id:number;version:number;code:string;displayCode?:string;selectionRowId:string;name:string;date:string;modelName:string;colorName:string;effectiveReceivedQty:number;canVoid:boolean;blockedReason:string}[];canVoidReceipts:boolean}

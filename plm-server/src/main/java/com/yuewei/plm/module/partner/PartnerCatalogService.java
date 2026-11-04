@@ -836,9 +836,12 @@ public class PartnerCatalogService {
                     if(cancelledSelection(saved)&&(styleOnly||!shared.isEmpty()||!sameSourceVersion(saved,row)))cancelledMatches.add(Map.of("rowId",saved.get("rowId"),"rowVersion",saved.get("rowVersion"),"phoneModelIds",savedPhones,"overlappingPhoneModelIds",shared,"discarded",Boolean.TRUE.equals(saved.get("discarded")),"selected",Boolean.TRUE.equals(saved.get("selected")),"confirmed",Boolean.TRUE.equals(saved.get("confirmed"))));
                     oldView.add(Map.of("rowId",saved.get("rowId"),"rowVersion",saved.get("rowVersion"),"confirmed",Boolean.TRUE.equals(saved.get("confirmed")),"phoneModelIds",savedPhones,"selectedPairs",maps(saved.get("selectedPairs")),"sampleColors",saved.getOrDefault("sampleColors",List.of())));
                 }
-                view.put("cancelledMatches",cancelledMatches);view.put("requiresReselect",!reselectCancelled&&!cancelledMatches.isEmpty());view.put("existingRows",oldView);
+                var activeHistory=history.stream().filter(saved->!cancelledSelection(saved)).toList();
+                var activePhones=new HashSet<Long>();for(var saved:activeHistory)activePhones.addAll(PartnerSelectionService.scopeIds(saved.get("phoneModelIds")));
+                boolean alreadySelected=styleOnly?!activeHistory.isEmpty():!chosen.isEmpty()&&activePhones.containsAll(chosen);
+                view.put("cancelledMatches",cancelledMatches);view.put("requiresReselect",!reselectCancelled&&!alreadySelected&&!cancelledMatches.isEmpty());view.put("existingRows",oldView);
                 // Explicit reselection creates a current draft; cancelled history never becomes a write target.
-                var existing=reselectCancelled?history.stream().filter(saved->!cancelledSelection(saved)).toList():history;
+                var existing=reselectCancelled||alreadySelected?activeHistory:history;
                 var oldChosen=new LinkedHashSet<Long>();
                 for(var saved:existing){
                     require(styleOnly||sameSourceVersion(saved,row)||PartnerSelectionService.awaitingFirstPhones(saved),"目标选品已采用该款另一来源版本，请先核对版本差异或另建选品");
