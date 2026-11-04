@@ -64,6 +64,12 @@ final class PartnerReceiptColors {
    String actual=required(existing.get("name"),"实际颜色");require(value.isEmpty()||fold(value).equals(fold(actual)),"填写的颜色与所选颜色不一致，请重新输入或选择本行颜色");return new Resolution(id,actual,false);
   }
   required(value,"实收颜色");var matched=allowed.stream().filter(c->fold(text(c.get("name"))).equals(fold(value))).toList();
+  if(atReceipt(snapshot)&&matched.size()>1){
+   int specificity=matched.stream().mapToInt(PartnerReceiptColors::specificity).max().orElse(0);
+   matched=matched.stream().filter(c->specificity(c)==specificity).toList();
+   // Unnumbered duplicate names in the same scope are ordinary receipt colours, not distinct supplier shades.
+   if(matched.size()>1&&matched.stream().allMatch(c->text(c.get("supplierColorCode")).isBlank()))matched=matched.stream().min(Comparator.comparingLong(c->number(c.get("id")))).stream().toList();
+  }
   require(matched.size()<=1,"这个颜色名称对应多条供方记录，请在本行选择对应颜色");
   if(matched.size()==1)return new Resolution(number(matched.get(0).get("id")),text(matched.get(0).get("name")),false);
   require(atReceipt(snapshot),"这个颜色不在原选样确认范围内，请选择本行已有颜色");
@@ -71,6 +77,7 @@ final class PartnerReceiptColors {
   require(inactive.isEmpty(),"这个供方颜色已停用，不能通过重新输入名称启用，请核对原颜色记录");
   return new Resolution(0,value,true);
  }
+ private static int specificity(Map<String,Object> color){return (text(color.get("styleKey")).isBlank()?0:2)+(text(color.get("configKey")).isBlank()?0:1);}
  /** Called only after every receipt row has passed read-only validation, inside its receipt transaction. */
  Resolution persist(long selection,Map<String,Object> snapshot,long phone,Map<String,Object> row,String request){
   return persist(selection,snapshot,phone,row,request,"实际收样时记录颜色");
@@ -79,6 +86,10 @@ final class PartnerReceiptColors {
  private Resolution persist(long selection,Map<String,Object> snapshot,long phone,Map<String,Object> row,String request,String purpose){
   var resolved=resolve(snapshot,phone,row);if(!resolved.proposed())return resolved;
   String supplier=required(snapshot.get("supplierCode"),"实际供应商"),style=text(snapshot.get("styleKey")),config=text(snapshot.get("configKey"));
+  // Earlier styles in this transaction may already have recorded this supplier's unnumbered colour.
+  var current=new LinkedHashMap<>(snapshot);
+  current.put("receiptColors",store.jdbc.queryForList("select color_id as id,name,code,supplier_color_code as \"supplierColorCode\",style_key as \"styleKey\",config_key as \"configKey\" from plm_supplier_color where supplier_code=? and lower(name)=lower(?) and status='active' and (style_key='' or style_key=?) and (config_key='' or config_key=?) order by color_id",supplier,resolved.name(),style,config));
+  resolved=resolve(current,phone,row);if(!resolved.proposed())return resolved;
   // The pre-acquired name lock serialises other receipt sheets. The existing supplier SHARE lock
   // also excludes the supplier editor's UPDATE lock, without a SHARE-to-UPDATE lock upgrade.
   var data=new LinkedHashMap<String,Object>();data.put("standardColorId",0);data.put("refs",List.of());
