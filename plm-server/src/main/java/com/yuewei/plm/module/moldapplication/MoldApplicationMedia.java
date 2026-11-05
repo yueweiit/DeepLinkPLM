@@ -59,6 +59,35 @@ public class MoldApplicationMedia {
             """,Long.class,id,category,name,name,ext,contentType,bytes==null?sourceSize:Long.valueOf(bytes.length),sha,sha,bytes==null?"dingtalk":"local",storage,
             contentType!=null&&contentType.startsWith("image/")?"image":"unsupported","ready",sourceId.startsWith("plm:")||sourceId.startsWith("selection:")?"plm":"dingtalk",sourceId,sourceUrl,downloadStatus,component,actor,actor);
     }
+    public static String researchCategory(String mime){return Set.of("image/jpeg","image/png","image/webp").contains(mime)?"key_photo":"attachment";}
+    public List<Map<String,Object>> describeResearchFiles(List<Map<String,Object>> references) {
+        var result=new ArrayList<Map<String,Object>>();
+        for(var reference:references){
+            var described=new LinkedHashMap<>(reference);
+            if("file".equals(reference.get("type"))){
+                var rows=jdbc.queryForList("select content_type from plm_attachment where attachment_id=? and deleted_flag=0",reference.get("id"));
+                if(rows.size()==1)described.put("category",researchCategory(Objects.toString(rows.get(0).get("content_type"),"")));
+            }
+            result.add(described);
+        }
+        return result;
+    }
+    /** Only unsubmitted research drafts use the new photo slot; original storage and versions stay pinned. */
+    public int migrateResearchPhotos(long id,String actor){
+        int duplicates=jdbc.update("""
+            update plm_attachment f set deleted_flag=1,updated_by=?,updated_at=now()
+            where f.owner_object_type='MoldApplication' and f.owner_object_id=? and f.deleted_flag=0
+              and f.source_file_id like 'research-file:%' and f.content_type in ('image/jpeg','image/png','image/webp')
+              and f.source_component_id<>? and exists(select 1 from plm_attachment kept where kept.owner_object_type=f.owner_object_type
+                and kept.owner_object_id=f.owner_object_id and kept.source_file_id=f.source_file_id and kept.source_component_id=? and kept.deleted_flag=0)
+            """,actor,id,COMPONENTS.get("keyPhotos"),COMPONENTS.get("keyPhotos"));
+        return duplicates+jdbc.update("""
+            update plm_attachment set file_category='key_photo',source_component_id=?,updated_by=?,updated_at=now()
+            where owner_object_type='MoldApplication' and owner_object_id=? and deleted_flag=0
+              and source_file_id like 'research-file:%' and content_type in ('image/jpeg','image/png','image/webp')
+              and (file_category<>'key_photo' or source_component_id<>?)
+            """,COMPONENTS.get("keyPhotos"),actor,id,COMPONENTS.get("keyPhotos"));
+    }
     /** Adopt the explicitly selected original revision; reuse its immutable storage object, never copy bytes or choose latest. */
     public List<Long> inheritResearchFiles(long id,long project,List<Map<String,Object>> references,String actor,com.yuewei.plm.module.pilot.PilotAccessService access) {
         var adopted=new ArrayList<Long>();
@@ -74,9 +103,8 @@ public class MoldApplicationMedia {
             if(!"local".equals(original.get("storage_type"))||storage.isBlank())throw invalid("附件「"+sourceName+"」尚未归档，请回新品项目的图片与附件重新上传或修复后重试");
             try{if(Files.size(file(storage))>MAX)throw invalid("附件「"+sourceName+"」超过开模附件50MB上限，请回新品项目压缩或拆分后重试");}catch(IOException missing){throw invalid("附件「"+sourceName+"」本地文件不存在，请回新品项目的图片与附件重新上传后重试");}
             String mime=Objects.toString(original.get("content_type"),Objects.toString(original.get("mime_type"),"application/octet-stream"));
-            boolean photo=Set.of("image/jpeg","image/png","image/webp").contains(mime);
-            String category=photo?(Objects.toString(original.get("file_category"),"").toLowerCase(Locale.ROOT).contains("sample")?"sample_photo":"key_photo"):"attachment";
-            String component=COMPONENTS.get(photo?(category.equals("key_photo")?"keyPhotos":"samplePhotos"):"attachments");
+            String category=researchCategory(mime);boolean photo="key_photo".equals(category);
+            String component=COMPONENTS.get(photo?"keyPhotos":"attachments");
             jdbc.update("""
                 insert into plm_attachment(owner_object_type,owner_object_id,file_category,file_name,original_file_name,file_ext,
                   content_type,file_size,checksum,content_sha256,storage_type,storage_key,preview_type,preview_status,

@@ -629,7 +629,7 @@ class MoldApplicationLocalIntegrationTest {
         var created=service.startFromResearch(request,null);assertThat(created).containsEntry("phoneModelId",null).containsEntry("status","draft");assertThat(((JsonNode)created.get("form")).path("remark").asText()).isEqualTo("弹窗填写且原子保存");assertThat(((JsonNode)created.get("form")).path("model").asText()).isEqualTo("用户手填待核对型号");
         var again=service.startFromResearch(request,null);assertThat(id(again)).isEqualTo(id(created));assertThat(version(again)).isEqualTo(version(created));
         var manual=service.save(null,new MoldApplicationService.Draft(json.valueToTree(Map.of("remark","另一个入口不能覆盖原草稿")),researchProject,null,null,null,"new",null,null,null),null);assertThat(id(manual)).isEqualTo(id(created));assertThat(version(manual)).isEqualTo(version(created));assertThat(((JsonNode)manual.get("form")).path("remark").asText()).isEqualTo("弹窗填写且原子保存");
-        assertThatThrownBy(()->service.reserve(id(created),version(created),null)).hasMessageContaining("请选择标准手机型号");
+        assertThatThrownBy(()->service.reserve(id(created),version(created),null)).hasMessageContaining("Tiffany 授权后自动编码");
         var saved=service.save(id(created),new MoldApplicationService.Draft((JsonNode)created.get("form"),researchProject,phone,version(created),phoneModel,"new",null,null,null),null);assertThat(saved).containsEntry("phoneModelId",phoneModel);
         assertThatThrownBy(()->service.save(id(saved),new MoldApplicationService.Draft((JsonNode)saved.get("form"),50L,phone,version(saved),phoneModel,"new",null,null,null),null)).hasMessageContaining("产品已固定");
         assertThatThrownBy(()->service.startFromResearch(new MoldApplicationService.ResearchDraft(researchProject,phoneModel,"it-research-version-12345678",0L),null)).hasMessageContaining("项目已被其他操作更新");
@@ -690,7 +690,7 @@ class MoldApplicationLocalIntegrationTest {
     @Test void researchDraftCompletesTheOriginalLemosSubmitWithAdoptedFilesAndHumanSupplierText()throws Exception {
         researchFixture(true);var created=service.startFromResearch(researchInput("it-research-formal-submit-12345678"),null);long application=id(created);
         assertThat(created.get("generatedCodes")).isNull();assertThat(((JsonNode)created.get("form")).path("tipo").asText()).isEmpty();
-        repo.saveSchema(props.getProcessCode(),currentResearchSchema());when(client.schema(anyString())).thenReturn(currentResearchSchema());
+        repo.saveSchema(props.getResearchProcessCode(),currentResearchSchema());when(client.schema(anyString())).thenReturn(currentResearchSchema());
         tipo="亮甲Rainbow 3.0";jdbc.update("delete from plm_mold_application_config where tipo=?",tipo);
         var form=((JsonNode)created.get("form")).deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)form).put("tipo",tipo).put("expectedDeliveryDate","2026-12-01");
         var saved=service.save(application,new MoldApplicationService.Draft(form,researchProject,phone,version(created),phoneModel,"new",null,null,null),null);
@@ -707,7 +707,7 @@ class MoldApplicationLocalIntegrationTest {
         when(client.submit(anyMap())).thenReturn("it-research-submitted-instance");when(client.instance("it-research-submitted-instance")).thenThrow(new MoldDingTalkClient.RemoteFailure(false,"离线补拉"));
         var submitted=service.submit(application,new MoldApplicationService.Submit(version(saved),null,true),null);assertThat(submitted).containsEntry("status","submitted").containsEntry("instanceId","it-research-submitted-instance");assertThat(service.researchApplications(researchProject).get(0)).containsEntry("businessStatus","awaiting_approval");
         var payload=org.mockito.ArgumentCaptor.forClass(Map.class);verify(client,times(1)).submit(payload.capture());var values=(List<Map<String,String>>)payload.getValue().get("formComponentValues");
-        var fieldsById=new HashMap<String,String>();for(var field:values)fieldsById.put(field.get("id"),field.get("value"));
+        assertThat(payload.getValue()).containsEntry("processCode",props.getResearchProcessCode());var fieldsById=new HashMap<String,String>();for(var field:values)fieldsById.put(field.get("id"),field.get("value"));assertThat(fieldsById).containsEntry(MoldApplicationForms.COMPONENTS.get("productName"),"IT LEMOS 新品").doesNotContainKey(MoldApplicationForms.COMPONENTS.get("tipo"));
         assertThat(fieldsById.get(MoldApplicationForms.COMPONENTS.get("model"))).isEqualTo("IT New Phone");assertThat(fieldsById.get(MoldApplicationForms.COMPONENTS.get("remark"))).contains("IT LEMOS 新品","透明PC背板，TPU包边","部件：内部制作 工程部（PC样板）").doesNotContain("supplierId","supplierCode");
         assertThat(fieldsById).doesNotContainKeys(MoldApplicationForms.COMPONENTS.get("generatedCodes"),MoldApplicationForms.COMPONENTS.get("informationComplete"));
         assertThat(fieldsById.get(MoldApplicationForms.COMPONENTS.get("attachments"))).contains("mock-adopted-file","工程方案.pdf");assertThat(fieldsById.get(MoldApplicationForms.COMPONENTS.get("keyPhotos"))).contains("qa-research-photo.png");
@@ -715,10 +715,10 @@ class MoldApplicationLocalIntegrationTest {
         var reopened=service.startFromResearch(researchInput("it-research-after-submit-12345678"),null);assertThat(id(reopened)).isEqualTo(application);assertThat(reopened).containsEntry("canEditDraft",false).containsEntry("status","submitted");assertThat(jdbc.queryForObject("select count(*) from plm_mold_application",Long.class)).isEqualTo(count);verify(client,times(1)).submit(anyMap());verify(http,times(1)).send(any(java.net.http.HttpRequest.class),any(java.net.http.HttpResponse.BodyHandler.class));
     }
 
-    @Test void researchWrongTipoCannotChangeThePinnedSourceProductDuringReservation()throws Exception {
+    @Test void newResearchCannotManuallyReserveCodesBeforeTiffanyAuthorization()throws Exception {
         researchFixture(false);var created=service.startFromResearch(researchInput("it-research-wrong-tipo-12345678"),null);var form=((JsonNode)created.get("form")).deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)form).put("tipo",tipo);
         var saved=service.save(id(created),new MoldApplicationService.Draft(form,researchProject,phone,version(created),phoneModel,"new",null,null,null),null);long reservations=jdbc.queryForObject("select count(*) from plm_mold_code_reservation",Long.class);
-        assertThatThrownBy(()->service.reserve(id(saved),version(saved),null)).hasMessageContaining("Tipo与新品产品不一致");assertThat(repo.row(id(saved),false)).containsEntry("productLineId",researchProject).containsEntry("generatedCodes",null);assertThat(jdbc.queryForObject("select count(*) from plm_mold_code_reservation",Long.class)).isEqualTo(reservations);verifyNoInteractions(client,files);
+        assertThatThrownBy(()->service.reserve(id(saved),version(saved),null)).hasMessageContaining("Tiffany 授权后自动编码");assertThat(repo.row(id(saved),false)).containsEntry("productLineId",researchProject).containsEntry("generatedCodes",null);assertThat(jdbc.queryForObject("select count(*) from plm_mold_code_reservation",Long.class)).isEqualTo(reservations);verifyNoInteractions(client,files);
     }
     @Test void visibleOtherApplicantsResearchDraftIsContinuedReadOnlyWithoutChangingEvidence()throws Exception {
         researchFixture(false);var created=service.startFromResearch(researchInput("it-research-original-owner-12345678"),null);
@@ -744,11 +744,17 @@ class MoldApplicationLocalIntegrationTest {
     }
 
     JsonNode currentResearchSchema()throws Exception {
-        try(var in=getClass().getResourceAsStream("/moldapplication/lemos-current-20261028-schema.json")){return json.readTree(in);}
+        try(var in=getClass().getResourceAsStream("/moldapplication/lemos-current-20261028-schema.json")){
+            var schema=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(in);schema.put("name","LEMOS-新产品开模 Fabricación de moldes");
+            var items=(com.fasterxml.jackson.databind.node.ArrayNode)schema.path("schemaContent").path("items");
+            for(int i=items.size()-1;i>=0;i--)if(MoldApplicationForms.COMPONENTS.get("tipo").equals(items.get(i).path("props").path("id").asText()))items.remove(i);
+            var product=json.createObjectNode().put("componentName","TextField");product.putObject("props").put("id",MoldApplicationForms.COMPONENTS.get("productName")).put("label","产品名nombre del producto").put("required",true);items.insert(0,product);
+            return schema;
+        }
     }
     Map<String,Object> uncodedResearchPrepared()throws Exception {
         researchFixture(false);tipo="亮甲Rainbow 3.0";jdbc.update("delete from plm_mold_application_config where tipo=?",tipo);
-        var actual=currentResearchSchema();repo.saveSchema(props.getProcessCode(),actual);when(client.schema(anyString())).thenReturn(actual);
+        var actual=currentResearchSchema();repo.saveSchema(props.getResearchProcessCode(),actual);when(client.schema(anyString())).thenReturn(actual);
         var state=researchStore.load(researchProject);state.put("planDraft",Map.of("phoneModelIds",List.of(),"needsMold",true));state.put("plan",Map.of("phoneModelIds",List.of(),"needsMold",true));researchStore.save(researchProject,state);
         var created=service.startFromResearch(new MoldApplicationService.ResearchDraft(researchProject,null,"it-uncoded-"+UUID.randomUUID(),((Number)researchStore.load(researchProject).get("version")).longValue()),null);
         var form=((JsonNode)created.get("form")).deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)form).put("model","Honor 600 Lite 待最终适配确认").put("tipo",tipo).put("expectedDeliveryDate","2026-12-01");
@@ -756,17 +762,17 @@ class MoldApplicationLocalIntegrationTest {
         byte[] png=Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6BuMAAAAASUVORK5CYII=");
         return service.upload(id(saved),"key_photo",new MockMultipartFile("file","设计图.png","image/png",png),null);
     }
-    @Test void actualTwentyControlTemplateAllowsResearchCodesToStayEmptyAndApprovalRemainsOnOriginalProject()throws Exception {
+    @Test void newProductTemplateAllowsResearchCodesToStayEmptyAndApprovalRemainsOnOriginalProject()throws Exception {
         var row=uncodedResearchPrepared();allowWrite();var actual=currentResearchSchema();
         assertThat(actual.path("schemaContent").path("items")).hasSize(20);
-        assertThat(MoldApplicationForms.controls(actual,json).stream().filter(c->Boolean.TRUE.equals(c.get("required"))).map(c->c.get("key")).toList()).containsExactly("model","tipo");
+        assertThat(MoldApplicationForms.controls(actual,json).stream().filter(c->Boolean.TRUE.equals(c.get("required"))).map(c->c.get("key")).toList()).containsExactly("productName","model");
         var before=new LinkedHashMap<String,Long>();for(String table:List.of("plm_product","plm_code_item","plm_collaboration_item","plm_collaboration_mold_set"))before.put(table,jdbc.queryForObject("select count(*) from "+table,Long.class));
         when(client.submit(anyMap())).thenReturn("it-uncoded-approved");when(client.instance("it-uncoded-approved")).thenThrow(new MoldDingTalkClient.RemoteFailure(false,"离线补拉"));
         var submitted=service.submit(id(row),new MoldApplicationService.Submit(version(row),null,true),null);
         assertThat(submitted).containsEntry("status","submitted").containsEntry("generatedCodes",null).containsEntry("phoneCodeItemId",null).containsEntry("phoneModelId",null).containsEntry("projectId",null);
         var values=org.mockito.ArgumentCaptor.forClass(Map.class);verify(client).submit(values.capture());var fields=(List<Map<String,String>>)values.getValue().get("formComponentValues");
         assertThat(fields).noneMatch(f->Set.of(MoldApplicationForms.COMPONENTS.get("generatedCodes"),MoldApplicationForms.COMPONENTS.get("informationComplete")).contains(f.get("id")));
-        assertThat(fields).anySatisfy(f->assertThat(f).containsEntry("id",MoldApplicationForms.COMPONENTS.get("tipo")).containsEntry("value","亮甲Rainbow 3.0"));
+        assertThat(values.getValue()).containsEntry("processCode",props.getResearchProcessCode());assertThat(fields).noneMatch(f->MoldApplicationForms.COMPONENTS.get("tipo").equals(f.get("id")));assertThat(fields).anySatisfy(f->assertThat(f).containsEntry("id",MoldApplicationForms.COMPONENTS.get("productName")).containsEntry("value","IT LEMOS 新品"));
         assertThat(((JsonNode)submitted.get("sourceSnapshot")).path("researchSubmission").path("projectId").asLong()).isEqualTo(researchProject);
         var convert=converter();
         var productCoding=mock(com.yuewei.plm.module.product.service.ResearchProductCodingService.class);when(productCoding.ensurePrefix(eq(researchProject),anyString())).thenReturn(Map.of("status","pending","productSpecificCode","","productCodePrefix",""));when(productCoding.operationOptions()).thenReturn(List.of());
@@ -775,7 +781,7 @@ class MoldApplicationLocalIntegrationTest {
         var remoteForm=approved.putArray("form_component_values");for(var field:fields)remoteForm.addObject().put("id",field.get("id")).put("value",field.get("value"));
         approved.putArray("tasks").addObject().put("userid",MoldApplicationForms.EXECUTION_APPROVER_USER_ID).put("taskid","it-research-proof").put("task_status","COMPLETED").put("task_result","AGREE").put("finish_time","2026-10-29 12:00:00");
         doReturn(approved).when(client).instance("it-uncoded-approved");
-        service.callback("it-uncoded-approved",props.getProcessCode(),true);service.callback("it-uncoded-approved",props.getProcessCode(),true);
+        service.callback("it-uncoded-approved",props.getResearchProcessCode(),true);service.callback("it-uncoded-approved",props.getResearchProcessCode(),true);
         var synced=repo.row(id(row),false);assertThat(synced).containsEntry("approvalGranted",true).containsEntry("productLineId",researchProject).containsEntry("projectId",researchProject).containsEntry("provisioningStatus","blocked");
         assertThat(((JsonNode)synced.get("sourceSnapshot")).path("researchSubmission")).isEqualTo(((JsonNode)submitted.get("sourceSnapshot")).path("researchSubmission"));
         assertThat(convert.preview(id(row))).containsKey("researchCoding");
@@ -785,7 +791,7 @@ class MoldApplicationLocalIntegrationTest {
         assertThat(service.retryProvision(id(row),version(repo.row(id(row),false)),null)).containsEntry("projectId",researchProject).containsEntry("moldSetId",null);
         assertThat(service.researchApplications(researchProject)).singleElement().satisfies(r->assertThat(r).containsEntry("model","Honor 600 Lite 待最终适配确认"));
         assertThat(service.detail(id(row)).get("nextStep").toString()).contains("新品审批已同意","新品项目");
-        approved.put("status","TERMINATED");service.callback("it-uncoded-approved",props.getProcessCode(),false);
+        approved.put("status","TERMINATED");service.callback("it-uncoded-approved",props.getResearchProcessCode(),false);
         var ended=repo.row(id(row),false);assertThat(ended).containsEntry("approvalGranted",false).containsEntry("productLineId",researchProject);assertThat(service.detail(id(row)).get("nextStep").toString()).contains("新品审批已结束");
         assertThat(((JsonNode)ended.get("sourceSnapshot")).path("researchSubmission")).isEqualTo(((JsonNode)submitted.get("sourceSnapshot")).path("researchSubmission"));
         for(var entry:before.entrySet())assertThat(jdbc.queryForObject("select count(*) from "+entry.getKey(),Long.class)).isEqualTo(entry.getValue());
@@ -811,8 +817,8 @@ class MoldApplicationLocalIntegrationTest {
         assertThatThrownBy(()->service.submit(id(manual),new MoldApplicationService.Submit(version(manual),null,true),null)).hasMessageContaining("生成编码");
         var forged=((com.fasterxml.jackson.databind.node.ObjectNode)form).deepCopy();forged.put("submissionPolicy","research");
         assertThatThrownBy(()->service.save(id(manual),new MoldApplicationService.Draft(forged,researchProject,null,version(manual),phoneModel,"new",null,null,null),null)).hasMessageContaining("未知申请字段");
-        var started=service.startFromResearch(researchInput("it-tipo-mapping-"+UUID.randomUUID()),null);
-        assertThatThrownBy(()->service.submit(id(started),new MoldApplicationService.Submit(version(started),null,true),null)).hasMessageContaining("不能用其他款式代替新品");verify(client,never()).submit(anyMap());
+        when(client.schema(props.getResearchProcessCode())).thenReturn(currentResearchSchema());var started=service.startFromResearch(researchInput("it-tipo-mapping-"+UUID.randomUUID()),null);
+        assertThatThrownBy(()->service.submit(id(started),new MoldApplicationService.Submit(version(started),null,true),null)).hasMessageContaining("关键图片");verify(client,never()).submit(anyMap());
     }
     @Test void alreadyLinkedExternalResearchApprovalReturnsTheSameRecordBeforeAnyCreateOrCodeCheck()throws Exception {
         var row=uncodedResearchPrepared();allowWrite();jdbc.update("update plm_mold_application set source_system='dingtalk',status='submitted',external_instance_id='it-existing-202610281759000301110',approval_no='202610281759000301110',remote_status='RUNNING' where application_id=?",id(row));
@@ -832,6 +838,48 @@ class MoldApplicationLocalIntegrationTest {
         var nested=new TransactionTemplate(tx);nested.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
         assertThatThrownBy(()->nested.execute(scope->service.submit(id(row),new MoldApplicationService.Submit(version(row),null,true),null))).hasMessageContaining("research submit audit failed");
         assertThat(repo.row(id(row),false)).containsEntry("status","draft").containsEntry("sourceSnapshot",before.get("sourceSnapshot")).containsEntry("version",before.get("version"));verify(client,never()).submit(anyMap());
+    }
+
+    long researchImageReference()throws Exception {
+        byte[] png=Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6BuMAAAAASUVORK5CYII=");
+        long image=media.store(0,MoldApplicationForms.COMPONENTS.get("samplePhotos"),"sample_photo","样品确认照片.png","plm:"+MoldApplicationMedia.hash(png),null,png,"image/png","it","downloaded");
+        jdbc.update("update plm_attachment set owner_object_type='Product',owner_object_id=?,version_no='V4' where attachment_id=?",researchProject,image);
+        var state=researchStore.load(researchProject);for(String key:List.of("plan","planDraft")){var plan=new LinkedHashMap<>((Map<String,Object>)state.get(key));var references=new ArrayList<>((List<Map<String,Object>>)plan.get("references"));references.add(Map.of("type","file","id",image));plan.put("references",references);state.put(key,plan);}researchStore.save(researchProject,state);return image;
+    }
+    @Test void contextualOptionsFetchTheCorrectNewTemplateOnceWithoutCreatingOrMigratingADraft()throws Exception {
+        researchFixture(false);jdbc.update("delete from plm_mold_application_schema where process_code=?",props.getResearchProcessCode());when(client.schema(props.getResearchProcessCode())).thenReturn(currentResearchSchema());
+        long before=jdbc.queryForObject("select count(*) from plm_mold_application",Long.class);
+        var options=service.options(researchProject,null);assertThat(options).containsEntry("processCode",props.getResearchProcessCode()).containsEntry("processName","LEMOS-新产品开模 Fabricación de moldes");
+        var controls=(List<Map<String,Object>>)options.get("controls");assertThat(controls.stream().filter(c->Boolean.TRUE.equals(c.get("required"))).map(c->c.get("key")).toList()).containsExactlyInAnyOrder("productName","model","expectedDeliveryDate","keyPhotos");assertThat(controls).noneMatch(c->"tipo".equals(c.get("key")));
+        service.options(researchProject,null);verify(client,times(1)).schema(props.getResearchProcessCode());assertThat(service.options()).containsEntry("processCode",props.getProcessCode());assertThat(jdbc.queryForObject("select count(*) from plm_mold_application",Long.class)).isEqualTo(before);verify(client,never()).submit(anyMap());
+    }
+    @Test void unsubmittedLegacyResearchMigratesOnlyOnSaveWithExactFilesAndOneAudit()throws Exception {
+        researchFixture(true);long image=researchImageReference();var created=service.startFromResearch(researchInput("it-dual-migration-"+UUID.randomUUID()),null);long application=id(created);
+        var original=media.list(application);assertThat(original).hasSize(2);assertThat(original.stream().filter(f->Objects.equals(f.get("sourceAttachmentId"),image)).findFirst().orElseThrow()).containsEntry("category","key_photo").containsEntry("versionNo","V4");
+        jdbc.update("update plm_mold_application set process_code=?,form_data=form_data-'productName' where application_id=?",props.getProcessCode(),application);
+        jdbc.update("update plm_attachment set file_category='sample_photo',source_component_id=? where owner_object_type='MoldApplication' and owner_object_id=? and source_file_id=?",MoldApplicationForms.COMPONENTS.get("samplePhotos"),application,"research-file:"+image);
+        var before=repo.row(application,false);repo.saveSchema(props.getResearchProcessCode(),currentResearchSchema());clearInvocations(client);
+        assertThat(service.detail(application)).containsEntry("processCode",props.getProcessCode()).containsEntry("submissionProcessCode",props.getResearchProcessCode()).containsEntry("processMigrationRequired",true);
+        assertThat(service.options(null,application)).containsEntry("processCode",props.getResearchProcessCode());assertThat(repo.row(application,false)).containsEntry("version",before.get("version")).containsEntry("form",before.get("form"));
+        var logs=(OperationLogService)org.springframework.test.util.ReflectionTestUtils.getField(service,"logs");clearInvocations(logs);
+        var saved=service.save(application,new MoldApplicationService.Draft((JsonNode)before.get("form"),researchProject,phone,version(before),phoneModel,"new",null,null,null),null);
+        assertThat(saved).containsEntry("processCode",props.getResearchProcessCode()).containsEntry("processMigrationRequired",false);assertThat(((JsonNode)saved.get("form")).path("productName").asText()).isEqualTo("IT LEMOS 新品");
+        var after=media.list(application);assertThat(after).hasSize(2);assertThat(after.stream().map(f->f.get("attachmentId")).toList()).isEqualTo(original.stream().map(f->f.get("attachmentId")).toList());assertThat(after.stream().filter(f->Objects.equals(f.get("sourceAttachmentId"),image)).findFirst().orElseThrow()).containsEntry("category","key_photo").containsEntry("versionNo","V4");
+        service.save(application,new MoldApplicationService.Draft((JsonNode)saved.get("form"),researchProject,phone,version(saved),phoneModel,"new",null,null,null),null);assertThat(media.list(application)).isEqualTo(after);verify(logs,times(1)).logRequired(argThat(command->"MOLD_APPLICATION_PROCESS_CHANGED".equals(command.getAction())),any());verifyNoInteractions(client,files);
+    }
+    @Test void submittedAndUnknownLegacyRecordsKeepTheirProcessAndFrozenRequest()throws Exception {
+        var created=uncodedResearchPrepared();long application=id(created);String request="{\"processCode\":\""+props.getProcessCode()+"\",\"frozen\":true}";
+        jdbc.update("update plm_mold_application set process_code=?,status='submission_unknown',submission_snapshot=?::jsonb where application_id=?",props.getProcessCode(),request,application);
+        var frozen=repo.row(application,false);assertThat(service.options(null,application)).containsEntry("processCode",props.getProcessCode());assertThat(service.detail(application)).containsEntry("processMigrationRequired",false);
+        var continued=service.startFromResearch(new MoldApplicationService.ResearchDraft(researchProject,null,"it-frozen-retry-"+UUID.randomUUID(),((Number)researchStore.load(researchProject).get("version")).longValue()),null);assertThat(continued).containsEntry("applicationId",application).containsEntry("processCode",props.getProcessCode()).containsEntry("version",frozen.get("version"));
+        assertThatThrownBy(()->service.save(application,new MoldApplicationService.Draft((JsonNode)frozen.get("form"),researchProject,null,version(frozen),null,"new",null,null,null),null)).hasMessageContaining("只读");
+        jdbc.update("update plm_mold_application set status='submitted',external_instance_id='it-frozen-old' where application_id=?",application);assertThat(service.detail(application)).containsEntry("processCode",props.getProcessCode()).containsEntry("processMigrationRequired",false);assertThat(json.readTree(jdbc.queryForObject("select submission_snapshot::text from plm_mold_application where application_id=?",String.class,application))).isEqualTo(json.readTree(request));verify(client,never()).submit(anyMap());
+    }
+    @Test void dualFlowPollingAndUnknownReconciliationUseTheRecordedProcess()throws Exception {
+        var created=uncodedResearchPrepared();allowWrite();when(client.submit(anyMap())).thenThrow(new MoldDingTalkClient.RemoteFailure(true,"待核对"));assertThatThrownBy(()->service.submit(id(created),new MoldApplicationService.Submit(version(created),null,true),null)).hasMessageContaining("待核对");
+        var unknown=repo.row(id(created),false);var detail=(com.fasterxml.jackson.databind.node.ObjectNode)snapshot("RUNNING","[PLM-ID:"+unknown.get("submissionKey")+"]");detail.put("create_time","2026-11-05 12:00:00");when(client.instance("it-dual-reconciled")).thenReturn(detail);when(client.ids(eq(props.getResearchProcessCode()),any(),any())).thenReturn(List.of("it-dual-reconciled"));
+        assertThat(service.syncInternal("it-dual-reconciled",props.getResearchProcessCode())).isEqualTo(id(created));assertThat(repo.row(id(created),false)).containsEntry("instanceId","it-dual-reconciled").containsEntry("status","submitted").containsEntry("processCode",props.getResearchProcessCode());
+        when(client.ids(eq(props.getProcessCode()),any(),any())).thenReturn(List.of());service.syncRange(java.time.LocalDate.of(2026,11,5),java.time.LocalDate.of(2026,11,5));verify(client).schema(props.getProcessCode());verify(client,atLeastOnce()).schema(props.getResearchProcessCode());verify(client,times(1)).submit(anyMap());
     }
 
 }

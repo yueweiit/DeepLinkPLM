@@ -19,4 +19,9 @@ class MoldApplicationSubmissionPolicyTest {
         assertThat(policy(research,true,mapping).allowedTipos()).containsExactly("亮甲Rainbow 3.0");
         assertThat(policy(research,false,mapping).allowedTipos()).isEmpty();
     }
+    @Test void newProductTemplateHasNoTipoPrerequisiteOrFilingMappingDebt(){
+        var p=MoldApplicationSubmissionPolicy.of(1L,research,true,null,null,null,null,List.of(),List.of());
+        assertThat(p.mode()).isEqualTo("research");assertThat(p.requiresTipoMapping()).isFalse();assertThat(p.allowedTipos()).isEmpty();
+        assertThat(p.filingMissing()).doesNotContain("Tipo与产品及材质编码映射").contains("正式模具编码");
+    }
 }

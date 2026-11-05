@@ -32,7 +32,7 @@ public class DingTalkApprovalDispatchService {
         if (!properties.isEnabled()) {
             throw validation("钉钉集成未启用");
         }
-        if(moldApplications!=null&&moldApplications.enabled()&&"PROC-89949932-19DE-48EB-A20B-2595CB0F804D".equals(dto.getProcessCode())) {
+        if(moldApplications!=null&&moldApplications.enabled()&&moldApplications.supportsProcess(dto.getProcessCode())) {
             return moldApplications.callback(dto.getApprovalInstanceId(),dto.getProcessCode(),"approved".equals(dto.getApprovalStatus()));
         }
         if (properties.getProductLineProcessCode().equals(dto.getProcessCode())) {

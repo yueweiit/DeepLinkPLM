@@ -18,7 +18,7 @@ public class MoldSignedCallbackController {
         String payload=crypto.decrypt(query.getOrDefault("msg_signature",query.get("signature")),query.getOrDefault("timeStamp",query.get("timestamp")),query.get("nonce"),text(body.path("encrypt")));var event=json.readTree(payload);
         String type=event.path("EventType").asText();
         if(!type.equals("check_url")) {
-            if(!Set.of("bpms_task_change","bpms_instance_change").contains(type)||!props.getProcessCode().equals(event.path("processCode").asText(event.path("process_code").asText())))return crypto.encrypt("success");
+            if(!Set.of("bpms_task_change","bpms_instance_change").contains(type)||!props.supports(event.path("processCode").asText(event.path("process_code").asText())))return crypto.encrypt("success");
             String instance=text(event.path("processInstanceId"));if(instance==null)throw invalid("回调缺少审批实例ID");
             // Acknowledge only after durable enqueue. Slow OA reads run outside DingTalk's callback deadline.
             repo.jdbc().update("insert into plm_mold_event_inbox(event_key,instance_id,payload) values(?,?,?::jsonb) on conflict(event_key) do nothing",MoldApplicationMedia.hash(payload.getBytes(StandardCharsets.UTF_8)),instance,payload);
@@ -35,7 +35,7 @@ public class MoldSignedCallbackController {
             """);
         for(var row:pending)try{
             var event=repo.node(row.get("payload"));boolean approved="finish".equalsIgnoreCase(event.path("type").asText())&&"agree".equalsIgnoreCase(event.path("result").asText());
-            service.callback(row.get("instance_id").toString(),props.getProcessCode(),approved);repo.jdbc().update("update plm_mold_event_inbox set completed_at=now(),last_error=null where event_key=?",row.get("event_key"));
+            service.callback(row.get("instance_id").toString(),event.path("processCode").asText(event.path("process_code").asText(props.getProcessCode())),approved);repo.jdbc().update("update plm_mold_event_inbox set completed_at=now(),last_error=null where event_key=?",row.get("event_key"));
         }catch(Exception e){long delay=Math.min(900,15L*(1L<<Math.min(6,((Number)row.get("attempts")).intValue())));repo.jdbc().update("update plm_mold_event_inbox set last_error='OA补拉失败，将自动重试',next_attempt_at=now()+(?*interval '1 second') where event_key=?",delay,row.get("event_key"));}
     }
 }

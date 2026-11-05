@@ -94,4 +94,13 @@ class DingTalkApprovalDispatchServiceTest {
         dto.setForm(form);
         return dto;
     }
+    @Test void trustedDispatchForNewProductUsesTheExistingMoldCallbackService(){
+        var props=new DingTalkIntegrationProperties();props.setEnabled(true);
+        var service=new DingTalkApprovalDispatchService(props,mock(DingTalkProductLineService.class),mock(DingTalkModelVariantService.class),new ObjectMapper());
+        var molds=mock(com.yuewei.plm.module.moldapplication.MoldApplicationService.class);String code=new com.yuewei.plm.module.moldapplication.MoldApplicationProperties().getResearchProcessCode();
+        when(molds.enabled()).thenReturn(true);when(molds.supportsProcess(code)).thenReturn(true);when(molds.callback("new-product-instance",code,true)).thenReturn(Map.of("applicationId",1));
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"moldApplications",molds);
+        var dto=new DingTalkApprovalCallbackDTO();dto.setProcessCode(code);dto.setApprovalInstanceId("new-product-instance");dto.setApprovalStatus("approved");
+        assertThat(service.dispatch(dto)).isEqualTo(Map.of("applicationId",1));verify(molds).callback("new-product-instance",code,true);
+    }
 }

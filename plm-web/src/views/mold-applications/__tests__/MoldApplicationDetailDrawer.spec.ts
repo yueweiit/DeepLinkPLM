@@ -34,6 +34,18 @@ describe('shared approval drawer in the original research page',()=>{
   const {drawer}=await start(capabilities);await drawer.open(88,{projectId:42,initial:rejected()});await flushPromises()
   expect(view.text()).toContain('APP-REFUSED-88');expect(api.getMoldApplication).not.toHaveBeenCalled();expect(api.getMoldOptions).not.toHaveBeenCalled()
  })
+ it('renders each record with its own flow fields even when parent capabilities came from the model flow',async()=>{
+  const parent={...capabilities,controls:[{key:'tipo',label:'Tipo',id:'old',required:true,type:'DDSelectField',options:[]}]} as MoldOptions;
+  const original=rejected({processCode:capabilities.processCode,processName:'LEMOS-新产品开模 Fabricación de moldes',form:{productName:'韧甲',model:'Honor 600 Lite'},submissionControls:[{key:'productName',label:'产品名',id:'new',required:true,type:'TextField',options:[]},{key:'model',label:'型号',id:'model',required:true,type:'TextField',options:[]}]});
+  const {drawer}=await start(parent);await drawer.open(88,{projectId:42,initial:original});await flushPromises();expect(view.text()).toContain('LEMOS-新产品开模');expect(view.text()).toContain('产品名');expect(view.text()).toContain('韧甲');expect(view.text()).not.toContain('Tipo');expect(api.getMoldOptions).not.toHaveBeenCalled();
+ });
+ it('loads application-scoped new-product options for an old draft when the new schema cache is empty',async()=>{
+  const newCode='PROC-82114D4B-5F22-4FE9-913A-9A73852DA323',oldCode='PROC-89949932-19DE-48EB-A20B-2595CB0F804D';
+  const parent={...capabilities,processCode:oldCode,controls:[{key:'tipo',label:'Tipo',id:'old',required:true,type:'DDSelectField',options:[]}]} as MoldOptions;
+  const current={...capabilities,processCode:newCode,controls:[{key:'productName',label:'产品名',id:'new',required:true,type:'TextField',options:[]}]} as MoldOptions;
+  const original=rejected({processCode:oldCode,submissionProcessCode:newCode,processMigrationRequired:true,status:'draft',form:{productName:'亮甲3.0'},submissionControls:[]});api.getMoldOptions.mockResolvedValue(current);
+  const {drawer}=await start(parent);await drawer.open(88,{projectId:42,initial:original});await flushPromises();expect(api.getMoldOptions).toHaveBeenCalledExactlyOnceWith({applicationId:88});expect(view.text()).toContain('产品名');expect(view.text()).toContain('亮甲3.0');expect(view.text()).not.toContain('Tipo');expect(api.saveMoldApplication).not.toHaveBeenCalled();
+ });
  it('keeps an error inside the drawer and retries the same application on the current page',async()=>{
   api.getMoldApplication.mockRejectedValueOnce(new Error('审批读取暂时失败'))
   const {router,drawer}=await start();await drawer.open(88,{projectId:42});await flushPromises();expect(view.text()).toContain('审批读取暂时失败')

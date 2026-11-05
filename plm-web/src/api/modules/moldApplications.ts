@@ -1,7 +1,7 @@
 import request, { unwrapResponse, type PageResponse } from '@/api/request'
 import type { PhoneCompatibleMold } from './phoneReference'
 
-export interface MoldFile { attachmentId:number; category:string; fileName:string; fileSize:number; contentType:string; sha256:string; downloadStatus:string; selectionId?:string|null; archiveError?:string|null }
+export interface MoldFile { sourceAttachmentId?:number|null;versionNo?:string; attachmentId:number; category:string; fileName:string; fileSize:number; contentType:string; sha256:string; downloadStatus:string; selectionId?:string|null; archiveError?:string|null }
 export interface MoldActivity { activityId:number; type:string; occurredAt:string|null; actorId:string|null; actorName:string|null; taskId:string|null; payload:Record<string,string> }
 export type MoldBusinessStatus = 'draft'|'submitting'|'submission_unknown'|'awaiting_approval'|'approved'|'rejected'|'withdrawn'|'terminated'|'approval_unknown'
 export const moldBusinessStatusNames:Record<MoldBusinessStatus,string>={draft:'草稿',submitting:'提交中',submission_unknown:'提交待核对',awaiting_approval:'待 Tiffany 审核',approved:'Tiffany 已同意',rejected:'已拒绝',withdrawn:'已撤回',terminated:'已终止',approval_unknown:'审批待核对'}
@@ -17,7 +17,7 @@ export interface MoldResearchSource {
   ownerUserId?:number|null;ownerName?:string|null;requirements?:string|null;workflowVersion:number;capturedAt:string
   restricted?:boolean;supplierPlanConfirmed?:boolean;suppliersRestricted?:boolean;referencesRestricted?:boolean
   suppliers:{role:string;mode:string;supplierId?:number;supplierCode?:string;supplierName?:string;internalName?:string;scope?:string;basis?:string;reason?:string}[]
-  references:{type:string;id:number;name:string;versionNo?:string;checksum?:string}[]
+  references:{category?:string;type:string;id:number;name:string;versionNo?:string;checksum?:string}[]
 }
 export interface ResearchCodingInput { materialCodes?:string[]; operationCode?:string }
 export interface ResearchCoding {
@@ -44,6 +44,7 @@ export interface MoldApplication {
   approvalGranted:boolean; originatorName:string|null; departmentName:string|null; sourceCreatedAt:string|null; sourceFinishedAt:string|null
   productLineId:number|null; phoneCodeItemId:number|null; projectId:number|null; itemId:number|null; moldSetId:number|null
   lastError:string|null; createdAt:string; activities?:MoldActivity[]; files?:MoldFile[]; previousApplicationId?:number|null
+  processCode?:string;submissionProcessCode?:string;processName?:string;processMigrationRequired?:boolean;submissionControls?:MoldControl[]
   submissionPolicy?:MoldSubmissionPolicy;reservedCompatibility?:PhoneCompatibleMold|null
   researchCoding?:ResearchCoding|null;canMaintainResearchCoding?:boolean
 }
@@ -57,7 +58,7 @@ export interface MoldApplicationEligibility {eligible:boolean;kind:'catalog'|'re
 export interface MoldOptions {
   controls:MoldControl[]; configs:MoldConfig[]; productLines:{productId:number;productName:string;productSpecificCode:string|null;canMaintainProductIdentity?:boolean;researchStepNo?:number;salesStatus:import('./productionMetadata').SalesProduct['salesStatus'];moldApplicationEligibility:MoldApplicationEligibility;submissionPolicy?:MoldSubmissionPolicy}[]
   canCreate:boolean; canConvert:boolean; administrator:boolean; writeEnabled:boolean; centralCodeEnabled:boolean; canSubmit:boolean
-  originators:{id:string;name:string}[]; processCode:string; syncRunning:boolean
+  originators:{id:string;name:string}[]; processCode:string;processName?:string; syncRunning:boolean
   submitter?:{name:string;dingtalkUserId:string|null;departments:{id:number;name:string}[]};submissionBlockReason?:string|null
 }
 export interface MoldSummary { counts:{status:string;remoteStatus:string|null;count:number}[]; businessCounts?:{businessStatus:MoldBusinessStatus;count:number}[]; ready:number }
@@ -73,7 +74,7 @@ export interface CompatibleHistoricalPhone {phoneModelId:number;brandName:string
 export interface MoldHistoricalInput {version:number;phoneModelId:number;productLineId:number;projectId:number|null;itemId:number|null;moldSetId:number|null;reason:string;confirmPhoneCorrection:boolean}
 export const root='/mold-applications'
 export async function getMoldApplicationConfig():Promise<{enabled:boolean}> { return unwrapResponse(await request.get(`${root}/config`)) }
-export async function getMoldOptions():Promise<MoldOptions> { return unwrapResponse(await request.get(`${root}/options`)) }
+export async function getMoldOptions(context?:{projectId?:number;applicationId?:number}):Promise<MoldOptions> { return unwrapResponse(await request.get(`${root}/options`,{params:context})) }
 export async function getMoldApplications(query:MoldQuery):Promise<PageResponse<MoldApplication>> { return unwrapResponse(await request.get(root,{params:query})) }
 export async function getMoldSummary(scope?:{projectId?:number;unlinked?:boolean}):Promise<MoldSummary> { return unwrapResponse(await request.get(`${root}/summary`,{params:scope})) }
 export async function getMoldApplication(id:number):Promise<MoldApplication> { return unwrapResponse(await request.get(`${root}/${id}`)) }

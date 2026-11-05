@@ -14,6 +14,7 @@ public final class MoldApplicationForms {
     public static final Map<String,String> COMPONENTS;
     static {
         var ids=new LinkedHashMap<String,String>();
+        ids.put("productName","TextField_1A0FL9VRYX9C0");
         ids.put("model","TextField-IH4TZP18");ids.put("networkType","DDSelectField_YLFSPZ54MMO0");
         ids.put("holeType","DDSelectField_3DGZZWYSEZ20");ids.put("mobileFunction","TextareaField_1WR63M7QNFSW0");
         ids.put("tipo","DDSelectField-JFX38WE3");ids.put("priority","DDSelectField-JXM5A55C");
@@ -99,6 +100,25 @@ public final class MoldApplicationForms {
             v.put("type",item.path("componentName").asText());v.put("required",props.path("required").asBoolean());v.put("options",options);list.add(v);
         }
         return list;
+    }
+    /** PLM's existing delivery and key-photo requirements augment the selected official template. */
+    public static List<Map<String,Object>> submissionControls(JsonNode schema,ObjectMapper json) {
+        var list=controls(schema,json);
+        for(var control:list)if(Set.of("expectedDeliveryDate","keyPhotos").contains(control.get("key")))control.put("required",true);
+        return list;
+    }
+    public static List<String> missingSubmission(Map<String,Object> form,List<Map<String,Object>> files,JsonNode schema,ObjectMapper json,boolean research) {
+        var required=new LinkedHashMap<String,String>();
+        for(var control:submissionControls(schema,json))if(Boolean.TRUE.equals(control.get("required")))required.put(control.get("key").toString(),control.get("label").toString());
+        required.putIfAbsent("expectedDeliveryDate","期望交付时间");required.putIfAbsent("keyPhotos","关键图片");
+        if(research){required.remove("generatedCodes");required.remove("informationComplete");}
+        var missing=new ArrayList<String>();
+        required.forEach((key,label)->{
+            String category=switch(key){case "keyPhotos"->"key_photo";case "samplePhotos"->"sample_photo";case "attachments"->"attachment";default->null;};
+            boolean present=category==null?text(form.get(key))!=null:files.stream().anyMatch(file->category.equals(file.get("file_category"))&&"downloaded".equals(file.get("download_status")));
+            if(!present)missing.add(label);
+        });
+        return missing;
     }
     public static BusinessException invalid(String message){return new BusinessException(40001,message);}
 }

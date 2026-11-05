@@ -1874,7 +1874,7 @@
   "模具编码：": "Código de molde: ",
   "关键图片": "Imágenes clave",
   "上传关键图片": "Cargar imágenes clave",
-  "样板 / 测试图片": "Imágenes de muestra / prueba",
+  "样板 / 测试图片": "Fotos de muestra / pruebas",
   "上传测试图片": "Cargar imágenes de prueba",
   "其他附件": "Otros adjuntos",
   "上传其他附件": "Cargar otros adjuntos",
@@ -1885,7 +1885,7 @@
   "：已登记但未归档，请重新选择此文件上传，或": ": registrado sin archivar. Seleccione de nuevo este archivo para cargarlo, o ",
   "移除未上传选择": "Quitar selección no cargada",
   "提交钉钉审批": "Enviar a aprobación DingTalk",
-  "送审还缺：": "Falta para enviar: ",
+  "送审还缺：": "Falta para enviar:",
   "图片加载中…": "Cargando imagen…",
   "重试图片": "Reintentar imagen",
   "历史开模关联 · 预检与集中补录": "Vínculos históricos de moldes · Revisión y captura conjunta",
@@ -4246,5 +4246,10 @@
   "共 {value0} 个型号 · 查看明细": "{value0} modelos · Ver detalle",
   "搜索已选手机型号": "Buscar entre los modelos seleccionados",
   "匹配 {value0} 个": "{value0} coincidencias",
-  "按品牌查看": "Ver por marca"
+  "按品牌查看": "Ver por marca",
+  "Adjunto附件": "Adjunto",
+  "至少一张；项目图片自动带入，无需重复上传": "Al menos una imagen; las imágenes del proyecto se incluyen automáticamente.",
+  "本地文件待上传完成": "Carga local pendiente",
+  "已归档": "Archivado",
+  "请先保存草稿，带入项目文件": "Guarda el borrador para incorporar los archivos del proyecto"
 }

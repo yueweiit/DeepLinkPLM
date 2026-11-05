@@ -77,7 +77,7 @@ class ResearchAutomaticCodingLocalIntegrationTest {
         installRealResearchReviews();
         fixture.jdbc.update("update plm_product set current_step_no=5,color='黑色',color_code='02' where product_id=?",project);
         fixture.tipo = "亮甲Rainbow 3.0";
-        fixture.repo.saveSchema(fixture.props.getProcessCode(),fixture.currentResearchSchema());
+        fixture.repo.saveSchema(fixture.props.getResearchProcessCode(),fixture.currentResearchSchema());
         fixture.jdbc.update("delete from plm_mold_application_config where tipo=?",fixture.tipo);
         fixtureFinalOperation=fixture.jdbc.queryForObject("insert into plm_process(process_id,process_code,process_name,process_type,operation_craft_code,finished_product_flag,status,created_by,updated_by) values(nextval('plm_process_process_id_seq'),?,'QA 最终组装','operation_master','4030',true,'confirmed','it','it') returning process_id",Long.class,
             "QA-CODING-"+UUID.randomUUID());
@@ -110,7 +110,7 @@ class ResearchAutomaticCodingLocalIntegrationTest {
         plan.put("phoneModelIds",phones);state.put("plan",plan);state.put("planDraft",plan);fixture.researchStore.save(project,state);
         long code=fixture.jdbc.queryForObject("select code_item_id from plm_phone_model_member where id=?",Long.class,phone);
         String model=fixture.jdbc.queryForObject("select model_name from plm_phone_model_member where id=?",String.class,phone);
-        var input=new MoldApplicationService.Draft(fixture.json.valueToTree(Map.of("model",model,"tipo",fixture.tipo,"expectedDeliveryDate","2026-12-01")),project,code,null,phone,intent,targetItem,targetSet,null);
+        var input=new MoldApplicationService.Draft(fixture.json.valueToTree(Map.of("model",model,"expectedDeliveryDate","2026-12-01")),project,code,null,phone,intent,targetItem,targetSet,null);
         var created=fixture.service.startFromResearch(new MoldApplicationService.ResearchDraft(project,phone,"qa-auto-"+UUID.randomUUID(),((Number)state.get("version")).longValue(),input),null);
         long id=fixture.id(created);
         String instance="qa-auto-instance-"+UUID.randomUUID();
@@ -124,7 +124,7 @@ class ResearchAutomaticCodingLocalIntegrationTest {
         source.put("status","RUNNING").put("business_id","QA-AUTO-APPROVAL").put("title","隔离自动编码验收").put("originator_userid","mold-it-user");
         var fields=source.putArray("form_component_values");
         JsonNode form=(JsonNode)row.get("form");
-        for(String name:List.of("model","tipo","expectedDeliveryDate"))fields.addObject().put("id",MoldApplicationForms.COMPONENTS.get(name)).put("value",form.path(name).asText());
+        for(String name:List.of("productName","model","expectedDeliveryDate"))fields.addObject().put("id",MoldApplicationForms.COMPONENTS.get(name)).put("value",form.path(name).asText());
         fields.addObject().put("id",MoldApplicationForms.COMPONENTS.get("generatedCodes")).put("value","");
         var task=source.putArray("tasks").addObject().put("userid",approver).put("task_status","COMPLETED").put("task_result","AGREE");
         if(taskId!=null)task.put("taskid",taskId);
@@ -138,7 +138,7 @@ class ResearchAutomaticCodingLocalIntegrationTest {
     }
 
     private Map<String,Object> sync(Map<String,Object> row) {
-        fixture.service.callback(row.get("instanceId").toString(),fixture.props.getProcessCode(),true);
+        fixture.service.callback(row.get("instanceId").toString(),row.get("processCode").toString(),true);
         var result=fixture.repo.row(fixture.id(row),false);
         assertThat(Objects.toString(result.get("provisioningError"),"")).doesNotContain("自动建档失败");
         return result;
@@ -366,21 +366,21 @@ class ResearchAutomaticCodingLocalIntegrationTest {
         assertThat(productCoding.operationOptions().stream().map(option->option.get("code")).toList()).doesNotContain("7842");
     }
 
-    @Test void twoResearchProductsWithOneLemosTipoKeepSeparateOwnedMoldIdentities() throws Exception {
+    @Test void twoNewResearchProductsWithoutTipoKeepSeparateOwnedMoldIdentities() throws Exception {
         String firstName="QA 新品A-"+UUID.randomUUID();long firstProject=project;
         fixture.jdbc.update("update plm_product set product_name=? where product_id=?",firstName,project);
         var first=application(fixture.phoneModel,List.of("10","20"),"4030");Object firstSource=first.get("sourceSnapshot");agree(first);var builtFirst=sync(first);
         String secondName="QA 新品B-"+UUID.randomUUID();project=fixture.researchFixture(false);installRealResearchReviews();
         fixture.jdbc.update("update plm_product set product_name=?,current_step_no=5,color='黑色',color_code='02' where product_id=?",secondName,project);
         var second=application(fixture.phoneModel,List.of("10","20"),"4030");Object secondSource=second.get("sourceSnapshot");agree(second);var builtSecond=sync(second);
-        assertThat(builtFirst).containsEntry("projectId",firstProject).containsEntry("tipo",fixture.tipo);
-        assertThat(builtSecond).containsEntry("projectId",project).containsEntry("tipo",fixture.tipo).containsEntry("provisioningStatus","ready");
+        assertThat(builtFirst).containsEntry("projectId",firstProject).containsEntry("tipo",null);
+        assertThat(builtSecond).containsEntry("projectId",project).containsEntry("tipo",null).containsEntry("provisioningStatus","ready");
         assertThat(builtSecond.get("itemId")).isNotEqualTo(builtFirst.get("itemId"));assertThat(builtSecond.get("moldSetId")).isNotEqualTo(builtFirst.get("moldSetId"));
         assertThat(builtFirst.get("generatedCodes").toString().substring(1,3)).isNotEqualTo(builtSecond.get("generatedCodes").toString().substring(1,3));
         assertThat(fixture.jdbc.queryForObject("select style_name from plm_collaboration_item where item_id=?",String.class,builtFirst.get("itemId"))).isEqualTo(firstName);
         assertThat(fixture.jdbc.queryForObject("select style_name from plm_collaboration_item where item_id=?",String.class,builtSecond.get("itemId"))).isEqualTo(secondName);
         assertThat(builtFirst.get("sourceSnapshot")).isEqualTo(firstSource);assertThat(builtSecond.get("sourceSnapshot")).isEqualTo(secondSource);
-        assertThat(((JsonNode)builtFirst.get("form")).path("tipo").asText()).isEqualTo(fixture.tipo);assertThat(((JsonNode)builtSecond.get("form")).path("tipo").asText()).isEqualTo(fixture.tipo);
+        assertThat(((JsonNode)builtFirst.get("form")).path("productName").asText()).isEqualTo(firstName);assertThat(((JsonNode)builtSecond.get("form")).path("productName").asText()).isEqualTo(secondName);
         workflowLinked(builtSecond);
         project=fixture.researchFixture(false);installRealResearchReviews();
         fixture.jdbc.update("update plm_product set product_name=?,current_step_no=5,color='黑色',color_code='02' where product_id=?",firstName,project);
@@ -501,4 +501,11 @@ class ResearchAutomaticCodingLocalIntegrationTest {
         assertThatThrownBy(()->productCoding.provision(50L,fixture.phoneModel,fixture.id(row),"QA 受限续办")).hasMessageContaining("未获授权");
         workflowLinked(built);noProductionFacts();
     }
+    @Test void aLegacySubmittedResearchStillHandlesItsOriginalCallbackWithoutChangingItsFlow() {
+        var row=application(fixture.phoneModel,List.of("10","20"),"4030");long id=fixture.id(row);
+        fixture.jdbc.update("update plm_mold_application set process_code=?,tipo=?,form_data=jsonb_set(form_data,'{tipo}',to_jsonb(?::text)) where application_id=?",fixture.props.getProcessCode(),fixture.tipo,fixture.tipo,id);
+        row=fixture.repo.row(id,false);var source=agree(row);((com.fasterxml.jackson.databind.node.ArrayNode)source.path("form_component_values")).addObject().put("id",MoldApplicationForms.COMPONENTS.get("tipo")).put("value",fixture.tipo);
+        var built=sync(row);assertThat(built).containsEntry("processCode",fixture.props.getProcessCode()).containsEntry("projectId",project).containsEntry("tipo",fixture.tipo).containsEntry("provisioningStatus","ready");assertThat(fixture.service.detail(id)).containsEntry("processMigrationRequired",false);workflowLinked(built);
+    }
+
 }

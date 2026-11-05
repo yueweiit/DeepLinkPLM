@@ -69,6 +69,29 @@ public class MoldApplicationService implements ApplicationRunner {
 
     public record Submit(long version,Long departmentId,boolean confirmFormal) {}
     public boolean enabled(){return props.isEnabled();}
+    public boolean supportsProcess(String code){return props.supports(code);}
+    private String storedProcess(Map<String,Object> row){return Objects.toString(row.get("processCode"),props.getProcessCode());}
+    private boolean trustedResearch(Map<String,Object> row){return "research".equals(submissionPolicy(row,json.createObjectNode()).mode());}
+    private String effectiveProcess(Map<String,Object> row){return "draft".equals(row.get("status"))&&trustedResearch(row)?props.getResearchProcessCode():storedProcess(row);}
+    private String processName(String code){return repo.schema(code).path("name").asText(code.equals(props.getResearchProcessCode())?"LEMOS-新产品开模 Fabricación de moldes":"LEMOS-开模申请 Fabricación de moldes");}
+    private void describeFlow(Map<String,Object> row){
+        String code=effectiveProcess(row);row.put("submissionProcessCode",code);row.put("processName",processName(code));
+        row.put("processMigrationRequired",!code.equals(storedProcess(row)));row.put("submissionControls",submissionControls(repo.schema(code),json));
+        row.put("submissionPolicy",submissionPolicy(row,repo.schema(code)));
+    }
+    private Map<String,Object> migrateResearchDraft(long id,HttpServletRequest request){
+        var row=repo.row(id,true);
+        if(!"draft".equals(row.get("status"))||row.get("instanceId")!=null||!editableDraft(row)||!trustedResearch(row))return row;
+        var form=(com.fasterxml.jackson.databind.node.ObjectNode)((JsonNode)row.get("form")).deepCopy();
+        boolean named=!form.has("productName");if(named)form.put("productName",((JsonNode)row.get("sourceSnapshot")).path("research").path("productName").asText());
+        String before=storedProcess(row),after=props.getResearchProcessCode();var oldFiles=media.list(id);
+        int changed=media.migrateResearchPhotos(id,access.actor().username());
+        if(!before.equals(after)||named||changed>0){
+            repo.jdbc().update("update plm_mold_application set process_code=?,form_data=?::jsonb,version_no=version_no+1,updated_at=now(),updated_by=? where application_id=?",after,repo.json(form),access.actor().username(),id);
+            audit("MOLD_APPLICATION_PROCESS_CHANGED",id,Map.of("beforeProcess",before,"afterProcess",after,"beforeForm",row.get("form"),"afterForm",form,"beforeFiles",oldFiles,"afterFiles",media.list(id)),request,access.actor());
+        }
+        return repo.row(id,false);
+    }
     void feature(){if(!props.isEnabled())throw new BusinessException(40401,"开模申请暂未启用");}
     void read(){feature();access.requirePermission("collaboration:view");}
     void createPermission(){read();if(access.isExternal())throw new BusinessException(40103,"国内账号才可发起开模申请");access.requirePermission("mold-application:create");}
@@ -116,9 +139,18 @@ public class MoldApplicationService implements ApplicationRunner {
     }
     void audit(String action,long id,Object data,HttpServletRequest request,CurrentUser actor){logs.logRequired(OperationLogCreateCommand.builder().action(action).businessType("MOLD_APPLICATION").businessId(String.valueOf(id)).detailJson(repo.json(data)).request(request).build(),actor);}
     public Map<String,Object> featureConfig(){access.requirePermission("collaboration:view");return Map.of("enabled",props.isEnabled());}
-    public Map<String,Object> options(){
-        read();var a=access.actor();var result=new LinkedHashMap<String,Object>();result.put("controls",controls(repo.schema(props.getProcessCode()),json));
-        var configurations=codes.configs();var templateTipos=officialTipos(repo.schema(props.getProcessCode()));result.put("configs",configurations);
+    public Map<String,Object> options(){return options(null,null);}
+    public Map<String,Object> options(Long projectId,Long applicationId){
+        read();if(projectId!=null&&applicationId!=null)throw invalid("请选择项目或申请中的一个上下文");
+        String code=props.getProcessCode();
+        if(applicationId!=null)code=effectiveProcess(require(applicationId,false));
+        else if(projectId!=null){access.requirePermission("project:view");access.requireProduct(projectId);if(Boolean.TRUE.equals(repo.jdbc().queryForObject("select exists(select 1 from plm_product where product_id=? and deleted_flag=0 and product_type='product_line' and development_mode='launch_v1')",Boolean.class,projectId)))code=props.getResearchProcessCode();}
+        var schema=repo.schema(code);
+        if((projectId!=null||applicationId!=null)&&schema.isEmpty()){
+            schema=client.schema(code);if(schema==null||schema.isEmpty())throw invalid("钉钉审批模板暂不可用，请稍后重试");repo.saveSchema(code,schema);
+        }
+        var a=access.actor();var result=new LinkedHashMap<String,Object>();result.put("controls",submissionControls(schema,json));
+        var configurations=codes.configs();var templateTipos=officialTipos(schema);result.put("configs",configurations);
         var productLines=repo.jdbc().queryForList("select p.product_id as \"productId\",p.product_name as \"productName\",p.product_specific_code as \"productSpecificCode\",p.sales_status as \"salesStatus\",p.product_name,p.sales_status,p.development_mode,p.product_type,p.product_specific_code,p.status,p.lock_status,p.current_step_no,case when (w.data->'revision'->>'stage')~'^[1-8]$' then (w.data->'revision'->>'stage')::integer else coalesce(p.current_step_no,1) end as \"researchStepNo\" from plm_product p left join plm_product_development_state w on w.product_id=p.product_id where p.deleted_flag=0 and p.product_type='product_line' and "+access.visibleSqlClause("product","p.product_id")+" order by p.product_name");
         for(var line:productLines){line.put("canMaintainProductIdentity","launch_v1".equals(line.get("development_mode"))&&com.yuewei.plm.module.project.development.ResearchLaunchService.canMaintainProductIdentity(text(line.get("productSpecificCode")),text(line.get("status")),text(line.get("lock_status")),access));line.put("moldApplicationEligibility",com.yuewei.plm.module.productionmetadata.ProductSalesPolicy.moldApplicationEligibility(line));line.put("submissionPolicy",MoldApplicationSubmissionPolicy.of(((Number)line.get("productId")).longValue(),line,true,null,null,null,null,templateTipos,configurations));for(String key:List.of("product_name","sales_status","development_mode","product_type","product_specific_code","status","lock_status","current_step_no"))line.remove(key);}
         result.put("productLines",productLines);
@@ -134,7 +166,7 @@ public class MoldApplicationService implements ApplicationRunner {
         if(allowed)try{var person=client.user(uid);name=Objects.requireNonNullElse(text(person.path("name")),name);for(var d:person.path("dept_id_list")){String departmentName=null;try{departmentName=text(client.department(d.asLong()).path("name"));}catch(Exception ignored){}departments.add(Map.of("id",d.asLong(),"name",Objects.requireNonNullElse(departmentName,"部门 "+d.asLong())));}if(departments.isEmpty()){allowed=false;reason="钉钉发起人没有可用部门，请管理员核对";}}catch(Exception e){allowed=false;reason="钉钉身份或通讯录权限暂不可用，请管理员核对";}
         var submitter=new LinkedHashMap<String,Object>();submitter.put("name",name);submitter.put("dingtalkUserId",uid);submitter.put("departments",departments);
         result.put("canSubmit",allowed);result.put("submitter",submitter);result.put("submissionBlockReason",reason);
-        result.put("executionApprover",Map.of("name","周汉琴 / Tiffany","userId",EXECUTION_APPROVER_USER_ID));result.put("processCode",props.getProcessCode());result.put("syncRunning",syncing.get());
+        result.put("executionApprover",Map.of("name","周汉琴 / Tiffany","userId",EXECUTION_APPROVER_USER_ID));result.put("processCode",code);result.put("processName",processName(code));result.put("syncRunning",syncing.get());
         result.put("originators",repo.jdbc().queryForList("select distinct originator_name as name,originator_user_id as id from plm_mold_application a where deleted_flag=0 and originator_user_id is not null and "+visible()+" order by name"));
         return result;
     }
@@ -288,7 +320,7 @@ public class MoldApplicationService implements ApplicationRunner {
         return switch(Objects.toString(row.get("businessStatus"),"")){case "draft"->"完善申请后提交";case "rejected","withdrawn","terminated"->"审批已结束；保留记录，确需重开请明确新增套与原因";case "awaiting_approval"->"等待周汉琴同意；可查看当前处理任务";default->"同步核对审批状态";};
     }
     public Map<String,Object> detail(long id){var r=require(id,false);enrichExecutionStages(List.of(r));enrichProgress(List.of(r));r.put("activities",repo.activities(id));enrichFiles(r);r.put("reservedCompatibility",codes.reservedCompatibility(id,text(r.get("generatedCodes"))));
-        r.put("submissionPolicy",submissionPolicy(r,repo.schema(props.getProcessCode())));redactResearchSource(r);return r;}
+        describeFlow(r);redactResearchSource(r);return r;}
     private void redactResearchSource(Map<String,Object> row) {
         if(productDevelopment==null||!(row.get("sourceSnapshot") instanceof JsonNode source)||!source.path("research").isObject())return;
         var visible=productDevelopment.redactMoldApplicationSource(json.convertValue(source.path("research"),new TypeReference<Map<String,Object>>(){}));
@@ -301,7 +333,7 @@ public class MoldApplicationService implements ApplicationRunner {
             row.put("files",list.stream().filter(raw->{var file=(Map<?,?>)raw;Object sourceId=file.get("sourceAttachmentId");if(sourceId==null)return true;try{access.requireFile(((Number)sourceId).longValue());return true;}catch(BusinessException denied){return false;}}).toList());
         }
     }
-    private Map<String,Object> responseRow(long id){var row=repo.row(id,false);row.put("canEditDraft",editableDraft(row));row.put("submissionPolicy",submissionPolicy(row,repo.schema(props.getProcessCode())));redactResearchSource(row);return row;}
+    private Map<String,Object> responseRow(long id){var row=repo.row(id,false);row.put("canEditDraft",editableDraft(row));describeFlow(row);redactResearchSource(row);return row;}
     private List<String> officialTipos(JsonNode schema) {
         return controls(schema,json).stream().filter(control->"tipo".equals(control.get("key")))
             .flatMap(control->((List<?>)control.get("options")).stream()).map(Object::toString).toList();
@@ -330,7 +362,7 @@ public class MoldApplicationService implements ApplicationRunner {
             if(Set.of("generatedCodes","informationComplete","keyPhotos","samplePhotos","attachments").contains(e.getKey()))continue;
             String value=text(e.getValue());if(value!=null&&value.length()>4000)throw invalid("申请字段过长");result.put(e.getKey(),value);
         }
-        for(String key:List.of("model","tipo")){String v=text(result.get(key));if(v!=null&&v.length()>255)throw invalid("型号或 Tipo 过长");}
+        for(String key:List.of("productName","model","tipo")){String v=text(result.get(key));if(v!=null&&v.length()>255)throw invalid("型号或 Tipo 过长");}
         if(text(result.get("expectedDeliveryDate"))!=null)try{LocalDate.parse(result.get("expectedDeliveryDate").toString());}catch(Exception e){throw invalid("期望交付日期格式无效");}
         if(text(result.get("phonePrice"))!=null)try{if(new java.math.BigDecimal(result.get("phonePrice").toString()).signum()<0)throw invalid("价格不可为负数");}catch(NumberFormatException e){throw invalid("价格必须为数字，币种不明确请在备注保留原值");}
         if(text(result.get("website"))!=null)try{var uri=java.net.URI.create(result.get("website").toString());if(!Set.of("http","https").contains(uri.getScheme())||uri.getUserInfo()!=null)throw invalid("网站须为有效链接");}catch(IllegalArgumentException e){throw invalid("网站须为有效链接");}
@@ -397,7 +429,7 @@ public class MoldApplicationService implements ApplicationRunner {
             }
             row=repo.row(id,false);
         }
-        row.put("alreadyExists",existing);row.put("requiresExplicitIntent",existing);row.put("canEditDraft",editableDraft(row));row.put("submissionPolicy",submissionPolicy(row,repo.schema(props.getProcessCode())));redactResearchSource(row);return row;
+        row=migrateResearchDraft(((Number)row.get("applicationId")).longValue(),request);row.put("alreadyExists",existing);row.put("requiresExplicitIntent",existing);row.put("canEditDraft",editableDraft(row));describeFlow(row);redactResearchSource(row);return row;
     }
     public Map<String,Object> startFromPhone(SourceDraft input,HttpServletRequest request){
         createPermission();if(input.phoneModelId()==null)throw invalid("请先匹配标准手机型号");
@@ -444,11 +476,10 @@ public class MoldApplicationService implements ApplicationRunner {
         validateExecutionRequest(Objects.requireNonNullElse(text(draft.executionIntent()),"new"),text(draft.executionReason()),true,input.requestId(),true);
     }
     private Map<String,Object> researchForm(Map<String,Object> context) {
-        var form=new LinkedHashMap<String,Object>();form.put("remark",researchRemark(context));
+        var form=new LinkedHashMap<String,Object>();form.put("productName",context.get("productName"));form.put("remark",researchRemark(context));
         if(context.get("phoneModelId")!=null&&context.get("phoneModelName")!=null)form.put("model",context.get("phoneModelName"));
         if(context.get("expectedDeliveryDate")!=null)form.put("expectedDeliveryDate",context.get("expectedDeliveryDate"));
-        var configs=codes.configs().stream().filter(c->Objects.equals(c.get("productLineId"),context.get("projectId"))).toList();
-        if(configs.size()==1)form.put("tipo",configs.get(0).get("tipo"));return form;
+        return form;
     }
     /** Read-only preview: opening or cancelling the editor creates no application, files or workflow events. */
     public Map<String,Object> researchContext(long projectId,Long phoneModelId,Long version) {
@@ -457,7 +488,8 @@ public class MoldApplicationService implements ApplicationRunner {
         var context=productDevelopment.moldApplicationPreviewContext(projectId,phoneModelId,version);
         Long phone=(Long)context.get("phoneModelId");var standardPhone=phone==null?null:codes.references().phone(phone);
         var form=researchForm(context);var missing=new ArrayList<String>((List<String>)context.get("missingFields"));
-        if(text(form.get("tipo"))==null)missing.add("LEMOS 类型");missing.add("关键图片");context.put("missingFields",missing);
+        var references=media.describeResearchFiles((List<Map<String,Object>>)context.getOrDefault("references",List.of()));context.put("references",references);
+        if(references.stream().noneMatch(file->"key_photo".equals(file.get("category"))))missing.add("关键图片");context.put("missingFields",missing);
         var result=new LinkedHashMap<String,Object>();result.put("applicationId",null);result.put("status","draft");result.put("canEditDraft",true);result.put("productLineId",projectId);result.put("phoneModelId",phone);result.put("phoneCodeItemId",standardPhone==null?null:standardPhone.get("codeItemId"));result.put("form",form);result.put("files",List.of());result.put("executionIntent","new");result.put("sourceSnapshot",Map.of("research",context));
         var existing=new ArrayList<Map<String,Object>>();var history=new ArrayList<Map<String,Object>>();
         for(var raw:researchCandidates(projectId,phone))try{existing.add(detail(((Number)raw.get("applicationId")).longValue()));}
@@ -465,7 +497,7 @@ public class MoldApplicationService implements ApplicationRunner {
         for(var application:existing)if(terminalApplication(application))history.add(application);
         var active=existing.stream().filter(application->!terminalApplication(application)).toList();
         var continuing=active.stream().filter(application->phone!=null&&Objects.equals(application.get("phoneModelId"),phone)||application.get("phoneModelId")==null).toList();
-        result.put("activeApplications",active);result.put("historyApplications",history);result.put("existingApplications",active);if(continuing.size()==1)result.put("existingApplication",continuing.get(0));result.put("submissionPolicy",submissionPolicy(result,repo.schema(props.getProcessCode())));return result;
+        result.put("activeApplications",active);result.put("historyApplications",history);result.put("existingApplications",active);if(continuing.size()==1)result.put("existingApplication",continuing.get(0));result.put("processCode",props.getResearchProcessCode());describeFlow(result);return result;
     }
     /** The existing manual writer saves supplied editor fields and research evidence in one transaction. */
     public Map<String,Object> startFromResearch(ResearchDraft input,HttpServletRequest request) {
@@ -545,7 +577,7 @@ public class MoldApplicationService implements ApplicationRunner {
                 var research=source.path("research");
                 if(!Objects.equals(draft.productLineId(),research.path("projectId").asLong()))throw invalid("新品来源的产品已固定，不能将草稿改为其他产品；手机缺项可在本申请中补齐");
             }
-            if(before==null||!Objects.equals(before.get("productLineId"),draft.productLineId())||!Objects.equals(text(before.get("tipo")),text(form.get("tipo"))))codes.requireOnSaleProduct(draft.productLineId(),text(form.get("tipo")));
+            if(before==null||!Objects.equals(before.get("productLineId"),draft.productLineId())||!Objects.equals(text(before.get("tipo")),text(form.get("tipo"))))codes.requireOnSaleProduct(draft.productLineId(),before!=null&&trustedResearch(before)?null:text(form.get("tipo")));
             Long phoneId=draft.phoneModelId(),codeId=draft.phoneCodeItemId();
             if(phoneId!=null){var phone=codes.references().phone(phoneId);if(!"enabled".equals(phone.get("status")))throw invalid("标准手机已停用");form.put("model",phone.get("modelName"));Long actual=phone.get("codeItemId")==null?null:((Number)phone.get("codeItemId")).longValue();if(codeId!=null&&!Objects.equals(actual,codeId))throw invalid("手机身份与编码不一致");codeId=actual;}
             String intent=Objects.requireNonNullElse(text(draft.executionIntent()),"new");if(!Set.of("new","new_set","reuse").contains(intent))throw invalid("开模方式无效");
@@ -572,7 +604,7 @@ public class MoldApplicationService implements ApplicationRunner {
             Long applicationId=id;
             if(id==null)applicationId=repo.jdbc().queryForObject("insert into plm_mold_application(process_code,model,tipo,form_data,applicant_id,product_line_id,phone_code_item_id,phone_model_id,execution_intent,target_item_id,target_mold_set_id,target_project_id,execution_reason,new_application_requested,draft_request_id,created_by,updated_by) values(?,?,?,?::jsonb,?,?,?,?,?,?,?,?,?,?,?,?,?) returning application_id",Long.class,props.getProcessCode(),form.get("model"),form.get("tipo"),repo.json(form),actor.userId(),draft.productLineId(),codeId,phoneId,intent,draft.targetItemId(),draft.targetMoldSetId(),draft.targetProjectId(),executionReason,explicit,requestId==null?UUID.randomUUID().toString():requestId,actor.username(),actor.username());
             else repo.jdbc().update("update plm_mold_application set model=?,tipo=?,form_data=?::jsonb,product_line_id=?,phone_code_item_id=?,phone_model_id=?,execution_intent=?,target_item_id=?,target_mold_set_id=?,target_project_id=?,execution_reason=?,new_application_requested=?,generated_codes=null,version_no=version_no+1,updated_at=now(),updated_by=? where application_id=?",form.get("model"),form.get("tipo"),repo.json(form),draft.productLineId(),codeId,phoneId,intent,draft.targetItemId(),draft.targetMoldSetId(),draft.targetProjectId(),executionReason,explicit,actor.username(),id);
-            audit("MOLD_APPLICATION_DRAFT_SAVE",applicationId,Map.of("form",form,"executionIntent",intent),request,actor);return responseRow(applicationId);
+            audit("MOLD_APPLICATION_DRAFT_SAVE",applicationId,Map.of("form",form,"executionIntent",intent),request,actor);migrateResearchDraft(applicationId,request);return responseRow(applicationId);
         });
     }
     private void validateTargets(Long line,Long phone,String intent,Long item,Long set,Long project,boolean submitting){
@@ -590,7 +622,7 @@ public class MoldApplicationService implements ApplicationRunner {
         if(productDevelopment!=null&&row.get("sourceSnapshot") instanceof JsonNode source&&source.path("research").isObject()){
             var research=source.path("research");
             if(!Objects.equals(row.get("productLineId"),research.path("projectId").asLong()))throw invalid("新品来源的产品身份不一致，请回原项目核对");
-            if(row.get("phoneModelId")==null&&submissionPolicy(row,repo.schema(props.getProcessCode())).requiresStandardPhone())throw invalid("提交前请选择标准手机型号");
+            if(row.get("phoneModelId")==null&&submissionPolicy(row,repo.schema(effectiveProcess(row))).requiresStandardPhone())throw invalid("提交前请选择标准手机型号");
         }
     }
     public Map<String,Object> reserve(long id,long version,HttpServletRequest request){
@@ -599,8 +631,9 @@ public class MoldApplicationService implements ApplicationRunner {
     public Map<String,Object> reserve(long id,long version,Long phoneModelId,Long itemId,Long moldSetId,String compatibilityDigest,HttpServletRequest request){
         createPermission();var actor=access.actor();return tx().execute(tx->{var original=require(id,false);lockPhones(phoneModelId,(Long)original.get("phoneModelId"));lockResearchProject(original);var row=require(id,true);ownDraft(row);if(((Number)row.get("version")).longValue()!=version)throw new BusinessException(40901,"申请已更新，请刷新");
             assertResearchScope(row);
+            if(props.getResearchProcessCode().equals(storedProcess(row))&&trustedResearch(row))throw invalid("新品在 Tiffany 授权后自动编码，请在原项目第5步办理");
             if(phoneModelId==null&&row.get("phoneModelId")==null)throw invalid("预留正式模具编码前请选择标准手机型号");
-            codes.requireOnSaleProduct((Long)row.get("productLineId"),text(row.get("tipo")));
+            codes.requireOnSaleProduct((Long)row.get("productLineId"),props.getResearchProcessCode().equals(storedProcess(row))?null:text(row.get("tipo")));
             if(row.get("sourceSnapshot") instanceof JsonNode source&&source.path("research").isObject()&&!Objects.equals(codes.config(text(row.get("tipo"))).get("productLineId"),row.get("productLineId")))throw invalid("所选Tipo与新品产品不一致，请选择该产品的LEMOS类型配置，不能改变来源产品");
             Long chosen=phoneModelId==null?(Long)row.get("phoneModelId"):phoneModelId;
             checkExistingExecution(chosen,(Long)row.get("productLineId"),id,Objects.toString(row.get("executionIntent"),"new"),Boolean.TRUE.equals(row.get("newApplication"))||moldSetId!=null);
@@ -620,28 +653,28 @@ public class MoldApplicationService implements ApplicationRunner {
         if(!input.confirmFormal())throw invalid("请确认将提交到正式钉钉审批");
         var current=require(id,false);if(current.get("instanceId")!=null)return detail(id);
         assertResearchScope(current);
-        codes.requireOnSaleProduct((Long)current.get("productLineId"),text(current.get("tipo")));
+        codes.requireOnSaleProduct((Long)current.get("productLineId"),props.getResearchProcessCode().equals(storedProcess(current))?null:text(current.get("tipo")));
         var identity=repo.jdbc().queryForList("select dingtalk_user_id from plm_pilot_account where user_id=?",actor.userId());
         if(identity.size()!=1||text(identity.get(0).get("dingtalk_user_id"))==null)throw invalid("请管理员先绑定真实钉钉UserID");
         String uid=identity.get(0).get("dingtalk_user_id").toString();var user=client.user(uid);var departments=new ArrayList<Long>();user.path("dept_id_list").forEach(d->departments.add(d.asLong()));
         Long dept=input.departmentId();if(dept==null&&departments.size()==1)dept=departments.get(0);if(dept==null||!departments.contains(dept))throw invalid("请确认发起人在钉钉中的所属部门");
-        final long departmentId=dept;var schema=client.schema(props.getProcessCode());repo.saveSchema(props.getProcessCode(),schema);
+        final long departmentId=dept;String process=storedProcess(current);if(!process.equals(effectiveProcess(current)))throw invalid("新品草稿将使用新产品流程，请先保存草稿后提交");var schema=client.schema(process);repo.saveSchema(process,schema);
         var prepared=tx().execute(tx->{lockPhones((Long)current.get("phoneModelId"));lockResearchProject(current);var row=require(id,true);ownDraft(row);if(((Number)row.get("version")).longValue()!=input.version())throw new BusinessException(40901,"申请已更新，请刷新后提交");
             assertResearchScope(row);
-            codes.requireOnSaleProduct((Long)row.get("productLineId"),text(row.get("tipo")));
+            codes.requireOnSaleProduct((Long)row.get("productLineId"),props.getResearchProcessCode().equals(storedProcess(row))?null:text(row.get("tipo")));
             String intent=Objects.toString(row.get("executionIntent"),"new");boolean explicit=Boolean.TRUE.equals(row.get("newApplication"))||"new_set".equals(intent);
             validateExecutionRequest(intent,text(row.get("executionReason")),explicit,null,false);
             checkExistingExecution((Long)row.get("phoneModelId"),(Long)row.get("productLineId"),id,intent,explicit);
             var policy=submissionPolicy(row,schema);
             var form=json.convertValue(row.get("form"),new TypeReference<Map<String,Object>>(){});
             if(text(row.get("executionReason"))!=null)form.put("remark",Objects.toString(form.get("remark"),"")+"\n新增或重新开模原因："+row.get("executionReason"));
-            for(String key:List.of("model","tipo","expectedDeliveryDate"))if(text(form.get(key))==null)throw invalid("请完善型号、Tipo和期望交期");
+            for(String key:process.equals(props.getResearchProcessCode())?List.of("productName","model","expectedDeliveryDate"):List.of("model","tipo","expectedDeliveryDate"))if(text(form.get(key))==null)throw invalid("请完善"+(process.equals(props.getResearchProcessCode())?"产品名、型号和期望交期":"型号、Tipo和期望交期"));
             if("research".equals(policy.mode())) {
                 if(row.get("targetProjectId")!=null&&!Objects.equals(row.get("targetProjectId"),row.get("productLineId")))throw invalid("新品开模继续关联原新品项目，不能改为其他项目");
                 if(Set.of("new_set","reuse").contains(intent))validateTargets((Long)row.get("productLineId"),(Long)row.get("phoneModelId"),intent,(Long)row.get("targetItemId"),(Long)row.get("targetMoldSetId"),null,true);
-                if(!policy.allowedTipos().contains(text(form.get("tipo"))))throw invalid("请选择当前钉钉模板中未映射其他产品的真实Tipo，不能用其他款式代替新品");
+                if(!process.equals(props.getResearchProcessCode())&&!policy.allowedTipos().contains(text(form.get("tipo"))))throw invalid("请选择当前钉钉模板中未映射其他产品的真实Tipo，不能用其他款式代替新品");
                 // No fake code or generated-code acknowledgement is sent for a research approval.
-                form.remove("generatedCodes");form.remove("informationComplete");
+                form.remove("generatedCodes");form.remove("informationComplete");if(process.equals(props.getResearchProcessCode()))form.remove("tipo");
                 var source=(com.fasterxml.jackson.databind.node.ObjectNode)((JsonNode)row.get("sourceSnapshot")).deepCopy();
                 source.set("researchSubmission",json.valueToTree(Map.of("mode","research","projectId",row.get("productLineId"),"submittedAt",OffsetDateTime.now().toString())));
                 repo.jdbc().update("update plm_mold_application set source_snapshot_json=?::jsonb where application_id=?",repo.json(source),id);
@@ -658,7 +691,7 @@ public class MoldApplicationService implements ApplicationRunner {
             validateTargets((Long)row.get("productLineId"),(Long)row.get("phoneModelId"),Objects.toString(row.get("executionIntent"),"new"),(Long)row.get("targetItemId"),(Long)row.get("targetMoldSetId"),(Long)row.get("targetProjectId"),true);
             }
             media.requireResearchFileAccess(id,null,access);
-            var files=media.internal(id);if(files.stream().noneMatch(f->"key_photo".equals(f.get("file_category"))))throw invalid("请上传关键图片");
+            var files=media.internal(id);var missing=missingSubmission(form,files,schema,json,"research".equals(policy.mode()));if(!missing.isEmpty())throw invalid("送审还缺："+String.join("、",missing));
             if(files.stream().anyMatch(f->!"downloaded".equals(f.get("download_status"))))throw invalid("所选图片或附件尚未归档完成");
             String key=UUID.randomUUID().toString();repo.jdbc().update("update plm_mold_application set status='submitting',provisioning_status='pending',submission_key=?,schema_version=?,schema_snapshot=?::jsonb,originator_user_id=?,originator_name=?,department_id=?,version_no=version_no+1,updated_at=now() where application_id=?",key,schema.path("gmtModified").asText(),repo.json(schema),uid,user.path("name").asText(actor.displayName()),departmentId,id);
             audit("MOLD_APPLICATION_SUBMIT_START",id,Map.of("requestId",key),request,actor);return Map.of("form",form,"key",key);
@@ -680,11 +713,11 @@ public class MoldApplicationService implements ApplicationRunner {
                 if(Boolean.TRUE.equals(control.get("required"))&&value==null)throw invalid("钉钉模板必填字段未填写："+control.get("label")+"；请按真实业务完善，编码待定时须使用支持新品研发的原审批模板");
                 if(value!=null){if(!((List<?>)control.get("options")).isEmpty()&&!((List<?>)control.get("options")).contains(value))throw invalid("下拉选项已变化，请刷新表单");values.add(Map.of("id",control.get("id").toString(),"name",control.get("label").toString(),"value",value));}
             }
-            var payload=new LinkedHashMap<String,Object>();payload.put("originatorUserId",uid);payload.put("processCode",props.getProcessCode());payload.put("deptId",dept);payload.put("formComponentValues",values);
+            var payload=new LinkedHashMap<String,Object>();payload.put("originatorUserId",uid);payload.put("processCode",process);payload.put("deptId",dept);payload.put("formComponentValues",values);
             repo.jdbc().update("update plm_mold_application set submission_snapshot=?::jsonb where application_id=?",repo.json(payload),id);
             createStarted=true;String instance=client.submit(payload);confirmedInstance=instance;
             tx().executeWithoutResult(tx->{repo.jdbc().update("update plm_mold_application set external_instance_id=?,status='submitted',remote_status='RUNNING',last_error=null,version_no=version_no+1,updated_at=now() where application_id=?",instance,id);audit("MOLD_APPLICATION_SUBMITTED",id,Map.of("instanceId",instance),request,actor);});
-            syncInternal(instance);return detail(id);
+            syncInternal(instance,process);return detail(id);
         }catch(Exception e){if(confirmedInstance!=null){repo.jdbc().update("update plm_mold_application set external_instance_id=?,status='submitted',remote_status='RUNNING',last_error='已取得审批实例，详情补拉失败，请同步核对' where application_id=?",confirmedInstance,id);return detail(id);}boolean unknown=createStarted&&(!(e instanceof MoldDingTalkClient.RemoteFailure failure)||failure.uncertain);String message=e instanceof BusinessException b?b.getMessage():e instanceof MoldDingTalkClient.RemoteFailure f?f.getMessage():"钉钉提交失败，请同步核对";
             repo.jdbc().update("update plm_mold_application set status=?,last_error=?,version_no=version_no+1 where application_id=?",unknown?"submission_unknown":"draft",message,id);throw new BusinessException(50301,message);}
     }
@@ -718,7 +751,7 @@ public class MoldApplicationService implements ApplicationRunner {
         var files=new ArrayList<Map<String,Object>>();boolean readable=access.hasPermission("file:read"),authorized=readable;
         if(readable)try{
             requireApplicationProducts(row);
-            for(var file:media.list(((Number)row.get("applicationId")).longValue()))try{access.requireFile(((Number)file.get("attachmentId")).longValue());files.add(file);}catch(BusinessException denied){authorized=false;}
+            for(var file:media.list(((Number)row.get("applicationId")).longValue()))try{access.requireFile(((Number)file.get("attachmentId")).longValue());if("draft".equals(row.get("status"))&&props.getResearchProcessCode().equals(effectiveProcess(row))&&file.get("sourceAttachmentId")!=null)file.put("category",MoldApplicationMedia.researchCategory(Objects.toString(file.get("contentType"),"")));files.add(file);}catch(BusinessException denied){authorized=false;}
         }catch(BusinessException denied){authorized=false;files.clear();}
         row.put("files",files);row.put("canArchiveFiles",access.actor().allPermissions()&&authorized&&props.isReadSyncEnabled()&&row.get("instanceId")!=null);
     }
@@ -740,25 +773,32 @@ public class MoldApplicationService implements ApplicationRunner {
     public Map<String,Object> syncRange(LocalDate from,LocalDate until){admin();return sync(from.atStartOfDay(ZONE).toInstant(),until.plusDays(1).atStartOfDay(ZONE).toInstant());}
     private Map<String,Object> sync(Instant from,Instant until){
         feature();if(!props.isReadSyncEnabled())throw invalid("钉钉读取同步未启用");if(!syncing.compareAndSet(false,true))throw invalid("已有同步任务正在运行");
-        try{client.warmup();repo.saveSchema(props.getProcessCode(),client.schema(props.getProcessCode()));var ids=new LinkedHashSet<>(client.ids(props.getProcessCode(),from,until.isAfter(Instant.now())?Instant.now():until));
-            ids.addAll(repo.jdbc().queryForList("select external_instance_id from plm_mold_application where process_code=? and remote_status='RUNNING' and external_instance_id is not null",String.class,props.getProcessCode()));int done=0;List<String> failed=new ArrayList<>();
-            for(String id:ids)try{syncInternal(id);done++;}catch(Exception e){failed.add(id);repo.jdbc().update("update plm_mold_application set last_error='钉钉同步失败，请重试' where external_instance_id=? and process_code=?",id,props.getProcessCode());}
+        try{client.warmup();int done=0;List<String> failed=new ArrayList<>();
+            for(String process:props.processCodes()){
+                repo.saveSchema(process,client.schema(process));var ids=new LinkedHashSet<>(client.ids(process,from,until.isAfter(Instant.now())?Instant.now():until));
+                ids.addAll(repo.jdbc().queryForList("select external_instance_id from plm_mold_application where process_code=? and remote_status='RUNNING' and external_instance_id is not null",String.class,process));
+                for(String id:ids)try{syncInternal(id,process);done++;}catch(Exception e){failed.add(id);repo.jdbc().update("update plm_mold_application set last_error='钉钉同步失败，请重试' where external_instance_id=? and process_code=?",id,process);}
+            }
             return Map.of("synced",done,"failedInstanceIds",failed);
         }finally{syncing.set(false);}
     }
     public long syncInternal(String id){
-        feature();if(!props.isReadSyncEnabled())throw invalid("钉钉读取同步未启用");
-        var d=client.instance(id);var created=date(text(d.path("create_time")));
-        boolean known=repo.jdbc().queryForObject("select exists(select 1 from plm_mold_application where process_code=? and external_instance_id=?)",Boolean.class,props.getProcessCode(),id);
-        if(!known){if(created==null||!client.ids(props.getProcessCode(),created.toInstant().minus(Duration.ofHours(12)),created.toInstant().plus(Duration.ofHours(12))).contains(id))throw invalid("此实例不属于开模正式流程，未导入");}
-        var normalized=normalize(d);String remark=Objects.toString(normalized.get("remark"),"");
-        // DingTalk create-instance has no documented request-id deduplication. Reconcile our marker;
-        // never send the create call a second time while the outcome is unknown.
-        var marker=java.util.regex.Pattern.compile("\\[PLM-ID:([a-f0-9-]{36})\\]").matcher(remark);String key=null;while(marker.find())key=marker.group(1);
-        if(key!=null)repo.jdbc().update("update plm_mold_application set external_instance_id=? where submission_key=? and process_code=? and originator_user_id=? and external_instance_id is null and status in ('submitting','submission_unknown')",id,key,props.getProcessCode(),text(d.path("originator_userid")));
-        var empty=json.createObjectNode();long result=repo.ingest(props.getProcessCode(),id,d,repo.schema(props.getProcessCode()),empty,empty);media.archiveRemote(result,d);autoProvision(result);return result;
+        var processes=repo.jdbc().queryForList("select distinct process_code from plm_mold_application where external_instance_id=?",String.class,id);
+        if(processes.size()>1)throw invalid("实例存在多个流程关联，请从原申请同步");
+        return syncInternal(id,processes.isEmpty()?props.getProcessCode():processes.get(0));
     }
-    public Map<String,Object> callback(String instance,String processCode,boolean approved){feature();if(!props.getProcessCode().equals(processCode))throw invalid("非开模正式流程");if(text(instance)==null)throw invalid("缺少实例ID");long id=syncInternal(instance);return Map.of("applicationId",id,"processingStatus",repo.row(id,false).get("provisioningStatus"));}
+    public long syncInternal(String id,String process){
+        feature();if(!props.isReadSyncEnabled())throw invalid("钉钉读取同步未启用");if(!props.supports(process))throw invalid("非开模正式流程");
+        var d=client.instance(id);var created=date(text(d.path("create_time")));
+        boolean known=repo.jdbc().queryForObject("select exists(select 1 from plm_mold_application where process_code=? and external_instance_id=?)",Boolean.class,process,id);
+        if(!known){if(created==null||!client.ids(process,created.toInstant().minus(Duration.ofHours(12)),created.toInstant().plus(Duration.ofHours(12))).contains(id))throw invalid("此实例不属于开模正式流程，未导入");}
+        var normalized=normalize(d);String remark=Objects.toString(normalized.get("remark"),"");
+        // Unknown creates reconcile the original marker within the same process; never send create twice.
+        var marker=java.util.regex.Pattern.compile("\\[PLM-ID:([a-f0-9-]{36})\\]").matcher(remark);String key=null;while(marker.find())key=marker.group(1);
+        if(key!=null)repo.jdbc().update("update plm_mold_application set external_instance_id=? where submission_key=? and process_code=? and originator_user_id=? and external_instance_id is null and status in ('submitting','submission_unknown')",id,key,process,text(d.path("originator_userid")));
+        var empty=json.createObjectNode();long result=repo.ingest(process,id,d,repo.schema(process),empty,empty);media.archiveRemote(result,d);autoProvision(result);return result;
+    }
+    public Map<String,Object> callback(String instance,String processCode,boolean approved){feature();if(!props.supports(processCode))throw invalid("非开模正式流程");if(text(instance)==null)throw invalid("缺少实例ID");long id=syncInternal(instance,processCode);return Map.of("applicationId",id,"processingStatus",repo.row(id,false).get("provisioningStatus"));}
     public Map<String,Object> correctTargets(long id,TargetCorrection input,HttpServletRequest request){
         convertPermission();if(text(input.reason())==null)throw invalid("请填写工程核对原因");if(!Set.of("new","new_set").contains(input.executionIntent()))throw invalid("建档方式无效");var actor=access.actor();
         tx().executeWithoutResult(tx->{var row=require(id,true);requireModelExecution(row);if(((Number)row.get("version")).longValue()!=input.version())throw new BusinessException(40901,"申请已更新，请刷新");if(row.get("moldSetId")!=null||!Boolean.TRUE.equals(row.get("approvalGranted"))||!"blocked".equals(row.get("provisioningStatus")))throw invalid("只可核对已获同意但自动建档待处理的申请");validateTargets((Long)row.get("productLineId"),(Long)row.get("phoneModelId"),input.executionIntent(),input.targetItemId(),null,input.targetProjectId(),true);if(codes.reservedNewSet(id,text(row.get("generatedCodes")))!=null&&!Objects.equals(row.get("targetItemId"),input.targetItemId()))throw invalid("加开原刻码已在正式审批冻结，不能改为另一主档；请核对原目标");if("new_set".equals(input.executionIntent())){String segment=repo.jdbc().queryForObject("select coalesce(nullif(engraved_code,''),phone_model_code) from plm_collaboration_item where item_id=?",String.class,input.targetItemId());if(segment==null||MoldApplicationForms.codes(text(row.get("generatedCodes"))).stream().anyMatch(code->!code.substring(5).equals(segment)))throw invalid("正式审批原刻码与所选主档不一致，请核对原申请，不能改写已提交的刻码");}repo.jdbc().update("update plm_mold_application set execution_intent=?,target_item_id=?,target_project_id=?,provisioning_status='pending',provisioning_error=null,version_no=version_no+1,updated_at=now() where application_id=?",input.executionIntent(),input.targetItemId(),input.targetProjectId(),id);audit("MOLD_APPLICATION_TARGETS_CORRECT",id,input,request,actor);});autoProvision(id,false);return detail(id);

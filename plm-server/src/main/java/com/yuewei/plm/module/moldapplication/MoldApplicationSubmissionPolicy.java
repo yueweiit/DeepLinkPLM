@@ -27,7 +27,7 @@ public record MoldApplicationSubmissionPolicy(String mode, boolean requiresCodes
             if (phoneId == null) missing.add("标准手机型号");
             if (phoneCodeId == null) missing.add("手机型号编码");
             if (!MoldApplicationForms.hasValidCodes(generatedCodes)) missing.add("正式模具编码");
-            if (configs.stream().noneMatch(c -> Objects.equals(tipo,c.get("tipo")) && Objects.equals(productId,c.get("productLineId"))))
+            if (!officialTipos.isEmpty() && configs.stream().noneMatch(c -> Objects.equals(tipo,c.get("tipo")) && Objects.equals(productId,c.get("productLineId"))))
                 missing.add("Tipo与产品及材质编码映射");
         }
         return new MoldApplicationSubmissionPolicy(research ? "research" : "model", !research, !research, !research,

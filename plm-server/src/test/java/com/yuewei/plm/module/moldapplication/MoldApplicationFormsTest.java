@@ -57,4 +57,18 @@ class MoldApplicationFormsTest {
         assertThat(MoldApplicationDingTalkFiles.durablePhotoUrl("https://static.dingtalk.com/media/photo.png")).isTrue();
         for(String u:java.util.List.of("http://static.dingtalk.com/media/photo.png","https://static.dingtalk.com.evil.test/photo.png","https://static.dingtalk.com/media/photo.png?access_token=secret","https://user@static.dingtalk.com/photo.png","https://bucket.oss-cn-shenzhen.aliyuncs.com/photo.png?Expires=1"))assertThat(MoldApplicationDingTalkFiles.durablePhotoUrl(u)).isFalse();
     }
+    @Test void newProductNameUsesItsOfficialIdAndRequiredRulesIncludeDeliveryAndKeyPhotos()throws Exception {
+        var schema=json.readTree("{\"schemaContent\":{\"items\":[{\"componentName\":\"TextField\",\"props\":{\"id\":\"TextField_1A0FL9VRYX9C0\",\"label\":\"产品名nombre del producto\",\"required\":true}},{\"componentName\":\"DDDateField\",\"props\":{\"id\":\"DDDateField-IH4TZP1H\",\"label\":\"期望交付时间\",\"required\":false}},{\"componentName\":\"DDPhotoField\",\"props\":{\"id\":\"DDPhotoField-IH4TZP1K\",\"label\":\"关键图片foto\",\"required\":false}}]}}");
+        assertThat(controls(schema,json).get(0)).containsEntry("key","productName").containsEntry("required",true);
+        assertThat(submissionControls(schema,json)).allSatisfy(control->assertThat(control.get("required")).isEqualTo(true));
+        var form=new java.util.LinkedHashMap<String,Object>();form.put("productName","韧甲");form.put("expectedDeliveryDate","2026-12-01");
+        assertThat(missingSubmission(form,java.util.List.of(),schema,json,true)).containsExactly("关键图片foto");
+        assertThat(missingSubmission(form,java.util.List.of(java.util.Map.of("file_category","key_photo","download_status","pending_upload")),schema,json,true)).containsExactly("关键图片foto");
+        assertThat(missingSubmission(form,java.util.List.of(java.util.Map.of("file_category","key_photo","download_status","downloaded")),schema,json,true)).isEmpty();
+    }
+    @Test void configuredFlowsStayDistinctAndForeignTemplatesAreNotAccepted(){
+        var props=new MoldApplicationProperties();assertThat(props.processCodes()).containsExactly("PROC-89949932-19DE-48EB-A20B-2595CB0F804D","PROC-82114D4B-5F22-4FE9-913A-9A73852DA323");
+        assertThat(props.supports("PROC-BD65F530-F66F-46B9-8F72-0567DD68F60C")).isFalse();
+        assertThat(MoldApplicationMedia.researchCategory("image/png")).isEqualTo("key_photo");assertThat(MoldApplicationMedia.researchCategory("application/pdf")).isEqualTo("attachment");
+    }
 }

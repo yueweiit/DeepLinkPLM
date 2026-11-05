@@ -13,6 +13,9 @@ public class MoldApplicationProperties {
     private boolean writeEnabled;
     private boolean centralCodeEnabled;
     private String processCode="PROC-89949932-19DE-48EB-A20B-2595CB0F804D";
+    private String researchProcessCode="PROC-82114D4B-5F22-4FE9-913A-9A73852DA323";
+    public List<String> processCodes(){return java.util.stream.Stream.of(processCode,researchProcessCode).distinct().toList();}
+    public boolean supports(String code){return processCodes().contains(code);}
     private String connectorToken="";
     private String callbackSignatureToken="";
     private String callbackAesKey="";

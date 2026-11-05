@@ -25,7 +25,7 @@ public class MoldApplicationController {
     @GetMapping("/historical-reconciliation") public ResponseVO<?> historyPreview(HttpServletRequest r){return ok(history.preview(),r);}
     @PostMapping("/historical-reconciliation") public ResponseVO<?> historyApply(@Valid @RequestBody MoldHistoryReconciliationService.Apply input,HttpServletRequest r){return ok(history.apply(input,r),r);}
     @GetMapping("/config") public ResponseVO<?> config(HttpServletRequest r){return ok(service.featureConfig(),r);}
-    @GetMapping("/options") public ResponseVO<?> options(HttpServletRequest r){return ok(service.options(),r);}
+    @GetMapping("/options") public ResponseVO<?> options(@RequestParam(required=false) Long projectId,@RequestParam(required=false) Long applicationId,HttpServletRequest r){return ok(service.options(projectId,applicationId),r);}
     @GetMapping("/summary") public ResponseVO<?> summary(@RequestParam(required=false) @Positive Long projectId,@RequestParam(required=false) Boolean unlinked,HttpServletRequest r){return ok(service.summary(projectId,unlinked),r);}
     @GetMapping("/phone-codes") public ResponseVO<?> phones(@RequestParam String keyword,HttpServletRequest r){return ok(service.phoneCodes(keyword),r);}
     @GetMapping public ResponseVO<?> page(@RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="50") int size,
