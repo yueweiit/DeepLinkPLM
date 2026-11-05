@@ -139,12 +139,11 @@ public class EngineeringBasisService {
         validatePlan(plan);
         confirmedAssignments(plan);requireCurrent(state,references);validateTechnical(productId,plan,references,true);
         if (direct(plan)) {
-            var costId=number(map(state.get("releaseDraft")).get("unitCostVersionId"));
-            var cost=records(state.get("unitCostVersions")).stream().filter(c->number(c.get("id"))==costId).findFirst().orElse(Map.of());
+            for(var cost:DevelopmentCostScopes.releaseCosts(state,map(state.get("releaseDraft")),false)){
             if ("supplier_quote".equals(cost.get("basisType"))) {
                 String code=text(map(cost.get("adoptedQuote")).get("supplierCode"));
                 require(normalizeAssignments(plan.get("supplierAssignments"),true).stream().anyMatch(r->"supplier".equals(r.get("mode"))&&"finished_product".equals(r.get("role"))&&code.equals(r.get("supplierCode"))),"采购成品成本报价的供应商与已确认成品供方不一致，请核对工程方案与成本版本");
-            }
+            }}
         }
     }
 

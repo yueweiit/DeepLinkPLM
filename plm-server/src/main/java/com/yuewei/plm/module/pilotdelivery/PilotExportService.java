@@ -63,7 +63,7 @@ public class PilotExportService {
         selects.put("production_color_decisions","select * from plm_product_production_color_decision where product_id in ("+marks+")");
         selects.put("production_operation_selection","select * from plm_process_production_operation_selection where product_id in ("+marks+")");
         selects.put("variant_colors","select * from plm_product_variant_color where project_product_id in ("+marks+")");
-        selects.put("bom_cost_snapshots","select * from plm_product_bom_cost_snapshot where product_bom_id in ("+boms+")");
+        selects.put("bom_cost_snapshots","select * from plm_product_bom_cost_snapshot where cost_scope_key is null and product_bom_id in ("+boms+")");
         selects.put("bom_releases","select * from plm_pilot_bom_release where bom_id in ("+boms+")");
         selects.put("referenced_processes","select * from plm_process where product_id in ("+marks+") or process_id in(select process_id from plm_product_bom_route where product_bom_id in ("+boms+"))");
         selects.put("workflow_templates","select * from plm_workflow_template where workflow_template_id in(select workflow_template_id from plm_product where product_id in ("+marks+")) or (active_flag=1 and flow_type in(select product_type from plm_product where product_id in ("+marks+")))");
@@ -134,7 +134,7 @@ public class PilotExportService {
         var sourceBoms=boms.values().stream().filter(b->!owned.contains(number(b,"product_bom_id"))).toList();var sourceIds=references(sourceBoms,"product_bom_id");
         data.put("referenced_boms",sourceBoms);data.put("referenced_bom_routes",routes.values().stream().filter(r->sourceIds.contains(number(r,"product_bom_id"))).toList());
         for(var entry:Map.of("referenced_bom_items","plm_product_bom_item","referenced_bom_colors","plm_product_bom_route_color","referenced_bom_cost_snapshots","plm_product_bom_cost_snapshot").entrySet()){
-            var values=sourceIds.isEmpty()?List.<Map<String,Object>>of():records("select * from "+entry.getValue()+" where product_bom_id in ("+PilotTrialService.marks(sourceIds.stream().toList())+") limit "+(MAX_REFERENCE_RECORDS+1),sourceIds.toArray());bounded(values.size());data.put(entry.getKey(),values);
+            var values=sourceIds.isEmpty()?List.<Map<String,Object>>of():records("select * from "+entry.getValue()+" where "+(entry.getValue().equals("plm_product_bom_cost_snapshot")?"cost_scope_key is null and ":"")+"product_bom_id in ("+PilotTrialService.marks(sourceIds.stream().toList())+") limit "+(MAX_REFERENCE_RECORDS+1),sourceIds.toArray());bounded(values.size());data.put(entry.getKey(),values);
         }
         Set<Long> inventory=references(rows(data,"referenced_bom_items"),"inventory_id");inventory.addAll(references(rows(data,"bom_items"),"inventory_id"));inventory.addAll(references(rows(data,"mold_parts"),"inventory_id"));inventory.removeAll(new HashSet<>(ids(data.get("referenced_inventory"),"inventory_id")));var extraInventory=batch("plm_inventory","inventory_id",inventory);if(extraInventory.size()!=inventory.size())throw incomplete("物料来源缺失");var allInventory=new ArrayList<>(rows(data,"referenced_inventory"));allInventory.addAll(extraInventory);data.put("referenced_inventory",allInventory);
     }

@@ -32,11 +32,11 @@ public class DevelopmentFinanceService {
     private final PlatformTransactionManager transactionManager;
     private final OperationLogService operationLog;
     private static final Map<String,String> BUDGET_FIELDS=Map.ofEntries(
-        Map.entry("freightAmount","freight_amount"),Map.entry("costCategory","cost_category"),Map.entry("budgetName","budget_name"),Map.entry("calculationMode","calculation_mode"),Map.entry("budgetAmount","budget_amount"),Map.entry("moldCost","mold_cost"),
+        Map.entry("costScopeKey","cost_scope_key"),Map.entry("freightAmount","freight_amount"),Map.entry("costCategory","cost_category"),Map.entry("budgetName","budget_name"),Map.entry("calculationMode","calculation_mode"),Map.entry("budgetAmount","budget_amount"),Map.entry("moldCost","mold_cost"),
         Map.entry("moldWeight","mold_weight"),Map.entry("transportRate","transport_rate"),Map.entry("fuelRate","fuel_rate"),
         Map.entry("customsCost","customs_cost"),Map.entry("salePrice","sale_price"),Map.entry("unitProductionCost","unit_production_cost"),Map.entry("notes","notes"));
     private static final Map<String,String> EXPENSE_FIELDS=Map.ofEntries(
-        Map.entry("actualReconciliation","actual_reconciliation"),Map.entry("actualAmount","actual_amount"),Map.entry("actualDate","actual_date"),Map.entry("actualBasis","actual_basis"),Map.entry("actualStatus","actual_status"),Map.entry("actualManualExpenseId","actual_manual_expense_id"),Map.entry("actualCoveredAmount","actual_covered_amount"),Map.entry("description","cost_name"),Map.entry("expenseCategory","cost_category"),Map.entry("declaredAmount","amount"),
+        Map.entry("costScopeKey","cost_scope_key"),Map.entry("actualReconciliation","actual_reconciliation"),Map.entry("actualAmount","actual_amount"),Map.entry("actualDate","actual_date"),Map.entry("actualBasis","actual_basis"),Map.entry("actualStatus","actual_status"),Map.entry("actualManualExpenseId","actual_manual_expense_id"),Map.entry("actualCoveredAmount","actual_covered_amount"),Map.entry("description","cost_name"),Map.entry("expenseCategory","cost_category"),Map.entry("declaredAmount","amount"),
         Map.entry("requestedAmount","requested_amount"),Map.entry("approvedAmount","approved_amount"),
         Map.entry("approvalInstanceId","approval_instance_id"),Map.entry("approvalStatus","approval_status"),
         Map.entry("supplierName","supplier_name"),Map.entry("occurredAt","occurred_at"),Map.entry("notes","remark"),Map.entry("state","status"),
@@ -65,6 +65,7 @@ public class DevelopmentFinanceService {
         if(q.getProjectId()!=null){access.requireProduct(q.getProjectId());sql.append(" and (").append(entity.equals("expense")?"(e.product_id=? or (e.product_line_id=? and e.item_id is null and e.mold_set_id is null))":"(b.budget_kind='platform' and b.product_line_id=?)").append(" or "+com.yuewei.plm.module.project.ProjectBusinessLinks.setExists(a+".mold_set_id")).append(" or ("+a+".mold_set_id is null and "+com.yuewei.plm.module.project.ProjectBusinessLinks.itemExists(a+".item_id")+"))");args.add(q.getProjectId());if(entity.equals("expense"))args.add(q.getProjectId());args.add(q.getProjectId());args.add(q.getProjectId());}
         if(q.getItemId()!=null){sql.append(" and ").append(a).append(".item_id=?");args.add(q.getItemId());}
         if(q.getCurrency()!=null){sql.append(" and ").append(a).append(".currency_code=?");args.add(q.getCurrency());}
+        if(q.getCostScopeKey()!=null){if(q.getProjectId()==null)throw invalid("成本组查询需指定项目");String key=q.getCostScopeKey();if(key.equals("unassigned"))sql.append(" and "+a+".cost_scope_key is null");else{validateCostScope(q.getProjectId(),key,false);sql.append(" and "+a+".cost_scope_key=?");args.add(key);}}
         if(entity.equals("budget")&&q.getKind()!=null){sql.append(" and b.budget_kind=?");args.add(q.getKind());}
         if(entity.equals("expense")&&q.getState()!=null){sql.append(" and e.status=?");args.add(q.getState());}
         if(entity.equals("expense")&&q.getSourceSystem()!=null){sql.append(" and e.source_system=?");args.add(q.getSourceSystem());}
@@ -109,13 +110,13 @@ public class DevelopmentFinanceService {
     }
     private String currency(String value){String code=value==null?"CNY":value;if(!Set.of("CNY","MXN","USD","EUR").contains(code)) throw invalid("请选择原币，不能猜测或混币加总");return code;}
     public Map<String,Object> createBudget(CreateBudget dto,HttpServletRequest request) {
-        access.requireFinanceWrite();scope(dto.productLineId(),dto.itemId(),dto.moldSetId());String code=currency(dto.currency());
+        access.requireFinanceWrite();scope(dto.productLineId(),dto.itemId(),dto.moldSetId());validateCostScope(dto.productLineId(),dto.costScopeKey(),true);String code=currency(dto.currency());
         if(dto.kind().equals("platform")&&(dto.productLineId()==null||dto.itemId()!=null||dto.moldSetId()!=null||dto.parentBudgetId()!=null)) throw invalid("平台预算只绑定一个产品平台");
         if(dto.productLineId()!=null&&jdbc.queryForObject("select count(*) from plm_product where product_id=? and product_type='product_line' and deleted_flag=0",Long.class,dto.productLineId())==0)throw invalid("请选择真实产品平台，不按颜色项目重复预算");
         if(dto.kind().equals("mold")&&dto.itemId()==null) throw invalid("模具预算须绑定不分颜色的协作档案");
         if(dto.parentBudgetId()!=null) {var parent=detail("budget",dto.parentBudgetId());if(!parent.get("budgetKind").equals("platform")||parent.get("costCategory")!=null&&!"project_total".equals(parent.get("costCategory"))||!same(parent.get("productLineId"),dto.productLineId())||!code.equals(parent.get("currencyCode"))) throw invalid("父预算须为同平台同币种；父子预算不能相加");}
         return new TransactionTemplate(transactionManager).execute(tx->{var actor=access.actor();Long id;
-            try {id=jdbc.queryForObject("insert into plm_development_budget(budget_kind,budget_name,product_line_id,item_id,mold_set_id,parent_budget_id,currency_code,transport_rate,fuel_rate,created_by,updated_by,cost_category) values(?,?,?,?,?,?,?,?,?,?,?,?) returning budget_id",Long.class,dto.kind(),dto.name().trim(),dto.productLineId(),dto.itemId(),dto.moldSetId(),dto.parentBudgetId(),code,dto.kind().equals("mold")&&code.equals("CNY")?TRANSPORT_RATE:null,dto.kind().equals("mold")&&code.equals("CNY")?FUEL_RATE:null,actor.username(),actor.username(),dto.costCategory());}
+            try {id=jdbc.queryForObject("insert into plm_development_budget(budget_kind,budget_name,product_line_id,item_id,mold_set_id,parent_budget_id,currency_code,transport_rate,fuel_rate,created_by,updated_by,cost_category,cost_scope_key) values(?,?,?,?,?,?,?,?,?,?,?,?,?) returning budget_id",Long.class,dto.kind(),dto.name().trim(),dto.productLineId(),dto.itemId(),dto.moldSetId(),dto.parentBudgetId(),code,dto.kind().equals("mold")&&code.equals("CNY")?TRANSPORT_RATE:null,dto.kind().equals("mold")&&code.equals("CNY")?FUEL_RATE:null,actor.username(),actor.username(),dto.costCategory(),dto.costScopeKey());}
             catch(org.springframework.dao.DuplicateKeyException e){throw invalid("同一核算对象与币种已有预算，请修改原预算形成新版本，不按颜色重复创建");}
             if(dto.kind().equals("mold")) jdbc.update("update plm_development_budget set calculation_mode='mold_formula' where budget_id=?",id);
             var row=detail("budget",id);history("budget",id,1,"__created",null,row,"新增预算",actor);log("budget",id,"DEVELOPMENT_BUDGET_CREATE",request);return row;});
@@ -125,12 +126,21 @@ public class DevelopmentFinanceService {
     }
     public Map<String,Object> createExpense(CreateExpense dto,Long legacyProductId,HttpServletRequest request) {
         access.requireFinanceWrite();if(dto.actualCorrectionOfId()!=null)return createCorrection(dto.actualCorrectionOfId(),request);if(legacyProductId!=null) access.requireProduct(legacyProductId);
-        scope(dto.productLineId(),dto.itemId(),dto.moldSetId());String code=currency(dto.currency());
+        scope(dto.productLineId(),dto.itemId(),dto.moldSetId());validateScopeProject(legacyProductId,dto.productLineId(),dto.costScopeKey());validateCostScope(legacyProductId!=null?legacyProductId:dto.productLineId(),dto.costScopeKey(),true);String code=currency(dto.currency());
         if(dto.productLineId()==null&&dto.itemId()==null&&legacyProductId==null) throw invalid("费用须明确关联平台或协作档案；不按金额猜测关系");
-        validateBudget(dto.budgetId(),dto.productLineId(),dto.itemId(),dto.moldSetId(),code);
-        return new TransactionTemplate(transactionManager).execute(tx->{var actor=access.actor();Long id=jdbc.queryForObject("insert into plm_project_cost_item(product_id,cost_name,cost_category,product_line_id,item_id,mold_set_id,budget_id,currency_code,created_by,updated_by) values(?,?,'mold',?,?,?,?,?,?,?) returning project_cost_item_id",Long.class,legacyProductId,text(dto.description(),128,true),dto.productLineId(),dto.itemId(),dto.moldSetId(),dto.budgetId(),code,actor.username(),actor.username());
+        validateBudget(dto.budgetId(),dto.productLineId(),dto.itemId(),dto.moldSetId(),code);validateBudgetScope(dto.budgetId(),dto.costScopeKey());
+        return new TransactionTemplate(transactionManager).execute(tx->{var actor=access.actor();Long id=jdbc.queryForObject("insert into plm_project_cost_item(product_id,cost_name,cost_category,product_line_id,item_id,mold_set_id,budget_id,currency_code,created_by,updated_by,cost_scope_key) values(?,?,'mold',?,?,?,?,?,?,?,?) returning project_cost_item_id",Long.class,legacyProductId,text(dto.description(),128,true),dto.productLineId(),dto.itemId(),dto.moldSetId(),dto.budgetId(),code,actor.username(),actor.username(),dto.costScopeKey());
             var row=detail("expense",id);history("expense",id,null,"__created",null,row,"新增费用草稿",actor);log("expense",id,"COST_ITEM_CREATE",request);return row;});
     }
+    private void validateCostScope(Long project,String key,boolean writable){
+        if(key==null)return;if(project==null)throw invalid("成本组需明确本项目归属");access.requireProduct(project);
+        if(key.equals("shared"))return;
+        var rows=jdbc.queryForList("select data::text from plm_product_development_state where product_id=?",project);
+        if(rows.isEmpty())throw invalid("成本组不属于本项目");
+        try{com.yuewei.plm.module.project.development.DevelopmentCostScopes.find(json.readValue(rows.get(0).get("data").toString(),new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>(){}),key,writable);}catch(java.io.IOException e){throw new IllegalStateException(e);}
+    }
+    private void validateBudgetScope(Long budget,String key){if(budget!=null&&!same(detail("budget",budget).get("costScopeKey"),key))throw invalid("费用与预算成本组不一致");}
+    private void validateScopeProject(Long project,Long platform,Object key){if(key!=null&&project!=null&&platform!=null&&!project.equals(platform))throw invalid("成本组费用不能跨项目归属");}
     private void validateBudget(Long id,Long product,Long item,Long mold,String code) {
         if(id==null) return;var b=detail("budget",id);
         if(!code.equals(b.get("currencyCode"))) throw invalid("费用与预算币种不同，请按原币归集，不自动换算");
@@ -147,6 +157,7 @@ public class DevelopmentFinanceService {
     }
     private Object normalise(String field,JsonNode value) {
         if(Set.of("budgetAmount","moldCost","customsCost","requestedAmount","approvedAmount","actualAmount","freightAmount").contains(field)) return amount(value,2,false);
+        if(field.equals("costScopeKey")){if(value==null||value.isNull()||value.asText().isBlank())return null;if(!value.asText().matches("shared|[a-f0-9-]{36}"))throw invalid("成本组身份无效");return value.asText();}
         if(field.equals("actualReconciliation")&&!Set.of("pending","independent").contains(value.asText()))throw invalid("核销状态无效");
         if(field.equals("actualCoveredAmount")) return amount(value,2,true);
         if(field.equals("actualDate")){if(value==null||value.isNull()||value.asText().isBlank())return null;try{return LocalDate.parse(value.asText());}catch(Exception e){throw invalid("实际发生日期格式不正确");}}
@@ -176,6 +187,7 @@ public class DevelopmentFinanceService {
         }
         if(!conflicts.isEmpty())return new Result(patch.id(),"conflict","同字段已被修改，请核对当前值后重新确认",conflicts,current);
         boolean changed=seen.stream().anyMatch(k->!same(current.get(k),next.get(k)));
+        if(next.get("costScopeKey")!=null||seen.contains("costScopeKey")){validateScopeProject((Long)next.get("productId"),(Long)next.get("productLineId"),next.get("costScopeKey"));validateCostScope((Long)(next.get("productId")!=null?next.get("productId"):next.get("productLineId")),(String)next.get("costScopeKey"),true);if(entity.equals("expense"))validateBudgetScope((Long)next.get("budgetId"),(String)next.get("costScopeKey"));}
         if(!changed)return new Result(patch.id(),"saved","没有新修改",List.of(),current);
         if(entity.equals("budget")&&(patch.reason()==null||patch.reason().isBlank()))throw invalid("预算修改须填写原因，保留独立版本");
         if(entity.equals("budget")) {
@@ -183,9 +195,9 @@ public class DevelopmentFinanceService {
         } else {
             if(seen.contains("approvedAmount")||seen.contains("approvalStatus")||seen.contains("state")||current.get("sourceSystem").equals("erp")) access.requireFinanceConfirm();
             String source=current.get("sourceSystem").toString(),oldState=current.get("state").toString(),newState=next.get("state").toString();
-            if(source.equals("erp")&&!Set.of("productLineId","itemId","moldSetId","budgetId","notes","expenseCategory","actualManualExpenseId","actualCoveredAmount","actualReconciliation").containsAll(seen))throw invalid("ERP已过账明细原值及状态不可手工改写；冲销须保留新明细ID");
+            if(source.equals("erp")&&!Set.of("costScopeKey","productLineId","itemId","moldSetId","budgetId","notes","expenseCategory","actualManualExpenseId","actualCoveredAmount","actualReconciliation").containsAll(seen))throw invalid("ERP已过账明细原值及状态不可手工改写；冲销须保留新明细ID");
             if(source.equals("erp")&&(patch.reason()==null||patch.reason().isBlank()))throw invalid("ERP关系映射须填写核对依据，不能按金额猜测");
-            if(!source.equals("erp")&&!oldState.equals("draft")&&seen.stream().anyMatch(k->!Set.of("state","productLineId","itemId","moldSetId","budgetId","notes","actualAmount","actualDate","actualBasis","actualStatus","actualCorrectionOfId").contains(k)))throw invalid("已确认费用只能作废或核对归属，金额原值保留");
+            if(!source.equals("erp")&&!oldState.equals("draft")&&seen.stream().anyMatch(k->!Set.of("costScopeKey","state","productLineId","itemId","moldSetId","budgetId","notes","actualAmount","actualDate","actualBasis","actualStatus","actualCorrectionOfId").contains(k)))throw invalid("已确认费用只能作废或核对归属，金额原值保留");
             if(!oldState.equals(newState)&&!(oldState.equals("draft")&&(newState.equals("confirmed")||newState.equals("void"))||oldState.equals("confirmed")&&newState.equals("void")))throw invalid("费用状态不能回退");
             if(newState.equals("void")&&(patch.reason()==null||patch.reason().isBlank()))throw invalid("作废费用须填写原因");
             if(next.get("approvalStatus").equals("approved")&&next.get("approvalInstanceId")==null)throw invalid("审批通过须关联真实审批实例ID；申报/审批不等于ERP入账");
@@ -194,7 +206,7 @@ public class DevelopmentFinanceService {
             if(next.get("productId")!=null&&next.get("itemId")!=null&&jdbc.queryForObject("select count(*) from plm_collaboration_item_project where project_id=? and item_id=?",Long.class,next.get("productId"),next.get("itemId"))==0)throw invalid("历史项目未关联此协作档案，请先人工核对项目关联，不按金额转移费用");
             if(next.get("itemId")==null&&next.get("productLineId")==null&&next.get("productId")==null)throw invalid("请明确费用归属，不按金额匹配");
             validateActual(current,next,seen);
-            validateBudget((Long)next.get("budgetId"),(Long)next.get("productLineId"),(Long)next.get("itemId"),(Long)next.get("moldSetId"),current.get("currencyCode").toString());
+            validateBudget((Long)next.get("budgetId"),(Long)next.get("productLineId"),(Long)next.get("itemId"),(Long)next.get("moldSetId"),current.get("currencyCode").toString());validateBudgetScope((Long)next.get("budgetId"),(String)next.get("costScopeKey"));
         }
         CurrentUser actor=access.actor();int version=entity.equals("budget")?((Number)current.get("versionNo")).intValue()+1:0;
         var assignments=new ArrayList<String>();var values=new ArrayList<Object>();
@@ -217,7 +229,7 @@ public class DevelopmentFinanceService {
             if(!"manual".equals(old.get("sourceSystem"))||!"confirmed".equals(old.get("actualStatus"))||"void".equals(old.get("state"))||old.get("actualReplacedById")!=null)throw invalid("仅当前已确认的手工实际费用可更正");
             var pending=jdbc.queryForList("select project_cost_item_id from plm_project_cost_item where actual_correction_of_id=? and actual_status='draft' and status<>'void' and deleted_flag=0",original);if(!pending.isEmpty())return detail("expense",((Number)pending.get(0).get("project_cost_item_id")).longValue());
             String name=Objects.toString(old.get("description"),"").replaceAll("(?:[（(]更正[）)]\\s*)+$","");if(name.length()>120)name=name.substring(0,120);
-            var draft=createExpense(new CreateExpense(name,(Long)old.get("productLineId"),(Long)old.get("itemId"),(Long)old.get("moldSetId"),(Long)old.get("budgetId"),old.get("currencyCode").toString(),(Long)old.get("productId")),request);long id=((Number)draft.get("expenseId")).longValue();
+            var draft=createExpense(new CreateExpense(name,(Long)old.get("productLineId"),(Long)old.get("itemId"),(Long)old.get("moldSetId"),(Long)old.get("budgetId"),old.get("currencyCode").toString(),(Long)old.get("productId"),null,(String)old.get("costScopeKey")),request);long id=((Number)draft.get("expenseId")).longValue();
             jdbc.update("update plm_project_cost_item set actual_correction_of_id=?,cost_category=? where project_cost_item_id=?",original,old.get("expenseCategory"),id);history("expense",id,null,"actualCorrectionOfId",null,original,"办理实际费用更正",access.actor());return detail("expense",id);
         });
     }
@@ -225,7 +237,7 @@ public class DevelopmentFinanceService {
         long original=((Number)next.get("actualCorrectionOfId")).longValue();if(same(original,next.get("expenseId")))throw invalid("更正不能引用自身");
         jdbc.queryForList("select project_cost_item_id from plm_project_cost_item where project_cost_item_id=? for update",original);var old=detail("expense",original);
         if(!"manual".equals(next.get("sourceSystem"))||!"manual".equals(old.get("sourceSystem"))||!"confirmed".equals(old.get("actualStatus"))||"void".equals(old.get("state"))||old.get("actualReplacedById")!=null)throw invalid("原实际费用已变化，请刷新后核对");
-        for(String key:List.of("currencyCode","expenseCategory","productId","productLineId","itemId","moldSetId","budgetId"))if(!same(next.get(key),old.get(key)))throw invalid("更正须保留原实际费用的币种与归属");return old;
+        for(String key:List.of("costScopeKey","currencyCode","expenseCategory","productId","productLineId","itemId","moldSetId","budgetId"))if(!same(next.get(key),old.get(key)))throw invalid("更正须保留原实际费用的币种与归属");return old;
     }
     private void applyCorrection(Map<String,Object> next,String reason,CurrentUser actor){
         if(reason==null||reason.isBlank())throw invalid("请填写实际费用更正原因");var old=validateCorrection(next);long id=((Number)next.get("expenseId")).longValue(),original=((Number)old.get("expenseId")).longValue();
@@ -235,7 +247,7 @@ public class DevelopmentFinanceService {
         jdbc.update("update plm_project_cost_item set actual_replaced_by_id=?,updated_at=now(),updated_by=? where project_cost_item_id=?",id,actor.username(),original);history("expense",original,null,"actualReplacedById",null,id,reason,actor);
     }
     private void validateActual(Map<String,Object> old,Map<String,Object> next,Set<String> changed) {
-        var actualFields=Set.of("actualAmount","actualDate","actualBasis","actualStatus","actualCorrectionOfId","expenseCategory","productLineId","itemId","moldSetId","budgetId");
+        var actualFields=Set.of("costScopeKey","actualAmount","actualDate","actualBasis","actualStatus","actualCorrectionOfId","expenseCategory","productLineId","itemId","moldSetId","budgetId");
         if("confirmed".equals(old.get("actualStatus"))&&changed.stream().anyMatch(k->actualFields.contains(k)&&!same(old.get(k),next.get(k))))throw invalid("已确认实际费用不能改写，请作废原记录后更正");
         if(next.get("actualCorrectionOfId")!=null&&!"confirmed".equals(old.get("actualStatus"))&&!"void".equals(next.get("state")))validateCorrection(next);
         if("confirmed".equals(next.get("actualStatus"))) {
@@ -257,6 +269,7 @@ public class DevelopmentFinanceService {
         if(!"erp".equals(next.get("sourceSystem")))throw invalid("仅ERP入账明细可核销手工费用");
         jdbc.queryForList("select project_cost_item_id from plm_project_cost_item where project_cost_item_id=? for update",manual);
         var target=detail("expense",manual);
+        if(!same(next.get("costScopeKey"),target.get("costScopeKey")))throw invalid("不能跨成本组核销手工费用");
         if(!"manual".equals(target.get("sourceSystem"))||!"confirmed".equals(target.get("actualStatus"))||"void".equals(target.get("state"))||target.get("actualReplacedById")!=null)throw invalid("请选择未作废且已确认的手工实际费用");
         if(!same(next.get("currencyCode"),target.get("currencyCode"))||!same(next.get("expenseCategory"),target.get("expenseCategory")))throw invalid("核销费用币种和分类必须一致");
         boolean sameBudget=next.get("budgetId")!=null&&same(next.get("budgetId"),target.get("budgetId"));

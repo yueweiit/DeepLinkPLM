@@ -44,7 +44,7 @@ public class LaunchDevelopmentWorkflow {
             detail.put("molds",ids.isEmpty()?List.of():molds.projectRows(ids));
         }else detail.put("molds",List.of());
         detail.put("applications",access.hasPermission("collaboration:view")&&moldApplications!=null?moldApplications.researchApplications(id):List.of());
-        detail.put("unitCostOptions",records(state.get("unitCostVersions")).stream().map(c->{var option=new LinkedHashMap<String,Object>();for(String key:List.of("id","title","bomId","bomVersion","basisType","confirmedAt","confirmedBy","voidReason"))if(c.containsKey(key))option.put(key,c.get(key));return option;}).toList());
+        detail.put("unitCostOptions",DevelopmentCostScopes.options(state));
         detail.put("canFinanceWrite",access.hasPermission("finance:write")&&access.hasPermission("finance:read"));
         detail.put("canScheduleWrite",access.hasPermission("schedule:write")&&access.hasPermission("schedule:read"));
     }
@@ -299,9 +299,9 @@ public class LaunchDevelopmentWorkflow {
             for(var ref:selected)if("bom".equals(ref.get("type"))&&Set.of("mes_baseline","mes_derivative").contains(text(ref.get("sourceType"))))require(Boolean.TRUE.equals(ref.get("engineeringConfirmed")),"来源有效不等于工程确认，请国内工程确认采用的 BOM 具体版本");
         }));
         checks.add(check("UNIT_COST","采用已确认且与本方案一致的单件成本","release-cost",()->{
-            long costId=number(draft.get("unitCostVersionId"));var cost=records(state.get("unitCostVersions")).stream().filter(c->number(c.get("id"))==costId&&!c.containsKey("voidReason")).findFirst().orElseThrow(()->invalid("请选择已确认且有效的单件成本版本"));
+            for(var cost:DevelopmentCostScopes.releaseCosts(state,draft,true)){
             if("supplier_quote".equals(cost.get("basisType")))require("direct".equals(map(state.get("plan")).get("method"))&&Boolean.FALSE.equals(map(state.get("plan")).get("needsMold"))&&!map(cost.get("adoptedQuote")).isEmpty(),"当前方案不能沿用采购成品报价成本，请按本方案重新核算");
-            else{require(selected.stream().anyMatch(r->"bom".equals(r.get("type"))&&number(r.get("id"))==number(cost.get("bomId"))),"成本采用的BOM与正式包不同，请重新核算确认");service.sameTechnical(records(cost.get("references")).stream().filter(r->"bom".equals(r.get("type"))).toList(),selected.stream().filter(r->"bom".equals(r.get("type"))).toList());}
+            else{require(selected.stream().anyMatch(r->"bom".equals(r.get("type"))&&number(r.get("id"))==number(cost.get("bomId"))),"成本采用的BOM与正式包不同，请重新核算确认");service.sameTechnical(records(cost.get("references")).stream().filter(r->"bom".equals(r.get("type"))).toList(),selected.stream().filter(r->"bom".equals(r.get("type"))).toList());}}
         }));
         if(finalized)checks.add(check("FINALIZED","采用资料变化后的重新定型确认","release-date",()->require(Objects.equals(state.get("finalized"),draft),"资料已变化，请重新确认定型")));
         return checks;

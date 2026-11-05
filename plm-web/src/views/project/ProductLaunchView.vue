@@ -897,11 +897,23 @@ async function deleteSampleDraft(){
   await action(async()=>{await ElMessageBox.confirm(uiText('删除这轮未确认的样品草稿？'),uiText('删除样品草稿'));await deleteDevelopmentDraft(id.value,activeSampleId.value!,version.value);activeSampleId.value=null;dirty.value=false;await refresh(true);});
 }
 async function voidSample(){await action(async()=>{const response=await ElMessageBox.prompt(uiText('填写作废原因。原收样、T0和测试历史保留，后续需采用有效样品。'),uiText('作废样品'),{inputValidator:v=>!!v?.trim()||uiText('请填写原因')});await command('round_void',{roundId:activeSampleId.value,reason:response.value});dirty.value=false;await refresh(true);});}
+type CostOption=NonNullable<ProductResearchDetail['unitCostOptions']>[number];
+const costOptionKey=(cost:CostOption)=>cost.key||`${cost.costScopeId||''}:${cost.id}`;
+function eligibleCostOptions(phones:number[],refs:{type:string;id:number}[]){
+ const scopes=(workflow.value.costScopes||[]) as {id:string;inactive?:boolean;phoneModelIds:number[]}[];
+ return detail.value?.unitCostOptions?.filter(cost=>!cost.voidReason&&!cost.scopeInactive&&(!cost.costScopeId||scopes.some(scope=>scope.id===cost.costScopeId&&!scope.inactive&&(scope.phoneModelIds||[]).some(phone=>phones.includes(phone))))&&((confirmedPlan.value.method==='direct'&&cost.basisType==='supplier_quote')||refs.some(ref=>ref.type==='bom'&&ref.id===cost.bomId)))||[];
+}
+const releaseCostKeys=computed<string[]>({get:()=>release.unitCostKeys?.length?release.unitCostKeys:release.unitCostVersionId?[`:${release.unitCostVersionId}`]:[],set:(keys)=>{
+ const added=keys.find(key=>!releaseCostKeys.value.includes(key));
+ const selected=added?.startsWith(':')?[added]:keys.filter(key=>!key.startsWith(':')&&(!added||key.slice(0,key.lastIndexOf(':'))!==added.slice(0,added.lastIndexOf(':'))||key===added));
+ release.unitCostVersionId=selected[0]?.startsWith(':')?Number(selected[0].slice(1)):null;release.unitCostKeys=release.unitCostVersionId?[]:selected;
+}});
+const releaseAvailableKeys=computed(()=>new Set(eligibleCostOptions(release.phoneModelIds||[],materialReferences(keys.value)).map(costOptionKey)));
+const releaseCostOptions=computed(()=>detail.value?.unitCostOptions?.filter(cost=>releaseAvailableKeys.value.has(costOptionKey(cost))||releaseCostKeys.value.includes(costOptionKey(cost)))||[]);
 function defaultReleaseBasis(){
  const pilot=detail.value?.rounds.find(r=>r.roundId===detail.value?.reviewGates?.find(g=>g.gate==='pilot'&&g.status==='passed')?.recordId);
- const refs=pilot?.references||inheritReferences();
- const costs=detail.value?.unitCostOptions?.filter(v=>!v.voidReason&&((confirmedPlan.value.method==='direct'&&v.basisType==='supplier_quote')||refs.some(r=>r.type==='bom'&&r.id===v.bomId)))||[];
- return {pilotRoundId:pilot?.roundId||null,unitCostVersionId:costs.length===1?costs[0]?.id:null,references:refs};
+ const refs=pilot?.references||inheritReferences(),costs=eligibleCostOptions(pilot?.details?.phoneModelIds||effectivePhones.value,refs),only=costs.length===1?costs[0]:undefined;
+ return {pilotRoundId:pilot?.roundId||null,unitCostVersionId:only&&!only.costScopeId?only.id:null,unitCostKeys:only?.costScopeId?[costOptionKey(only)]:[],references:refs};
 }
 function releasePilotChanged(value:number){
  const pilot=detail.value?.rounds.find(r=>r.roundId===value);if(!pilot)return;
@@ -1950,7 +1962,7 @@ function resultLabel(value: string) {
                     ><el-date-picker
                       v-model="release.confirmationDate"
                       value-format="YYYY-MM-DD" /></el-form-item
-                  ><div class="field-grid"><el-form-item data-readiness-target="release-scope" :label='uiText("定型适配范围")'><SharedCompatiblePhoneSelector v-model="release.phoneModelIds" :members="phones" :allowed-ids="effectivePhones" :aria-label='uiText("定型适配范围")'/></el-form-item><el-form-item data-readiness-target="release-pilot" :label='uiText("采用试产评审")'><el-select v-model="release.pilotRoundId" @change="releasePilotChanged" :placeholder='uiText("选择本方案通过的试产")'><el-option v-for="r in detail.rounds.filter(r=>r.kind==='pilot'&&r.status==='confirmed'&&r.result==='passed'&&!r.voided)" :key="r.roundId" :value="r.roundId" :label="`${r.title} · P${r.roundNo}`"/></el-select></el-form-item><el-form-item data-readiness-target="release-cost" :label='uiText("采用单件成本版本")'><el-select v-model="release.unitCostVersionId" :placeholder='uiText("选择已确认成本版本")'><el-option v-for="v in detail.unitCostOptions?.filter(v=>!v.voidReason)||[]" :key="v.id" :value="v.id" :label="uiText('C{value0} · {value1} · {value2}',{value0:(v.id),value1:(v.title),value2:(v.bomVersion||'供方报价依据')})"/></el-select></el-form-item></div><section class="field-section" ><h4>{{ uiText("确认样与交接说明") }}</h4><div class="field-grid">
+                  ><div class="field-grid"><el-form-item data-readiness-target="release-scope" :label='uiText("定型适配范围")'><SharedCompatiblePhoneSelector v-model="release.phoneModelIds" :members="phones" :allowed-ids="effectivePhones" :aria-label='uiText("定型适配范围")'/></el-form-item><el-form-item data-readiness-target="release-pilot" :label='uiText("采用试产评审")'><el-select v-model="release.pilotRoundId" @change="releasePilotChanged" :placeholder='uiText("选择本方案通过的试产")'><el-option v-for="r in detail.rounds.filter(r=>r.kind==='pilot'&&r.status==='confirmed'&&r.result==='passed'&&!r.voided)" :key="r.roundId" :value="r.roundId" :label="`${r.title} · P${r.roundNo}`"/></el-select></el-form-item><el-form-item data-readiness-target="release-cost" :label='uiText("采用单件成本版本")'><el-select v-model="releaseCostKeys" multiple :placeholder='uiText("选择已确认成本版本")'><el-option v-for="cost in releaseCostOptions" :key="costOptionKey(cost)" :value="costOptionKey(cost)" :disabled="!releaseAvailableKeys.has(costOptionKey(cost))" :label="`${cost.costScopeId?cost.costScopeName+' · ':''}C${cost.id} · ${cost.title}`"/></el-select></el-form-item></div><section class="field-section" ><h4>{{ uiText("确认样与交接说明") }}</h4><div class="field-grid">
                         <el-form-item :label='uiText("确认样／供货说明")'
                           ><el-input
                             v-model="release.sampleNote"

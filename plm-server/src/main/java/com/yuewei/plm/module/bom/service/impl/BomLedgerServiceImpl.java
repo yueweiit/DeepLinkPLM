@@ -311,7 +311,8 @@ public class BomLedgerServiceImpl implements BomLedgerService {
                     .in(ProductBomCostSnapshot::getProductBomId, bomIds)
                     .in(ProductBomCostSnapshot::getProductBomRouteId, routeIds)
                     .in(ProductBomCostSnapshot::getStatus, List.of("current", "baseline"))
-                    .eq(ProductBomCostSnapshot::getDeletedFlag, 0)
+                    .isNull(ProductBomCostSnapshot::getCostScopeKey)
+            .eq(ProductBomCostSnapshot::getDeletedFlag, 0)
                     .orderByDesc(ProductBomCostSnapshot::getCalculatedAt, ProductBomCostSnapshot::getProductBomCostSnapshotId)))
                     .forEach(value -> costs.putIfAbsent(value.getProductBomRouteId(), toCostVo(value)));
             }

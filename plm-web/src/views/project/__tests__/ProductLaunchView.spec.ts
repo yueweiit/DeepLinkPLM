@@ -969,3 +969,18 @@ describe('supplier business classification in mold work',()=>{
   vi.mocked(getResearchOwnerOptions).mockResolvedValue({owners:[],canSelectSupplier:true,suppliers:[{supplierCode:'PARTNER',supplierName:'合作公司',businessCategories:['partner_selection']}]});await launch(current(1));expect(wrapper.get('[data-readiness-target="supplier"]').findAllComponents(ElOption)).toHaveLength(0);expect(wrapper.text()).toContain('暂无已分类的开模供应商，请在供应商资料中设置业务分类。');
  });
 });
+
+describe('legacy costs remain available when only an unrelated development group is added',()=>{
+ it.each([true,false])('retains or defaults legacy C8 for the Pro batch with saved draft=%s',async(saved)=>{
+  const d=current(7),duo='11111111-1111-4111-8111-111111111111';d.workflow.plan={...d.workflow.plan,method:'direct',needsMold:false};d.workflow.planDraft={...d.workflow.plan};
+  d.workflow.costScopes=[{id:duo,name:'Duo',phoneModelIds:[99]}];d.unitCostOptions=[{id:8,title:'历史成本',basisType:'supplier_quote'},{id:9,title:'Duo成本',basisType:'supplier_quote',costScopeId:duo,costScopeName:'Duo',key:duo+':9'}];
+  if(saved)d.workflow.releaseDraft={phoneModelIds:[1],unitCostVersionId:8};await launch(d);
+  const field=wrapper.get('[data-readiness-target="release-cost"]'),select=field.getComponent(ElSelect);expect(select.props('multiple')).toBe(true);expect(select.props('modelValue')).toEqual([':8']);await select.get('.el-select__wrapper').trigger('click');await flushPromises();expect(select.findAllComponents(ElOption).map(option=>option.props('value'))).toEqual([':8']);expect(researchAction).not.toHaveBeenCalled();
+ })
+})
+
+it('adopts only the chosen specification and BOM when another group serves the same phone',async()=>{
+ const d=current(7),large='11111111-1111-4111-8111-111111111111',precise='22222222-2222-4222-8222-222222222222';d.workflow.costScopes=[{id:large,name:'大孔',phoneModelIds:[1]},{id:precise,name:'精孔',phoneModelIds:[1]}];
+ d.materials.push({type:'bom',id:31,name:'大孔BOM',versionNo:'B1',status:'released'},{type:'bom',id:32,name:'精孔BOM',versionNo:'B1',status:'released'});d.workflow.releaseDraft={phoneModelIds:[1],references:[{type:'bom',id:31}],unitCostKeys:[large+':1']};d.unitCostOptions=[{id:1,title:'大孔成本',bomId:31,costScopeId:large,costScopeName:'大孔',key:large+':1'},{id:2,title:'精孔成本',bomId:32,costScopeId:precise,costScopeName:'精孔',key:precise+':2'}];await launch(d);
+ const select=wrapper.get('[data-readiness-target="release-cost"]').getComponent(ElSelect);expect(select.props('modelValue')).toEqual([large+':1']);await select.get('.el-select__wrapper').trigger('click');await flushPromises();expect(select.findAllComponents(ElOption).map(option=>option.props('value'))).toEqual([large+':1']);expect(researchAction).not.toHaveBeenCalled();
+})

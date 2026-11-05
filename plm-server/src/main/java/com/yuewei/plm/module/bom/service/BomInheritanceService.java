@@ -149,7 +149,8 @@ public class BomInheritanceService {
                 new LambdaQueryWrapper<ProductBomCostSnapshot>()
                     .eq(ProductBomCostSnapshot::getProductBomRouteId, sourceRoute.getProductBomRouteId())
                     .eq(ProductBomCostSnapshot::getStatus, "current")
-                    .eq(ProductBomCostSnapshot::getDeletedFlag, 0)
+                    .isNull(ProductBomCostSnapshot::getCostScopeKey)
+            .eq(ProductBomCostSnapshot::getDeletedFlag, 0)
             );
             if (sourceCosts != null) {
                 sourceCosts.forEach(sourceCost -> costRepository.insert(copyCost(sourceCost, targetBom, targetRoute, now)));

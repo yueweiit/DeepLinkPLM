@@ -201,14 +201,18 @@ public class ProductBomWorkflowService {
     @Transactional
     public ProductBomCostSnapshot recordReviewedUnitCost(long productId,long bomId,long routeId,String currency,
         BomCostCalculator.Result value,String sourceJson) {
+        return recordReviewedUnitCost(productId,bomId,routeId,currency,value,sourceJson,null);
+    }
+    public ProductBomCostSnapshot recordReviewedUnitCost(long productId,long bomId,long routeId,String currency,
+        BomCostCalculator.Result value,String sourceJson,String costScopeKey) {
         access.requireFinanceWrite();access.requireProduct(productId);
         ProductBom bom=bomRepository.selectById(bomId);
         if(bom==null||Integer.valueOf(1).equals(bom.getDeletedFlag())||!Objects.equals(bom.getProductId(),productId))throw validation("BOM不属于本新品项目");
         if(currency==null||!currency.matches("[A-Z]{3}"))throw validation("请明确核算币种");
         if(bom.getCurrencyCode()!=null&&!bom.getCurrencyCode().isBlank()&&!currency.equalsIgnoreCase(bom.getCurrencyCode()))throw validation("核算币种与所选BOM币种不一致");
         ProductBomRoute route=activeRoutes(bomId).stream().filter(r->r.getProductBomRouteId()==routeId).findFirst().orElseThrow(()->validation("BOM工艺路线不存在"));
-        archiveCurrentCost(bomId,routeId);
-        ProductBomCostSnapshot snapshot=snapshot(bom,route,value);snapshot.setCurrencyCode(currency);snapshot.setSourceSnapshotJson(sourceJson);costRepository.insert(snapshot);return snapshot;
+        archiveCurrentCost(bomId,routeId,costScopeKey);
+        ProductBomCostSnapshot snapshot=snapshot(bom,route,value);snapshot.setCostScopeKey(costScopeKey);snapshot.setCurrencyCode(currency);snapshot.setSourceSnapshotJson(sourceJson);costRepository.insert(snapshot);return snapshot;
     }
 
     @Transactional
@@ -497,7 +501,11 @@ public class ProductBomWorkflowService {
     }
 
     private List<ProductBomCostSnapshot> currentCosts(Long bomId, Long routeId) {
+        return currentCosts(bomId,routeId,null);
+    }
+    private List<ProductBomCostSnapshot> currentCosts(Long bomId, Long routeId,String costScopeKey) {
         return safeList(costRepository.selectList(new LambdaQueryWrapper<ProductBomCostSnapshot>()
+            .eq(costScopeKey!=null,ProductBomCostSnapshot::getCostScopeKey,costScopeKey).isNull(costScopeKey==null,ProductBomCostSnapshot::getCostScopeKey)
             .eq(ProductBomCostSnapshot::getProductBomId, bomId)
             .eq(ProductBomCostSnapshot::getProductBomRouteId, routeId)
             .eq(ProductBomCostSnapshot::getStatus, "current")
@@ -538,7 +546,10 @@ public class ProductBomWorkflowService {
     }
 
     private void archiveCurrentCost(Long bomId, Long routeId) {
-        List<ProductBomCostSnapshot> existing = currentCosts(bomId, routeId);
+        archiveCurrentCost(bomId,routeId,null);
+    }
+    private void archiveCurrentCost(Long bomId,Long routeId,String costScopeKey) {
+        List<ProductBomCostSnapshot> existing = currentCosts(bomId, routeId,costScopeKey);
         existing.forEach(snapshot -> {
             snapshot.setStatus("history");
             touch(snapshot);

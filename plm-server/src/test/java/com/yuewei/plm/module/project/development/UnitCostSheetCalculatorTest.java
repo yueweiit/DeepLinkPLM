@@ -37,7 +37,7 @@ class UnitCostSheetCalculatorTest {
         var input=source();assertThatThrownBy(()->calculator.requireConfirmable(calculator.calculate(input))).hasMessageContaining("统一");
         input.put("taxBasis","net");var rows=LaunchReviewWorkflow.records(input.get("rows"));rows.forEach(r->{r.put("taxIncluded",false);r.put("taxRate",0);});input.put("rows",rows);
         assertThatThrownBy(()->calculator.requireConfirmable(calculator.calculate(input))).hasMessageContaining("汇率依据日期");input.put("exchangeRateDate","2026-10-16");assertThatCode(()->calculator.requireConfirmable(calculator.calculate(input))).doesNotThrowAnyException();
-        rows.get(0).put("warning","金额待核对");assertThatThrownBy(()->calculator.requireConfirmable(calculator.calculate(input))).hasMessageContaining("待核对");
+        rows.get(0).put("warning","金额待核对");assertThatThrownBy(()->calculator.requireConfirmable(calculator.calculate(input))).hasMessageContaining("待核对");rows.get(0).remove("warning");rows.get(0).put("investmentAllocationPending",true);assertThatThrownBy(()->calculator.requireConfirmable(calculator.calculate(input))).hasMessageContaining("待核对");
     }
     @Test void quantityAndLossMustBothBeExplicitAndIdsCannotDuplicate(){var input=source();var rows=LaunchReviewWorkflow.records(input.get("rows"));rows.get(0).put("mode","usage");rows.get(0).put("quantity",1);input.put("rows",rows);assertThat(totals(calculator.calculate(input)).get("base")).isNull();rows.get(0).put("lossPct",0);assertThat(totals(calculator.calculate(input)).get("base")).isNotNull();rows.get(1).put("id",rows.get(0).get("id"));assertThatThrownBy(()->calculator.calculate(input)).hasMessageContaining("重复");}
     @Test void missingSourceCurrencyStaysAnIncompleteDraftInsteadOfBecomingCny(){var input=source();input.remove("currency");var result=calculator.calculate(input);assertThat(result.get("currency")).isEqualTo("");assertThat(result.get("complete")).isEqualTo(false);assertThat(totals(result).get("base")).isNull();assertThat(result.get("missing").toString()).contains("币种待确认");assertThatThrownBy(()->calculator.requireConfirmable(result)).hasMessageContaining("待补");}
@@ -48,4 +48,20 @@ class UnitCostSheetCalculatorTest {
         assertThat(LaunchReviewWorkflow.records(sheet.get("rows")).get(0).get("displayCost")).isNull();
     }
 
+    @Test void sourceOutlayIsRecalculatedSeparatelyAndNeverAddedToUnitCost(){
+        var input=source();var base=totals(calculator.calculate(input)).get("base");
+        input.put("sourceOutlay",Map.of("currency","CNY","scope","合成批量采购估算","rows",List.of(Map.of("name","材料","unitPrice",new BigDecimal("2.5"),"quantity",4,"transportAmount",3,"purchaseAmount",999,"combinedAmount",999),Map.of("name","共用件","unitPrice",10,"quantity",2,"transportAmount",5))));
+        var result=calculator.calculate(input);var outlay=DevelopmentWorkflowStore.map(result.get("sourceOutlay"));
+        assertThat(outlay).containsEntry("missingCount",0);assertThat((BigDecimal)outlay.get("purchaseTotal")).isEqualByComparingTo("30");assertThat((BigDecimal)outlay.get("transportTotal")).isEqualByComparingTo("8");assertThat((BigDecimal)outlay.get("knownTotal")).isEqualByComparingTo("38");assertThat(totals(result).get("base")).isEqualTo(base);
+        assertThat((BigDecimal)LaunchReviewWorkflow.records(outlay.get("rows")).get(0).get("combinedAmount")).isEqualByComparingTo("13");
+        var store=new DevelopmentWorkflowStore(org.mockito.Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class),new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules());
+        var reopened=calculator.calculate(DevelopmentWorkflowStore.map(store.read(store.encode(result))));assertThat((BigDecimal)DevelopmentWorkflowStore.map(reopened.get("sourceOutlay")).get("knownTotal")).isEqualByComparingTo("38");
+    }
+    @Test void unknownOutlayComponentsRemainUnknownAndNegativeOrFormulaInputsAreRejected(){
+        var input=source();var row=new LinkedHashMap<String,Object>();row.put("name","未知材料");row.put("unitPrice",null);row.put("quantity",2);row.put("transportAmount",null);
+        input.put("sourceOutlay",Map.of("currency","CNY","rows",List.of(row)));
+        var outlay=DevelopmentWorkflowStore.map(calculator.calculate(input).get("sourceOutlay"));assertThat(outlay).containsEntry("missingCount",1).containsEntry("knownTotal",null).containsEntry("purchaseTotal",null).containsEntry("transportTotal",null);
+        row.put("unitPrice",0);row.put("transportAmount",0);outlay=DevelopmentWorkflowStore.map(calculator.calculate(input).get("sourceOutlay"));assertThat((BigDecimal)outlay.get("knownTotal")).isEqualByComparingTo("0");assertThat(outlay).containsEntry("missingCount",0);
+        row.put("unitPrice",-1);assertThatThrownBy(()->calculator.calculate(input)).hasMessageContaining("非负数");row.put("unitPrice","=2+3");assertThatThrownBy(()->calculator.calculate(input)).hasMessageContaining("有效数值");
+    }
 }

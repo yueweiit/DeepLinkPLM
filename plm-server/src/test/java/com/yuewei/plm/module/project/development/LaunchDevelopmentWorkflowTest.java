@@ -30,7 +30,7 @@ class LaunchDevelopmentWorkflowTest {
         var original=Map.of("kind","mold_node","data",Map.of("sample",Map.of("quoteEventId",9,"adoptedQuote",Map.of("amount",120,"conditions","含税报价"),"details",Map.of("depositNote","已收100","actualResult","试装通过"))));
         String masked=new ObjectMapper().valueToTree(FinancialSnapshotRedaction.withoutMoney(original)).toString();
         assertThat(masked).doesNotContain("含税报价","已收100","amount").contains("actualResult","试装通过","quoteEventId");
-        assertThat(original.toString()).contains("含税报价","已收100");
+        assertThat(original.toString()).contains("含税报价","已收100");assertThat(FinancialSnapshotRedaction.withoutMoney(Map.of("costScopes",List.of(Map.of("unitCostDraft",Map.of("rows",List.of(Map.of("unitPrice",777)),"sourceOutlay",Map.of("knownTotal",999)))))).toString()).doesNotContain("777","999","sourceOutlay");
         assertThatCode(()->FinancialSnapshotRedaction.withoutMoney(Map.of("basis",Map.of("node","testing")))) .doesNotThrowAnyException();
     }
     @Test void canonicalMoldHistoryDoesNotExposeAnotherProjectsPrivateEvidence(){

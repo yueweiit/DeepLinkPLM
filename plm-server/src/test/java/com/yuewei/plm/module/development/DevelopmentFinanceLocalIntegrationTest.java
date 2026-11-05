@@ -46,6 +46,26 @@ class DevelopmentFinanceLocalIntegrationTest {
     long budget(String kind,String currency){return ((Number)service.createBudget(new CreateBudget(kind,"Finance "+UUID.randomUUID(),product,kind.equals("mold")?item:null,null,null,currency),null).get("budgetId")).longValue();}
     long expense(String currency){return ((Number)service.createExpense(new CreateExpense("Test cost",product,item,null,null,currency),null).get("expenseId")).longValue();}
     Result patch(String entity,long id,Map<String,Object> values,String reason){var row=service.detail(entity,id);List<Change> changes=values.entrySet().stream().map(e->new Change(e.getKey(),json.valueToTree(row.get(e.getKey())),json.valueToTree(e.getValue()))).toList();return service.save(entity,new Batch(List.of(new Patch(id,changes,reason))),null).get(0);}
+    @Test void independentCostScopesFilterWholeLedgersAndKeepSharedAndLegacyNullDistinct() throws Exception {
+        String a=UUID.randomUUID().toString(),b=UUID.randomUUID().toString();
+        String state=json.writeValueAsString(Map.of("costScopes",List.of(Map.of("id",a,"name","Pro"),Map.of("id",b,"name","Pro Max"))));
+        jdbc.update("insert into plm_product_development_state(product_id,data) values(?,?::jsonb) on conflict(product_id) do update set data=excluded.data",product,state);
+        var ids=new ArrayList<Long>();int amount=100;
+        for(String key:List.of(a,b,"shared")){
+            long id=((Number)service.createBudget(new CreateBudget("platform","Scoped",product,null,null,null,"CNY","mold",key),null).get("budgetId")).longValue();
+            assertThat(patch("budget",id,Map.of("budgetAmount",key.equals("shared")?50:amount),"合成分组预算").status()).isEqualTo("saved");ids.add(id);amount+=100;
+        }
+        long old=((Number)service.createBudget(new CreateBudget("platform","Old null scope",product,null,null,null,"CNY","mold"),null).get("budgetId")).longValue();patch("budget",old,Map.of("budgetAmount",23),"旧空归属保持");
+        var q=new Query();q.setProjectId(product);q.setCostScopeKey(a);q.setSize(1);assertThat((List<?>)investment("budget",q).get("rows")).hasSize(1);assertThat((BigDecimal)investmentGroups("budget",q).get(0).get("knownTotal")).isEqualByComparingTo("100");
+        q.setCostScopeKey(b);assertThat((BigDecimal)investmentGroups("budget",q).get(0).get("knownTotal")).isEqualByComparingTo("200");q.setCostScopeKey("shared");assertThat((BigDecimal)investmentGroups("budget",q).get(0).get("knownTotal")).isEqualByComparingTo("50");q.setCostScopeKey("unassigned");assertThat((BigDecimal)investmentGroups("budget",q).get(0).get("knownTotal")).isEqualByComparingTo("23");
+        q.setCostScopeKey(null);assertThat((BigDecimal)investmentGroups("budget",q).get(0).get("knownTotal")).isEqualByComparingTo("373");
+        // Savepoints preserve the outer rollback fixture after checking the real unique index.
+        for(String key:Arrays.asList(a,null)) {var inner=tx.getTransaction(new DefaultTransactionDefinition(org.springframework.transaction.TransactionDefinition.PROPAGATION_NESTED));try{assertThatThrownBy(()->service.createBudget(new CreateBudget("platform","Duplicate",product,null,null,null,"CNY","mold",key),null)).hasMessageContaining("重复");}finally{tx.rollback(inner);}}
+        long e=((Number)service.createExpense(new CreateExpense("Scoped expense",product,null,null,ids.get(0),"CNY",product,null,a),null).get("expenseId")).longValue();assertThat(patch("expense",e,Map.of("costScopeKey",b),"不可跨组预算").status()).isEqualTo("invalid");
+        long other=jdbc.queryForObject("select product_id from plm_product where product_type='product_line' and product_id<>? and deleted_flag=0 limit 1",Long.class,product);
+        assertThat(patch("expense",e,Map.of("productLineId",other),"不可跨项目").status()).isEqualTo("invalid");assertThat(service.detail("expense",e)).containsEntry("actualAmount",null).containsEntry("costScopeKey",a);
+        assertThatThrownBy(()->service.createExpense(new CreateExpense("Foreign group",other,null,null,null,"CNY",product,null,a),null)).hasMessageContaining("跨项目");
+    }
     @Test void nullableAmountsVersionsAndRealActorAreAudited() {
         long id=budget("mold","CNY");assertThat(service.detail("budget",id).get("moldCost")).isNull();assertThat(service.detail("budget",id).get("transportRate")).isEqualTo(new BigDecimal("74.6800"));
         assertThat(patch("budget",id,Map.of("moldCost",0),"").status()).isEqualTo("invalid");assertThat(patch("budget",id,Map.of("moldCost",0),"确认零值").status()).isEqualTo("saved");assertThat(service.detail("budget",id)).containsEntry("versionNo",2);assertThat(service.history("budget",id,1,20).getContent()).anySatisfy(r->assertThat(r).containsEntry("actorName",admin.username()).containsEntry("reason","确认零值"));

@@ -18,7 +18,7 @@ const sourceDraft = (): Sheet => ({ title: '来源核算草稿', currency: '', t
     sourceQuantity: 0.00000001, sourceOutputQty: 10, warning: '请核对单件用量' }] })
 const simpleDraft = (): Sheet => ({ title: '测试核算', currency: 'CNY', taxBasis: 'net', references: [], totals: { base: null },
   rows: [0, 1].map(index => ({ id: `row-${index}`, category: 'material', name: `材料${index + 1}`, mode: 'unit', unitPrice: null, taxIncluded: null, taxRate: null })) })
-async function start(permissions = ['finance:read', 'finance:write'], draft = sourceDraft(), workflow: Record<string, unknown> = {},embedded=false) {
+async function start(permissions = ['finance:read', 'finance:write'], draft = sourceDraft(), workflow: Record<string, unknown> = {},embedded=false,costScopeId='') {
   const pinia = createPinia(); setActivePinia(pinia); useUserStore().permissions = permissions
   const detail = ref({ productId: 42, status: 'developing', canWrite: true, workflow: { version: 3, unitCostDraft: clone(draft), ...workflow }, materials: [], bomRoutes: [], events: [] } as unknown as ProductResearchDetail)
   vi.mocked(previewUnitCost).mockResolvedValue(clone(draft))
@@ -30,7 +30,7 @@ async function start(permissions = ['finance:read', 'finance:write'], draft = so
     detail.value = next; return next
   })
   const editing=ref(false)
-  const Host = defineComponent({ setup: () => () => h(UnitCostSheet, { detail: detail.value,embedded,editing:editing.value }) })
+  const Host = defineComponent({ setup: () => () => h(UnitCostSheet, { detail: detail.value,embedded,editing:editing.value,costScopeId }) })
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: Host }, { path: '/other', component: { template: '<p>other</p>' } }] })
   await router.push('/'); await router.isReady()
   wrapper = mount(RouterView, { attachTo: document.body, global: { plugins: [pinia, router, ElementPlus] } }); await flushPromises()
@@ -356,3 +356,22 @@ it('explains that a BOM replacement retains column names and rebuilds original v
 })
 
 it('uses the latest confirmed version in the full cost page when there is no draft, without duplicating save controls',async()=>{const confirmed={...simpleDraft(),id:5,status:'confirmed' as const,totals:{manufacturing:2,base:3}};const {component}=await start(undefined,simpleDraft(),{unitCostDraft:undefined,unitCostVersions:[confirmed]},true);expect((component.vm as any).overview).toMatchObject({selected:'5',manufacturing:2,base:3});expect(component.find('.cost-overview').exists()).toBe(false);expect(component.findAll('button').some(b=>b.text()==='保存成本草稿')).toBe(false)})
+
+it('edits an original estimate in place and saves its independent divisor and batch source in the same draft',async()=>{
+ const draft=simpleDraft();draft.currency='CNY';draft.taxBasis='source';draft.rows=[{id:'original-core',name:'合成原模仁',category:'tooling',mode:'divide',unitPrice:900,allocationQty:300,investmentFallback:true}];draft.investmentOriginalRows=clone(draft.rows);draft.sourceOutlay={currency:'CNY',scope:'合成批量估算',rows:[{name:'材料',unitPrice:2,quantity:100,transportAmount:20}]}
+ const {component,editing}=await start(undefined,draft,{},true);editing.value=true;await flushPromises();component.vm.editInvestmentEstimate('original-core','950');await component.vm.saveProjectCosts();await flushPromises()
+ expect(researchAction).toHaveBeenCalledWith(42,'unit_cost_save',3,expect.objectContaining({rows:[expect.objectContaining({id:'original-core',unitPrice:950,allocationQty:300})],investmentOriginalRows:[expect.objectContaining({unitPrice:900})],sourceOutlay:expect.objectContaining({scope:'合成批量估算'})}));expect(wrapper.text()).not.toContain('模具及研发费用请在上方编辑')
+})
+
+it('saves and reopens the selected cost group without reading a sibling or the project sheet',async()=>{
+  const a='11111111-1111-4111-8111-111111111111',b='22222222-2222-4222-8222-222222222222'
+  const draft=simpleDraft();draft.rows[0].unitPrice=5
+  const {component,editing}=await start(undefined,draft,{},true,a);editing.value=true;await flushPromises()
+  const other={...simpleDraft(),title:'Pro Max',rows:[{...draft.rows[0],unitPrice:7}]}
+  vi.mocked(researchAction).mockResolvedValueOnce({productId:42,workflow:{version:4,unitCostDraft:{...draft,title:'项目原核算'},costScopes:[{id:a,name:'Pro',phoneModelIds:[1],unitCostDraft:{...draft,title:'Pro已保存'}},{id:b,name:'Pro Max',phoneModelIds:[2],unitCostDraft:other}]}} as any)
+  await cell(0,'unitPrice').setValue('6');await component.vm.saveProjectCosts();await flushPromises()
+  expect(researchAction).toHaveBeenCalledWith(42,'unit_cost_save',3,expect.objectContaining({costScopeId:a,rows:[expect.objectContaining({unitPrice:6}),expect.anything()]}))
+  expect(wrapper.get('[aria-label="核算名称"]').element).toHaveProperty('value','Pro已保存')
+  expect((cell(0,'unitPrice').element as HTMLInputElement).value).toBe('5')
+  expect(wrapper.text()).not.toContain('Pro Max')
+})

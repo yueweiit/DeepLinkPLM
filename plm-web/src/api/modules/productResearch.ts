@@ -126,7 +126,7 @@ export interface ProductResearchDetail extends DevelopmentProfileInput {
   release: DevelopmentRelease | null;
   reviewGates?: {gate:string;status:string;reason:string;recordId?:number}[];
   bomRoutes?: { routeId:number; bomId:number; processId:number; name:string }[];
-  unitCostOptions?: { id:number; title:string; bomId:number; bomVersion:string; basisType?:'bom'|'supplier_quote'; confirmedAt:string; confirmedBy:string; voidReason?:string }[];
+  unitCostOptions?: { id:number;key?:string;costScopeId?:string;costScopeName?:string;scopeInactive?:boolean; title:string; bomId:number; bomVersion:string; basisType?:'bom'|'supplier_quote'; confirmedAt:string; confirmedBy:string; voidReason?:string }[];
 }
 
 export interface SupplierFeedbackSummary {
@@ -307,6 +307,7 @@ export interface ReleaseDraft {
   documentationReason?: string;
   responsibleUserId?: number;
   unitCostVersionId?: number | null;
+  unitCostKeys?:string[];
 }
 export interface ResearchWorkflow {
   version: number;
@@ -369,10 +370,10 @@ export type WorkflowAction =
   | "start_revision";
 export const researchAction = async (
   id: number,
-  action: WorkflowAction,
+  action: WorkflowAction|'unit_cost_group_save'|'unit_cost_group_delete'|'unit_cost_group_status',
   version: number,
   data: object,
-  requestId = crypto.randomUUID(),
+  requestId:string = crypto.randomUUID(),
 ) =>
   unwrapResponse<ProductResearchDetail>(
     await request.post(`/product-research/${id}/workflow`, {
@@ -409,6 +410,13 @@ export interface UnitCostRow {
   sourceQuantity?:number|string|null;sourceOutputQty?:number|string|null;
   extraValues?:Record<string,string|number|null>;
   investmentCategories?:string[];
+  investmentFallback?:boolean;investmentAllocationPending?:boolean;
+}
+export interface SourceOutlay {
+  currency:string;scope:string;sourceFileName?:string;sourceSheet?:string;sourceHash?:string;
+  sourceReference?:MaterialReference;sourceVersion?:string;
+  rows:{name:string;unitPrice:number|null;quantity:number|null;transportAmount:number|null;sourceCell?:string;notes?:string;purchaseAmount?:number|null;combinedAmount?:number|null}[];
+  purchaseTotal?:number|null;transportTotal?:number|null;knownTotal?:number|null;missingCount?:number;
 }
 export interface UnitCostSheet {
   title:string;currency:string;displayCurrency?:string;exchangeRate?:number|null;exchangeRateDate?:string|null;
@@ -420,7 +428,11 @@ export interface UnitCostSheet {
   basisType?:'bom'|'supplier_quote';quoteEventId?:number|null;quoteUnitNote?:string;
   extraColumns?:UnitCostExtraColumn[];visibleOptionalColumns?:UnitCostOptionalColumn[];
   useProjectInvestment?:boolean;investmentOriginalRows?:UnitCostRow[];investmentBasis?:Record<string,unknown>[];
+  sourceOutlay?:SourceOutlay;
+  costScopeId?:string;costScopeName?:string;costScopePhoneModelIds?:number[];
 }
 
 export async function getResearchReferencePage(query:PhoneObjectQuery):Promise<PhoneObjectPage<PhoneObjectOption>> {return unwrapResponse(await request.get('/product-research/reference-options/page',{params:query}))}
 export async function getResearchReferencePhones(query:PhoneObjectQuery):Promise<PhoneObjectPage<ObjectPhoneGroup> & {unlinkedCount:number}> {return unwrapResponse(await request.get('/product-research/reference-options/phones',{params:query}))}
+
+export interface DevelopmentCostScope {id:string;name:string;phoneModelIds:number[];inactive?:boolean;applicationId?:number;specKey?:string;unitCostDraft?:UnitCostSheet;unitCostVersions?:UnitCostSheet[]}

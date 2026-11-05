@@ -52,7 +52,7 @@ public class ProductResearchBusinessService {
             (s.data->'plan'->>'planVersion')::int as "currentPlanVersion",s.data->'plan'->>'launchDate' as "launchDate"
             """;
         if(records)select+=",r.data::text as \"recordJson\"";
-        else select+=",(s.data->'unitCostDraft' is not null) as \"hasUnitCostDraft\",jsonb_array_length(coalesce(s.data->'unitCostVersions','[]'::jsonb)) as \"unitCostVersionCount\"";
+        else select+=",(s.data->'unitCostDraft' is not null or exists(select 1 from jsonb_array_elements(coalesce(s.data->'costScopes','[]'::jsonb)) cs where cs->'unitCostDraft' is not null)) as \"hasUnitCostDraft\",(jsonb_array_length(coalesce(s.data->'unitCostVersions','[]'::jsonb))+(select coalesce(sum(jsonb_array_length(coalesce(cs->'unitCostVersions','[]'::jsonb))),0) from jsonb_array_elements(coalesce(s.data->'costScopes','[]'::jsonb)) cs)) as \"unitCostVersionCount\"";
         var pageArgs=new ArrayList<>(args);pageArgs.add(limit);pageArgs.add((current-1L)*limit);
         var rows=jdbc.queryForList(select+from+where+" order by p.product_id desc"+(records?",(r.data->>'id')::bigint desc":"")+" limit ? offset ?",pageArgs.toArray());
         for(var row:rows) {

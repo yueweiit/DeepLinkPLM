@@ -30,6 +30,7 @@ public class ProductBomCostSnapshot extends BaseEntity {
     private BigDecimal otherCost;
     private BigDecimal totalCost;
     private String currencyCode;
+    private String costScopeKey;
     @TableField(typeHandler = PostgresJsonbStringTypeHandler.class)
     private String sourceSnapshotJson;
     private LocalDateTime calculatedAt;

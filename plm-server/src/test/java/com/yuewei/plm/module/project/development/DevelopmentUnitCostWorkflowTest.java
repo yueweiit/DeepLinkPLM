@@ -78,6 +78,37 @@ class DevelopmentUnitCostWorkflowTest {
     private Map<String,Object> costs(String currency,Map<String,Integer> amounts){
         return Map.of("investment",Map.of("rows",List.of(),"currencyGroups",List.of(Map.of("currency",currency,"categories",amounts.entrySet().stream().map(e->Map.<String,Object>of("category",e.getKey(),"knownTotal",e.getValue(),"missingCount",0)).toList()))));
     }
+    @Test void sourceEstimatesWithIndependentLifetimesSurviveEmptyFinancePreviewSaveAndReopen(){
+        var access=mock(PilotAccessService.class);var actor=mock(com.yuewei.plm.common.security.CurrentUser.class);when(access.actor()).thenReturn(actor);when(actor.displayName()).thenReturn("合成成本工程师");
+        var finance=mock(com.yuewei.plm.module.development.DevelopmentFinanceService.class);when(finance.summary(anyString(),any())).thenReturn(costs("CNY",Map.of()));
+        var store=new DevelopmentWorkflowStore(mock(JdbcTemplate.class),new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules());
+        var workflow=new DevelopmentUnitCostWorkflow(access,new UnitCostSheetCalculator(new BomCostCalculator()),mock(ProductBomWorkflowService.class),mock(JdbcTemplate.class),store,finance);
+        var input=new LinkedHashMap<String,Object>(Map.of("currency","CNY","taxBasis","source","useProjectInvestment",true,"rows",List.of(
+            Map.of("id","material","category","material","mode","unit","unitPrice",2),Map.of("id","process","category","process","mode","unit","unitPrice",1),
+            Map.of("id","core","name","模仁","category","tooling","mode","divide","unitPrice",900,"allocationQty",300),
+            Map.of("id","frame","name","共用模框","category","tooling","mode","divide","unitPrice",60,"allocationQty",600),
+            Map.of("id","base","name","共用模架","category","tooling","mode","divide","unitPrice",30,"allocationQty",1000),
+            Map.of("id","transport","category","tool_transport","mode","divide","unitPrice",90,"allocationQty",300),
+            Map.of("id","development","category","development","mode","unit","unitPrice",new BigDecimal("0.1")))));
+        var result=workflow.preview(20L,input);assertThat(LaunchReviewWorkflow.records(result.get("rows"))).hasSize(7);
+        assertThat((BigDecimal)DevelopmentWorkflowStore.map(result.get("totals")).get("base")).isEqualByComparingTo("6.53");
+        assertThat(LaunchReviewWorkflow.records(result.get("rows")).stream().filter(r->"tooling".equals(r.get("category"))).map(r->r.get("allocationQty"))).containsExactly(300,600,1000);
+        assertThat(input).doesNotContainKey("investmentOriginalRows");assertThat(LaunchReviewWorkflow.records(input.get("rows"))).noneSatisfy(r->assertThat(r).containsKey("investmentFallback"));
+        var service=mock(ProductDevelopmentService.class);when(service.snapshotReferences(anyLong(),anyList())).thenReturn(List.of());var state=new LinkedHashMap<String,Object>();workflow.action(20L,state,"unit_cost_save",result,service);
+        var reopened=workflow.preview(20L,DevelopmentWorkflowStore.map(store.read(store.encode(state.get("unitCostDraft")))));
+        assertThat(LaunchReviewWorkflow.records(reopened.get("rows"))).hasSize(7);assertThat(LaunchReviewWorkflow.records(reopened.get("investmentOriginalRows"))).hasSize(5);
+        assertThat((BigDecimal)DevelopmentWorkflowStore.map(reopened.get("totals")).get("base")).isEqualByComparingTo("6.53");verify(finance,never()).save(anyString(),any(),any());
+        var removed=new LinkedHashMap<>(reopened);removed.put("rows",LaunchReviewWorkflow.records(reopened.get("rows")).stream().filter(r->!"tooling".equals(r.get("category"))).toList());
+        var afterDelete=workflow.preview(20L,removed);assertThat(LaunchReviewWorkflow.records(afterDelete.get("rows"))).noneSatisfy(r->assertThat(r.get("id")).isIn("core","frame","base"));assertThat(DevelopmentWorkflowStore.map(afterDelete.get("totals")).get("base")).isNull();
+    }
+    @Test void anAggregateAmountDoesNotFlattenDifferentSourceDivisorsOrSilentlyClaimItWasAllocated(){
+        var finance=mock(com.yuewei.plm.module.development.DevelopmentFinanceService.class);when(finance.summary(eq("budget"),any())).thenReturn(costs("CNY",Map.of("mold",5000)));when(finance.summary(eq("expense"),any())).thenReturn(costs("CNY",Map.of()));
+        var workflow=new DevelopmentUnitCostWorkflow(mock(PilotAccessService.class),new UnitCostSheetCalculator(new BomCostCalculator()),mock(ProductBomWorkflowService.class),mock(JdbcTemplate.class),mock(DevelopmentWorkflowStore.class),finance);
+        var input=new LinkedHashMap<String,Object>(Map.of("currency","CNY","useProjectInvestment",true,"rows",List.of(Map.of("id","a","category","tooling","mode","divide","unitPrice",1000,"allocationQty",100),Map.of("id","b","category","tooling","mode","divide","unitPrice",200,"allocationQty",1000))));
+        var result=workflow.preview(20L,input);var tooling=LaunchReviewWorkflow.records(result.get("rows")).stream().filter(r->"tooling".equals(r.get("category"))).toList();
+        assertThat(tooling).hasSize(2).allSatisfy(r->assertThat(r).containsEntry("investmentAllocationPending",true));assertThat(result.get("warnings").toString()).contains("分摊范围待核对");
+        assertThat(tooling).extracting(r->r.get("unitPrice")).containsExactly(1000,200);
+    }
     @Test void linkedUnitCostsReadSavedProjectCostsOnceAndKeepOldRowsAsEvidence(){
         var access=mock(PilotAccessService.class);var finance=mock(com.yuewei.plm.module.development.DevelopmentFinanceService.class);
         when(finance.summary(eq("budget"),any())).thenReturn(costs("CNY",Map.of("mold",1000,"transport",100,"customs",20,"design",30,"sample",10,"other",0)));

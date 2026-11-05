@@ -299,7 +299,7 @@ public class ProductDevelopmentService {
               +(select count(*) from plm_project_cost_item where (product_line_id=? or product_id=?) and deleted_flag=0)
             """,Long.class,id,id,id,id,id,id,id,id,id,id);
         DevelopmentRules.require(downstream==0,"已有下游BOM、工艺、申请、费用依据或开发记录，不能删除，请保留档案并停止开发");
-        DevelopmentRules.require(LaunchReviewWorkflow.records(state.get("unitCostVersions")).isEmpty(),"已有已确认成本版本，不能删除新品档案");
+        DevelopmentRules.require(LaunchReviewWorkflow.records(state.get("unitCostVersions")).isEmpty()&&DevelopmentCostScopes.scopes(state).stream().allMatch(g->LaunchReviewWorkflow.records(g.get("unitCostVersions")).isEmpty()),"已有已确认成本版本，不能删除新品档案");
         audit(id,"PRODUCT_RESEARCH_DRAFT_DELETE",Map.of("productName",product.getProductName()));
         jdbc.update("update plm_product set deleted_flag=1,updated_at=now(),updated_by=? where product_id=?",access.actor().displayName(),id);
     }
@@ -524,6 +524,7 @@ public class ProductDevelopmentService {
                 if (file != null) {
                     var option = option("file", fileId, file.getOriginalFileName(), file.getVersionNo(), file.getStatus());
                     option.put("category", file.getFileCategory()); option.put("familyId", file.getFamilyId() == null ? fileId : file.getFamilyId());
+                    option.put("checksum",file.getChecksum());
                     option.put("attachment", AttachmentVO.from(file)); options.add(option);
                 }
             }
@@ -627,7 +628,7 @@ public class ProductDevelopmentService {
         DevelopmentRules.require(jdbc.queryForObject("select count(*) from sys_user where user_id=? and deleted_flag=0 and status='active'",Long.class,responsible)==1,"补齐责任人不存在或已停用");
         long packageNo=jdbc.queryForObject("select coalesce(max(package_no),0)+1 from plm_product_development_release where product_id=?",Long.class,id);
         var basis=new LinkedHashMap<String,Object>();basis.put("requirement",state.get("requirement"));basis.put("compatibleRequirementVersions",state.get("compatibleRequirementVersions"));basis.put("releaseDraft",draft);basis.put("revision",state.get("revision"));basis.put("plan",state.get("plan"));basis.put("sample",DevelopmentWorkflowStore.map(state.get("validationBasis")).get("sample"));basis.put("molds",DevelopmentWorkflowStore.map(state.get("validationBasis")).get("molds"));basis.put("stageEvidence",Map.of("design",DevelopmentWorkflowStore.map(state.get("stage1Basis")),"mold",DevelopmentWorkflowStore.map(state.get("stage2Basis")),"validation",DevelopmentWorkflowStore.map(state.get("validationBasis"))));basis.put("flow",product.getDevelopmentMode());
-        basis.put("reviews",state.get("reviewRecords"));basis.put("reviewSetup",state.get("reviewSetup"));basis.put("unitCostVersions",state.get("unitCostVersions"));basis.put("voidedRounds",state.get("voidedRounds"));basis.put("engineeringBasis",state.get("engineeringBasis"));
+        basis.put("reviews",state.get("reviewRecords"));basis.put("reviewSetup",state.get("reviewSetup"));basis.put("unitCostVersions",state.get("unitCostVersions"));basis.put("costScopes",state.get("costScopes"));basis.put("voidedRounds",state.get("voidedRounds"));basis.put("engineeringBasis",state.get("engineeringBasis"));
         basis.put("responsibleSnapshot",Map.of("userId",responsible,"name",jdbc.queryForObject("select coalesce(display_name,user_name,username) from sys_user where user_id=?",String.class,responsible)));
         Long releaseId=jdbc.queryForObject("""
             insert into plm_product_development_release(product_id,version_no,package_no,references_json,product_snapshot,

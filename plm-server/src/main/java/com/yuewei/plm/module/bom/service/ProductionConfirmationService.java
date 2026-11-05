@@ -382,6 +382,7 @@ public class ProductionConfirmationService {
             .eq(ProductBomCostSnapshot::getProductBomId, bom.getProductBomId())
             .eq(ProductBomCostSnapshot::getProductBomRouteId, route.getProductBomRouteId())
             .in(ProductBomCostSnapshot::getStatus, List.of("current", "baseline"))
+            .isNull(ProductBomCostSnapshot::getCostScopeKey)
             .eq(ProductBomCostSnapshot::getDeletedFlag, 0))).isEmpty();
         if (!hasCost) {
             throw validation("路线 " + route.getRouteName() + " 尚未完成成本计算");
@@ -537,6 +538,7 @@ public class ProductionConfirmationService {
             .eq(ProductBomCostSnapshot::getProductBomId, bom.getProductBomId())
             .eq(ProductBomCostSnapshot::getProductBomRouteId, route.getProductBomRouteId())
             .in(ProductBomCostSnapshot::getStatus, List.of("current", "baseline"))
+            .isNull(ProductBomCostSnapshot::getCostScopeKey)
             .eq(ProductBomCostSnapshot::getDeletedFlag, 0))).isEmpty();
         if (!hasCost) {
             throw validation("投产颜色关联路线缺少有效成本快照");

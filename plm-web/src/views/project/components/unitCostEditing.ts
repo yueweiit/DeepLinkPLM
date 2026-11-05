@@ -3,7 +3,7 @@ import { parseClipboard } from '@/utils/collaboration'
 import { t as uiText } from '@/locales'
 
 export const costGroups = [
-  { key: 'material', name: '材料成本' }, { key: 'process', name: '加工成本' },
+  { key: 'material', name: '材料成本' }, { key: 'process', name: '加工成本' }, { key:'packaging',name:'包装成本' },
   { key: 'tooling', name: '模具摊销' }, { key: 'tool_transport', name: '模具运输摊销' },
   { key: 'development', name: '开发费用' }, { key: 'freight_sea', name: '成品海运' },
   { key: 'freight_air', name: '成品空运' },

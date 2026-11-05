@@ -202,7 +202,7 @@ class EngineeringBasisServiceTest {
 
     @Test void directPurchaseDoesNotInventManufacturingBomButRequiresTheSameConfirmedFinishedSupplierAsCost(){
         actor();supplier("active");var state=state(true);policy.confirm(42,state,List.of(),"");
-        state.put("releaseDraft",Map.of("unitCostVersionId",7L));state.put("unitCostVersions",List.of(Map.of("id",7L,"basisType","supplier_quote","adoptedQuote",Map.of("supplierCode","SUP-B"))));
+        state.put("costScopes",List.of(Map.of("id","unrelated-duo","name","Duo","phoneModelIds",List.of(9L))));state.put("releaseDraft",Map.of("unitCostVersionId",7L,"phoneModelIds",List.of(8L)));state.put("unitCostVersions",List.of(Map.of("id",7L,"basisType","supplier_quote","adoptedQuote",Map.of("supplierCode","SUP-B"))));
         assertThatThrownBy(()->policy.requireFinal(42,state,List.of())).hasMessageContaining("供应商与已确认成品供方不一致");
         state.put("unitCostVersions",List.of(Map.of("id",7L,"basisType","supplier_quote","adoptedQuote",Map.of("supplierCode","SUP-A"))));
         assertThatCode(()->policy.requireFinal(42,state,List.of())).doesNotThrowAnyException();verifyNoInteractions(jdbc);

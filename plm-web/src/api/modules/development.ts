@@ -8,7 +8,7 @@ export interface InvestmentLine { entity: FinanceEntity; id: number; category: s
 export interface InvestmentCurrency { currency: string; knownTotal: number | null; missingCount: number; complete: boolean; categories: { category: string; knownTotal: number | null; missingCount: number; count: number }[] }
 export interface InvestmentSummary { rows: InvestmentLine[]; references: InvestmentLine[]; currencyGroups: InvestmentCurrency[] }
 export interface FinanceSummary { currencyGroups: Record<string, FinanceValue>[]; rule: string; investment?: InvestmentSummary }
-export interface FinanceQuery { projectId?:number; page: number; size: number; keyword?: string; kind?: 'platform' | 'mold'; state?: string; productLineId?: number; productId?: number; itemId?: number; currency?: string; budgetId?: number; expenseId?:number; sourceSystem?: 'manual'|'erp'; actualStatus?: 'draft'|'confirmed'; expenseCategory?: string }
+export interface FinanceQuery { projectId?:number;costScopeKey?:string; page: number; size: number; keyword?: string; kind?: 'platform' | 'mold'; state?: string; productLineId?: number; productId?: number; itemId?: number; currency?: string; budgetId?: number; expenseId?:number; sourceSystem?: 'manual'|'erp'; actualStatus?: 'draft'|'confirmed'; expenseCategory?: string }
 export interface FinanceChange { field: string; before: FinanceValue; after: FinanceValue }
 export interface FinancePatch { id: number; changes: FinanceChange[]; reason?: string }
 export interface FinanceResult { id: number; status: 'saved' | 'invalid' | 'conflict' | 'forbidden'; message: string; conflicts: { field: string; before: FinanceValue; current: FinanceValue; attempted: FinanceValue }[]; row: FinanceRow | null }

@@ -19,6 +19,7 @@ public final class DevelopmentTypes {
         @Positive private Long productLineId;
         @Positive private Long productId;
         @Positive private Long projectId;
+        @Pattern(regexp="unassigned|shared|[a-f0-9-]{36}") private String costScopeKey;
         @Positive private Long itemId;
         @Positive private Long budgetId;
         @Positive private Long expenseId;
@@ -34,11 +35,13 @@ public final class DevelopmentTypes {
     public record CreateBudget(@NotBlank @Pattern(regexp="platform|mold") String kind,
         @NotBlank @Size(max=255) String name, @Positive Long productLineId,@Positive Long itemId,
         @Positive Long moldSetId,@Positive Long parentBudgetId,@Pattern(regexp="CNY|MXN|USD|EUR") String currency,
-        @Pattern(regexp="project_total|mold|transport|customs|design|sample|other") String costCategory) {
+        @Pattern(regexp="project_total|mold|transport|customs|design|sample|other") String costCategory,@Pattern(regexp="shared|[a-f0-9-]{36}") String costScopeKey) {
+        public CreateBudget(String kind,String name,Long productLineId,Long itemId,Long moldSetId,Long parentBudgetId,String currency,String costCategory){this(kind,name,productLineId,itemId,moldSetId,parentBudgetId,currency,costCategory,null);}
         public CreateBudget(String kind,String name,Long productLineId,Long itemId,Long moldSetId,Long parentBudgetId,String currency){this(kind,name,productLineId,itemId,moldSetId,parentBudgetId,currency,null);}
     }
     public record CreateExpense(@NotBlank @Size(max=128) String description,@Positive Long productLineId,
-        @Positive Long itemId,@Positive Long moldSetId,@Positive Long budgetId,@Pattern(regexp="CNY|MXN|USD|EUR") String currency,@Positive Long productId,@Positive Long actualCorrectionOfId) {
+        @Positive Long itemId,@Positive Long moldSetId,@Positive Long budgetId,@Pattern(regexp="CNY|MXN|USD|EUR") String currency,@Positive Long productId,@Positive Long actualCorrectionOfId,@Pattern(regexp="shared|[a-f0-9-]{36}") String costScopeKey) {
+        public CreateExpense(String description,Long productLineId,Long itemId,Long moldSetId,Long budgetId,String currency,Long productId,Long actualCorrectionOfId){this(description,productLineId,itemId,moldSetId,budgetId,currency,productId,actualCorrectionOfId,null);}
         public CreateExpense(String description,Long productLineId,Long itemId,Long moldSetId,Long budgetId,String currency,Long productId){this(description,productLineId,itemId,moldSetId,budgetId,currency,productId,null);}
         public CreateExpense(String description,Long productLineId,Long itemId,Long moldSetId,Long budgetId,String currency){this(description,productLineId,itemId,moldSetId,budgetId,currency,null);}
     }
