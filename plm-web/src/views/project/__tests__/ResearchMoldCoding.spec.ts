@@ -26,7 +26,7 @@ describe('minimal step-five automatic coding',()=>{
   const view=render([app({businessStatus:'approved',approvalGranted:true,executionStatus:'active',authorization,researchCoding:{status:'ready',missingFields:[],generatedMoldCodes:['MHA100030','MHA200030'],generatedProductCodes:['NHA4020003002']}})])
   expect(view.findAll('code').map(c=>c.text())).toEqual(['MHA100030','MHA200030','NHA4020003002'])
   expect(view.text()).toContain('已自动生成并关联档案');expect(view.text()).not.toContain('4030')
-  expect(view.findAll('button').map(b=>b.text())).toEqual(['选择其他型号','查看审批进度']);view.unmount()
+  expect(view.findAll('button').map(b=>b.text())).toEqual(['办理其他模具需求','查看审批进度']);view.unmount()
  })
  it('does not present legacy explanations or a literal null as mold codes or change their original text',async()=>{
   for(const generatedCodes of ['✅ 型号匹配(1298) / 但工艺关键词[亮甲3.0]未匹配到对应模具','null']){
@@ -59,7 +59,7 @@ describe('minimal step-five automatic coding',()=>{
  it('shows only the missing process selector and leaves saving to the existing page action',async()=>{
   const view=render([app({businessStatus:'approved',canMaintainResearchCoding:true,researchCoding:{status:'pending',missingFields:['operationCode'],generatedMoldCodes:['MHA100030'],operationOptions:[{code:'4020',name:'已配置最终工序'}]}})])
   expect(view.text()).toContain('待补：产品工序');expect(view.text()).not.toContain('待补：模具材质')
-  expect(view.findAll('button').map(b=>b.text())).toEqual(['选择其他型号','查看审批进度'])
+  expect(view.findAll('button').map(b=>b.text())).toEqual(['办理其他模具需求','查看审批进度'])
   await view.getComponent(ElSelect).vm.$emit('update:modelValue','4020')
   expect(view.emitted('update:inputs')).toEqual([[{88:{operationCode:'4020'}}]])
   expect(view.findAll('code').map(c=>c.text())).toEqual(['MHA100030']);view.unmount()
@@ -99,7 +99,7 @@ describe('minimal step-five automatic coding',()=>{
  it('offers another phone independently of viewing a refused application',async()=>{
   const view=render([app({businessStatus:'rejected',refusal:{reason:'这个型号不好卖',actorName:'周汉琴',actorId:'verified',occurredAt:'2026-10-29T10:00:00+08:00'}})])
   expect(view.text()).toContain('已拒绝');expect(view.text()).toContain('这个型号不好卖')
-  await view.findAll('button').find(button=>button.text()==='选择其他型号')!.trigger('click')
+  await view.findAll('button').find(button=>button.text()==='办理其他模具需求')!.trigger('click')
   expect(view.emitted('other-phone')).toEqual([[]]);expect(view.emitted('create')).toBeUndefined();expect(view.emitted('progress')).toBeUndefined();view.unmount()
  })
 

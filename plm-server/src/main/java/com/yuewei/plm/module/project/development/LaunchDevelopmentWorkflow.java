@@ -31,6 +31,8 @@ public class LaunchDevelopmentWorkflow {
     private ResearchLaunchService salesLaunch;
     @org.springframework.beans.factory.annotation.Autowired @org.springframework.context.annotation.Lazy
     private com.yuewei.plm.module.moldapplication.MoldApplicationService moldApplications;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.yuewei.plm.module.manufacturing.ManufacturingIdentityService manufacturing;
     public boolean handles(String action){return Set.of("plan_draft","launch_draft","mold_link","mold_unlink","mold_node","mold_restart","no_mold","cost","promotion","presale","launch","shipment_confirm").contains(action);}
     private int stage(Product p,Map<String,Object>s){var r=map(s.get("revision"));return r.isEmpty()?Objects.requireNonNullElse(p.getCurrentStepNo(),1):(int)number(r.get("stage"));}
     private List<Map<String,Object>> records(Object rows){if(!(rows instanceof List<?> list))return new ArrayList<>();return new ArrayList<>(list.stream().map(DevelopmentWorkflowStore::map).toList());}
@@ -64,6 +66,9 @@ public class LaunchDevelopmentWorkflow {
             var drafts=new LinkedHashMap<>(map(s.get("stageDrafts")));d.put("references",service.snapshotReferences(id,service.refs(d.get("references"))));drafts.put(String.valueOf(st),d);s.put("stageDrafts",drafts);
         }else if(action.equals("mold_link")){
             atStage(p.getCurrentStepNo(),s,5);long moldId=number(d.get("moldSetId")),appId=number(d.get("applicationId"));
+            if(d.containsKey("engineeringPlan")) {
+                require(appId==0,"沿用已有模具不新增开模审批");d.put("manufacturingSnapshots",confirmedManufacturingReuse(id,moldId,s,d));
+            }
             if(appId>0){var apps=jdbc.queryForList("select application_id,mold_set_id,phone_model_id from plm_mold_application where application_id=? and deleted_flag=0 and (project_id=? or product_line_id=?)",appId,id,id);require(!apps.isEmpty(),"请选择属于本项目的原开模申请");var app=apps.get(0);require(ids(map(s.get("plan")).get("phoneModelIds")).contains(number(app.get("phone_model_id"))),"申请机型不在当前计划内");moldId=number(app.get("mold_set_id"));d.put("applicationSnapshot",app);}
             require(moldId>0||appId>0,"请选择模具或原开模申请");
             if(moldId>0){var row=molds.snapshotForDevelopment(moldId);verifyMoldScope(id,moldId,s);if(Boolean.TRUE.equals(d.get("reuseConfirmed"))){filled(d.get("reason"),"已有模具采用依据");require("ready".equals(row.get("pcStatus"))&&"ready".equals(row.get("tpuStatus")),"已有模具PC／TPU尚未确认可用");requireReusableMold(id,moldId,s);}d.put("moldSetId",moldId);d.put("moldSnapshot",row);}
@@ -243,7 +248,7 @@ public class LaunchDevelopmentWorkflow {
             checks.add(check("MOLD_DESIGN_FILES","本次模具设计资料","mold-design-files",()->{var draft=map(map(state.get("stageDrafts")).get("5"));var refs=service.snapshotReferences(id,service.refs(draft.get("moldDesignReferences")));require(!refs.isEmpty(),"请明确本次模具设计资料版本");}));
             checks.add(check("MOLD_AUTHORIZATION","原开模申请授权及逐套关联","mold-links",()->{var links=records(state.get("moldLinks"));require(!links.isEmpty(),"请关联原开模申请或明确可复用的模具套");for(var link:links){long mold=reviews.resolveMold(id,link);require(mold>0,"原申请尚未授权建套，请在原申请查看审批和建档进度");access.requireMold(mold);var authority=new com.yuewei.plm.module.collaboration.MoldWorkflowRepository(jdbc);require(!authority.isPaused(mold),"原申请已暂停或终止");
                 if(number(link.get("applicationId"))>0)require(authority.isAuthorized(number(link.get("applicationId")),id,mold),"原申请尚未达到已授权开工条件");
-                else {require(Boolean.TRUE.equals(link.get("reuseConfirmed")),"直接关联已有套需要明确确认复用；新开模请关联原申请");requireReusableMold(id,mold,state);}}}));
+                else {require(Boolean.TRUE.equals(link.get("reuseConfirmed")),"直接关联已有套需要明确确认复用；新开模请关联原申请");if(link.containsKey("engineeringPlan"))confirmedManufacturingReuse(id,mold,state,link);requireReusableMold(id,mold,state);}}}));
             return checks;
         }
         if(step==6){
@@ -313,6 +318,13 @@ public class LaunchDevelopmentWorkflow {
             phones.requireCompatibility(productId,phoneId,number(candidate.get("itemId")),moldId,text(candidate.get("compatibilityDigest")));matched=true;
         }
         require(matched,"已有模具须按明确的实物及PC／TPU逐套适配依据确认复用");
+    }
+    private List<Map<String,Object>> confirmedManufacturingReuse(long productId,long moldId,Map<String,Object> state,Map<String,Object> link){
+        var plan=com.yuewei.plm.module.moldapplication.MoldEngineeringPlan.normalize(json,json.valueToTree(link.get("engineeringPlan")));
+        var resolved=com.yuewei.plm.module.moldapplication.MoldEngineeringPlan.resolveReuse(manufacturing,productId,plan);
+        require(number(resolved.get(0).get("moldSetId"))==moldId,"沿用方案与所选实物套不一致");
+        var planned=ids(map(state.get("plan")).get("phoneModelIds"));for(var match:resolved)require(planned.contains(number(map(match.get("businessPhone")).get("phoneModelId"))),"采用手机不在本项目已确认开发范围内，请先按原流程修订计划");
+        require(Boolean.TRUE.equals(link.get("reuseConfirmed")),"请工程明确确认沿用");return resolved;
     }
     boolean appendMoldLink(Map<String,Object> state,Map<String,Object> data){
         var links=records(state.get("moldLinks"));long mold=number(data.get("moldSetId")),application=number(data.get("applicationId"));

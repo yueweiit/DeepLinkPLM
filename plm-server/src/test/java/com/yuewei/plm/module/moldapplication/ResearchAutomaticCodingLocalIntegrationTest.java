@@ -34,6 +34,7 @@ import static org.mockito.Mockito.*;
 class ResearchAutomaticCodingLocalIntegrationTest {
     private final MoldApplicationLocalIntegrationTest fixture = new MoldApplicationLocalIntegrationTest();
     private ResearchProductCodingService productCoding;
+    private com.yuewei.plm.module.collaboration.CollaborationService collaboration;
     private ProductRepository productRepository;
     private ProductionConfirmationService production;
     private long project;
@@ -70,6 +71,8 @@ class ResearchAutomaticCodingLocalIntegrationTest {
         var conversion = new MoldApplicationConversion(fixture.repo,fixture.service,fixture.codes,products,
             new ProductCodeGenerator(fixture.jdbc),mock(WorkflowTemplateService.class),fixture.access,fixture.tx);
         ReflectionTestUtils.setField(conversion,"productCoding",productCoding);
+        collaboration=new com.yuewei.plm.module.collaboration.CollaborationService(fixture.jdbc,fixture.json,new com.yuewei.plm.module.collaboration.CollaborationRepository(fixture.jdbc,fixture.json),fixture.tx,logs,fixture.access,fixture.codes.references());
+        ReflectionTestUtils.setField(conversion,"collaboration",collaboration);
         fixture.service.setConversion(conversion);
         fixture.phoneModel = phone("0052");
         fixture.phone = fixture.jdbc.queryForObject("select code_item_id from plm_phone_model_member where id=?",Long.class,fixture.phoneModel);
@@ -103,14 +106,18 @@ class ResearchAutomaticCodingLocalIntegrationTest {
         return application(phone,materials,operation,"new",null,null);
     }
     private Map<String,Object> application(long phone,List<String> materials,String operation,String intent,Long targetItem,Long targetSet) {
+        return application(phone,materials,operation,intent,targetItem,targetSet,null);
+    }
+    private Map<String,Object> application(long phone,List<String> materials,String operation,String intent,Long targetItem,Long targetSet,JsonNode engineeringPlan) {
         var state=fixture.researchStore.load(project);
         var plan=new LinkedHashMap<>((Map<String,Object>)state.get("plan"));
         var phones=new ArrayList<Long>((List<Long>)plan.get("phoneModelIds"));
         if(!phones.contains(phone))phones.add(phone);
+        for(long declared:MoldEngineeringPlan.phones(engineeringPlan))if(!phones.contains(declared))phones.add(declared);
         plan.put("phoneModelIds",phones);state.put("plan",plan);state.put("planDraft",plan);fixture.researchStore.save(project,state);
         long code=fixture.jdbc.queryForObject("select code_item_id from plm_phone_model_member where id=?",Long.class,phone);
         String model=fixture.jdbc.queryForObject("select model_name from plm_phone_model_member where id=?",String.class,phone);
-        var input=new MoldApplicationService.Draft(fixture.json.valueToTree(Map.of("model",model,"expectedDeliveryDate","2026-12-01")),project,code,null,phone,intent,targetItem,targetSet,null);
+        var input=new MoldApplicationService.Draft(fixture.json.valueToTree(Map.of("model",model,"holeType","大孔Gran agujero","expectedDeliveryDate","2026-12-01")),project,code,null,phone,intent,targetItem,targetSet,null,"new_set".equals(intent)?"隔离验证明确加开独立套":null,null,"new_set".equals(intent),engineeringPlan);
         var created=fixture.service.startFromResearch(new MoldApplicationService.ResearchDraft(project,phone,"qa-auto-"+UUID.randomUUID(),((Number)state.get("version")).longValue(),input),null);
         long id=fixture.id(created);
         String instance="qa-auto-instance-"+UUID.randomUUID();
@@ -124,7 +131,7 @@ class ResearchAutomaticCodingLocalIntegrationTest {
         source.put("status","RUNNING").put("business_id","QA-AUTO-APPROVAL").put("title","隔离自动编码验收").put("originator_userid","mold-it-user");
         var fields=source.putArray("form_component_values");
         JsonNode form=(JsonNode)row.get("form");
-        for(String name:List.of("productName","model","expectedDeliveryDate"))fields.addObject().put("id",MoldApplicationForms.COMPONENTS.get(name)).put("value",form.path(name).asText());
+        for(String name:List.of("productName","model","holeType","expectedDeliveryDate"))fields.addObject().put("id",MoldApplicationForms.COMPONENTS.get(name)).put("value",form.path(name).asText());
         fields.addObject().put("id",MoldApplicationForms.COMPONENTS.get("generatedCodes")).put("value","");
         var task=source.putArray("tasks").addObject().put("userid",approver).put("task_status","COMPLETED").put("task_result","AGREE");
         if(taskId!=null)task.put("taskid",taskId);
@@ -180,6 +187,89 @@ class ResearchAutomaticCodingLocalIntegrationTest {
         var product=((JsonNode)built.get("executionResolution")).path("researchCoding").path("products").get(0);
         assertThat(product.path("colorCode").asText()).isEqualTo("02");assertThat(product.path("colorName").asText()).isEqualTo("黑色");assertThat(product.path("modelName").asText()).isEqualTo("QA 标准手机 0052");
         workflowLinked(built);noProductionFacts();verify(fixture.client,never()).submit(anyMap());
+    }
+
+    @Test void aNewSharedMoldDeclaresEveryPhoneButDoesNotInventFitOrAnotherManufacturingIdentity() {
+        long other=phone("0053");
+        var plan=fixture.json.valueToTree(Map.of("handling","new","codePhoneModelId",fixture.phoneModel,"specifications",List.of(Map.of("key","large","holeType","large","structureDescription","大孔共模候选","phoneModelIds",List.of(fixture.phoneModel,other)))));
+        var row=application(fixture.phoneModel,List.of("10","20"),"4030","new",null,null,plan);agree(row);var built=sync(row);
+        assertThat(built).containsEntry("provisioningStatus","ready");long item=((Number)built.get("itemId")).longValue(),set=((Number)built.get("moldSetId")).longValue();
+        var fits=fixture.jdbc.queryForList("select phone_model_id,pc_confirmed,tpu_confirmed,pc_evidence,tpu_evidence from plm_collaboration_phone_set_compatibility where item_id=? and mold_set_id=? order by phone_model_id",item,set);
+        assertThat(fits).hasSize(2).extracting(fit->((Number)fit.get("phone_model_id")).longValue()).containsExactlyInAnyOrder(fixture.phoneModel,other);
+        assertThat(fits).allSatisfy(fit->assertThat(fit).containsEntry("pc_confirmed",false).containsEntry("tpu_confirmed",false).containsEntry("pc_evidence",null).containsEntry("tpu_evidence",null));
+        assertThat(count("select count(*) from plm_collaboration_phone_member where item_id=?",item)).isEqualTo(2);
+        assertThat(fixture.codes.references().compatibleMolds(other,project)).isEmpty();
+        assertThat(productCodes()).singleElement().asString().matches("N[A-Z]{2}4030005202");
+        long memberVersion=count("select master_data_version from plm_collaboration_item where item_id=?",item);var products=identities();sync(row);
+        assertThat(count("select master_data_version from plm_collaboration_item where item_id=?",item)).isEqualTo(memberVersion);
+        assertThat(identities()).isEqualTo(products);assertThat(count("select count(*) from plm_collaboration_phone_set_compatibility where item_id=?",item)).isEqualTo(2);noProductionFacts();
+    }
+
+    @Test void anAdditionalSetKeepsTheOriginal1145ManufacturingSkusAndDeclaresTheNewSetAsUnverified() {
+        long oldPhone=phone("1145"),customerPhone=phone("1218");
+        var oldPlan=fixture.json.valueToTree(Map.of("handling","new","codePhoneModelId",oldPhone,"specifications",List.of(Map.of("key","original","holeType","large","structureDescription","","phoneModelIds",List.of(oldPhone)))));
+        var old=application(oldPhone,List.of("10","20"),"4030","new",null,null,oldPlan);agree(old);old=sync(old);
+        long item=((Number)old.get("itemId")).longValue(),sourceSet=((Number)old.get("moldSetId")).longValue();
+        fixture.jdbc.update("update plm_collaboration_mold_part set physical_status='confirmed',status='ready' where mold_set_id=?",sourceSet);
+        var master=collaboration.item(item);var before=fixture.json.valueToTree(master.get("compatiblePhones"));var after=(com.fasterxml.jackson.databind.node.ArrayNode)before.deepCopy();
+        after.addObject().put("phoneModelId",customerPhone).putArray("setCompatibilities").addObject().put("moldSetId",sourceSet).put("pcConfirmed",true).put("tpuConfirmed",true).put("pcEvidence","隔离实测PC适配").put("tpuEvidence","隔离实测TPU适配");
+        var saved=collaboration.saveMoldLedger(new com.yuewei.plm.module.collaboration.CollaborationTypes.BatchSave(List.of(new com.yuewei.plm.module.collaboration.CollaborationTypes.RowPatch("item",item,List.of(new com.yuewei.plm.module.collaboration.CollaborationTypes.CellChange("compatiblePhones",before,after,"隔离工程适配确认"))))),null);
+        assertThat(saved.get(0).status()).as(saved.get(0).message()).isEqualTo("saved");
+        var identitiesService=new com.yuewei.plm.module.manufacturing.ManufacturingIdentityService(fixture.jdbc,fixture.json,fixture.access,fixture.codes.references(),mock(com.yuewei.plm.module.operationlog.service.OperationLogService.class),new ProductBusinessCodeGenerator());
+        ReflectionTestUtils.setField(ReflectionTestUtils.getField(fixture.service,"conversion"),"manufacturing",identitiesService);ReflectionTestUtils.setField(productCoding,"manufacturingIdentities",identitiesService);
+        String digest=fixture.codes.references().compatibleMolds(customerPhone,project).stream().filter(candidate->Objects.equals(candidate.get("moldSetId"),sourceSet)).findFirst().orElseThrow().get("compatibilityDigest").toString();
+        long manufacturer=fixture.jdbc.queryForObject("select product_id from plm_product where parent_product_id=? and product_type='model_variant' and phone_model_code='1145' and deleted_flag=0",Long.class,project);
+        var skus=fixture.jdbc.queryForList("select product_id from plm_product where parent_product_id=? and product_type='sku' and deleted_flag=0 order by product_id",Long.class,manufacturer);
+        var relation=identitiesService.save(null,new com.yuewei.plm.module.manufacturing.ManufacturingIdentityService.WriteInput(null,project,item,sourceSet,customerPhone,"large","",true,manufacturer,skus,"隔离工程共模确认","隔离工程成品与BOM共用确认",digest,"隔离追加套依据","active"),null);
+        var plan=fixture.json.valueToTree(Map.of("handling","new_set","codePhoneModelId",customerPhone,"specifications",List.of(Map.of("key","additional","holeType","large","structureDescription","","phoneModelIds",List.of(customerPhone),"manufacturingRelationId",relation.get("id"),"manufacturingRelationVersion",relation.get("version")))));
+        var productBefore=identities();long sets=count("select count(*) from plm_collaboration_mold_set");
+        var additional=application(customerPhone,List.of("10","20"),"4030","new_set",item,sourceSet,plan);agree(additional);var built=sync(additional);
+        assertThat(built).containsEntry("itemId",item).containsEntry("provisioningStatus","ready");long newSet=((Number)built.get("moldSetId")).longValue();assertThat(newSet).isNotEqualTo(sourceSet);
+        assertThat(built.get("generatedCodes").toString()).contains("1145").doesNotContain("1218");assertThat(productCodes()).singleElement().asString().matches("N[A-Z]{2}4030114502");assertThat(identities()).isEqualTo(productBefore);
+        var coding=((JsonNode)built.get("executionResolution")).path("researchCoding");assertThat(coding.path("productCodePrefix").asText()).isEqualTo("N"+coding.path("productSpecificCode").asText()).isNotEqualTo("N");assertThat(coding.path("n").path("manufacturingSnapshots").get(0).path("businessPhone").path("phoneModelCode").asText()).isEqualTo("1218");
+        assertThat(count("select source_mold_set_id from plm_collaboration_mold_set where mold_set_id=?",newSet)).isEqualTo(sourceSet);assertThat(count("select count(*) from plm_collaboration_mold_set")).isEqualTo(sets+1);
+        assertThat(fixture.jdbc.queryForMap("select pc_confirmed,tpu_confirmed from plm_collaboration_phone_set_compatibility where item_id=? and mold_set_id=? and phone_model_id=?",item,newSet,customerPhone)).containsEntry("pc_confirmed",false).containsEntry("tpu_confirmed",false);
+        assertThat(fixture.jdbc.queryForMap("select pc_confirmed,tpu_confirmed from plm_collaboration_phone_set_compatibility where item_id=? and mold_set_id=? and phone_model_id=?",item,sourceSet,customerPhone)).containsEntry("pc_confirmed",true).containsEntry("tpu_confirmed",true);
+        sync(additional);assertThat(count("select count(*) from plm_collaboration_mold_set")).isEqualTo(sets+1);noProductionFacts();
+    }
+
+    @Test void explicitNewPrecisionManufacturingKeeps1218AndCannotCreateAnotherSkuForADifferentHole() {
+        fixture.jdbc.execute("alter table plm_project_requirement_form add column if not exists manufacturing_structure_description varchar(1000)");
+        long actualPhone=phone("1218");var row=application(actualPhone,List.of("10","20"),"4030");
+        long applicationId=fixture.id(row);
+        var result=productCoding.provision(project,actualPhone,applicationId,"it","precision","独立精孔方案");
+        assertThat(result).containsEntry("status","ready");
+        assertThat((List<String>)result.get("codes")).singleElement().asString().matches("N[A-Z]{2}4030121802");
+        long variant=fixture.jdbc.queryForObject("select product_id from plm_product where parent_product_id=? and phone_model_code='1218' and product_type='model_variant' and deleted_flag=0",Long.class,project);
+        assertThat(fixture.jdbc.queryForMap("select hole_type,manufacturing_structure_description from plm_project_requirement_form where project_id=? and deleted_flag=0",variant))
+            .containsEntry("hole_type","precision").containsEntry("manufacturing_structure_description","独立精孔方案");
+        var before=identities();var repeated=productCoding.provision(project,actualPhone,applicationId,"it","precision","独立精孔方案");
+        assertThat(repeated.get("codes")).isEqualTo(result.get("codes"));assertThat(identities()).isEqualTo(before);
+        var wrongHole=productCoding.provision(project,actualPhone,applicationId,"it","large","独立精孔方案");
+        assertThat(wrongHole).containsEntry("status","pending");assertThat((List<?>)wrongHole.get("codes")).isEmpty();assertThat(identities()).isEqualTo(before);
+        assertThat(fixture.jdbc.queryForObject("select hole_type from plm_project_requirement_form where project_id=? and deleted_flag=0",String.class,variant)).isEqualTo("precision");
+        noProductionFacts();
+    }
+
+    @Test void aLegacyManufacturingIdentityWithoutAHoleIsNotSilentlyAdoptedByANewExplicitSpecification() {
+        fixture.jdbc.execute("alter table plm_project_requirement_form add column if not exists manufacturing_structure_description varchar(1000)");
+        var row=application(fixture.phoneModel,List.of("10","20"),"4030");long applicationId=fixture.id(row);
+        var old=productCoding.provision(project,fixture.phoneModel,applicationId,"it","large","");assertThat(old).containsEntry("status","ready");
+        fixture.jdbc.update("update plm_project_requirement_form set hole_type=null,manufacturing_structure_description=null where project_id in (select product_id from plm_product where parent_product_id=? and product_type='model_variant')",project);
+        var before=identities();long requirements=count("select count(*) from plm_project_requirement_form");
+        var pending=productCoding.provision(project,fixture.phoneModel,applicationId,"it","large","");
+        assertThat(pending).containsEntry("status","pending");assertThat((List<?>)pending.get("codes")).isEmpty();assertThat(identities()).isEqualTo(before);
+        assertThat(count("select count(*) from plm_project_requirement_form")).isEqualTo(requirements);noProductionFacts();
+    }
+
+    @Test void aLegacyApprovedResearchWithoutAHoleCannotAllocateMoldOrManufacturingCodes() {
+        var row=application(fixture.phoneModel,List.of("10","20"),"4030");
+        fixture.jdbc.update("update plm_mold_application set form_data=form_data-'holeType'-'structureDescription' where application_id=?",fixture.id(row));row=fixture.repo.row(fixture.id(row),false);
+        long reservations=count("select count(*) from plm_mold_code_reservation"),sets=count("select count(*) from plm_collaboration_mold_set");var products=identities();
+        agree(row);var blocked=sync(row);
+        assertThat(blocked).containsEntry("moldSetId",null).containsEntry("provisioningStatus","blocked");assertThat(blocked.get("provisioningError").toString()).contains("孔型");
+        assertThat(count("select count(*) from plm_mold_code_reservation")).isEqualTo(reservations);assertThat(count("select count(*) from plm_collaboration_mold_set")).isEqualTo(sets);assertThat(identities()).isEqualTo(products);assertThat(productCodes()).isEmpty();
+        assertThat(fixture.jdbc.queryForObject("select product_specific_code from plm_product where product_id=?",String.class,project)).isNull();noProductionFacts();
     }
 
     @Test void duplicateCallbacksRetainLocalCodesAndTheOriginalResearchProject() {
@@ -437,7 +527,7 @@ class ResearchAutomaticCodingLocalIntegrationTest {
         long variant=fixture.jdbc.queryForObject("select product_id from plm_product where parent_product_id=? and product_type='model_variant'",Long.class,project);
         var before=identities();long engineer=useScopedEngineer();
         assertThatThrownBy(()->fixture.access.requireProduct(variant)).hasMessageContaining("未获授权");
-        assertThatThrownBy(()->productCoding.provision(project,fixture.phoneModel,fixture.id(row),"QA 受限续办")).hasMessageContaining("未获授权");
+        assertThatThrownBy(()->productCoding.provision(project,fixture.phoneModel,fixture.id(row),"QA 受限续办","large","")).hasMessageContaining("未获授权");
         assertThat(count("select count(*) from plm_pilot_scope where user_id=? and entity_type='product' and entity_id in (select product_id from plm_product where parent_product_id=? or parent_product_id in (select product_id from plm_product where parent_product_id=?))",engineer,project,project)).isZero();
         assertThat(identities()).isEqualTo(before);noProductionFacts();
     }
@@ -450,7 +540,7 @@ class ResearchAutomaticCodingLocalIntegrationTest {
         fixture.jdbc.update("insert into plm_pilot_scope(user_id,entity_type,entity_id) values(?,'product',?)",engineer,variant);
         assertThatCode(()->fixture.access.requireProduct(variant)).doesNotThrowAnyException();
         assertThatThrownBy(()->fixture.access.requireProduct(sku)).hasMessageContaining("未获授权");
-        assertThatThrownBy(()->productCoding.provision(project,fixture.phoneModel,fixture.id(row),"QA 受限续办")).hasMessageContaining("未获授权");
+        assertThatThrownBy(()->productCoding.provision(project,fixture.phoneModel,fixture.id(row),"QA 受限续办","large","")).hasMessageContaining("未获授权");
         assertThat(count("select count(*) from plm_pilot_scope where user_id=? and entity_type='product' and entity_id=?",engineer,sku)).isZero();
         assertThat(identities()).isEqualTo(before);noProductionFacts();
     }
@@ -460,11 +550,11 @@ class ResearchAutomaticCodingLocalIntegrationTest {
         long variant=fixture.jdbc.queryForObject("select product_id from plm_product where parent_product_id=? and product_type='model_variant'",Long.class,project);
         var before=identities();
         fixture.jdbc.update("update plm_product set master_data_status='inactive' where product_id=?",variant);
-        assertThatThrownBy(()->productCoding.provision(project,fixture.phoneModel,fixture.id(row),"QA 停用资料" )).hasMessageContaining("已停用");
+        assertThatThrownBy(()->productCoding.provision(project,fixture.phoneModel,fixture.id(row),"QA 停用资料","large","")).hasMessageContaining("已停用");
         assertThat(identities()).isEqualTo(before);
         fixture.jdbc.update("update plm_product set master_data_status='active' where product_id=?",variant);
         fixture.jdbc.update("update plm_product set master_data_status='inactive' where product_id=?",project);
-        assertThatThrownBy(()->productCoding.provision(project,fixture.phoneModel,fixture.id(row),"QA 停用祖先" )).hasMessageContaining("已停用");
+        assertThatThrownBy(()->productCoding.provision(project,fixture.phoneModel,fixture.id(row),"QA 停用祖先","large","")).hasMessageContaining("已停用");
         assertThat(identities()).isEqualTo(before);
         assertThat(fixture.repo.row(fixture.id(row),false)).containsEntry("provisioningStatus","ready").containsEntry("moldSetId",built.get("moldSetId"));
         fixture.jdbc.update("update plm_product set master_data_status='active' where product_id=?",project);
@@ -477,11 +567,11 @@ class ResearchAutomaticCodingLocalIntegrationTest {
         long sku=fixture.jdbc.queryForObject("select product_id from plm_product where parent_product_id=? and product_type='sku'",Long.class,variant);
         var before=identities();
         fixture.jdbc.update("update plm_product set master_data_status='inactive' where product_id=?",sku);
-        assertThatThrownBy(()->productCoding.provision(project,fixture.phoneModel,fixture.id(row),"QA 停用SKU" )).hasMessageContaining("已停用");
+        assertThatThrownBy(()->productCoding.provision(project,fixture.phoneModel,fixture.id(row),"QA 停用SKU","large","")).hasMessageContaining("已停用");
         assertThat(identities()).isEqualTo(before);
         assertThat(fixture.repo.row(fixture.id(row),false)).containsEntry("provisioningStatus","ready").containsEntry("moldSetId",built.get("moldSetId"));
         fixture.jdbc.update("update plm_product set master_data_status='active',production_status='discontinued' where product_id in (?,?,?)",project,variant,sku);
-        var reused=productCoding.provision(project,fixture.phoneModel,fixture.id(row),"QA 已停产资料");
+        var reused=productCoding.provision(project,fixture.phoneModel,fixture.id(row),"QA 已停产资料","large","");
         assertThat(reused).containsEntry("status","ready");assertThat((List<Long>)reused.get("skuIds")).containsExactly(sku);
         assertThat(identities()).isEqualTo(before);noProductionFacts();
     }
@@ -498,7 +588,7 @@ class ResearchAutomaticCodingLocalIntegrationTest {
         assertThatThrownBy(()->fixture.access.requireProduct(otherModel)).hasMessageContaining("未获授权");
         long otherFile=fixture.jdbc.queryForObject("select attachment_id from plm_attachment where deleted_flag=0 order by attachment_id limit 1",Long.class);
         assertThatThrownBy(()->fixture.access.requireFile(otherFile)).hasMessageContaining("未获授权");
-        assertThatThrownBy(()->productCoding.provision(50L,fixture.phoneModel,fixture.id(row),"QA 受限续办")).hasMessageContaining("未获授权");
+        assertThatThrownBy(()->productCoding.provision(50L,fixture.phoneModel,fixture.id(row),"QA 受限续办","large","")).hasMessageContaining("未获授权");
         workflowLinked(built);noProductionFacts();
     }
     @Test void aLegacySubmittedResearchStillHandlesItsOriginalCallbackWithoutChangingItsFlow() {

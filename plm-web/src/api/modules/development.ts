@@ -4,7 +4,11 @@ import request, { unwrapPage, unwrapResponse, type PageResponse } from '../reque
 export type FinanceEntity = 'budget' | 'expense'
 export type FinanceValue = string | number | null
 export interface FinanceRow { budgetId?: number; expenseId?: number; budgetKind?: 'platform' | 'mold'; budgetName?: string; description?: string; currencyCode: string; versionNo?: number; sourceSystem?: string; state?: string; [key: string]: FinanceValue | undefined }
-export interface FinanceQuery { projectId?:number; page: number; size: number; keyword?: string; kind?: 'platform' | 'mold'; state?: string; productLineId?: number; productId?: number; itemId?: number; currency?: string; budgetId?: number; expenseId?:number }
+export interface InvestmentLine { entity: FinanceEntity; id: number; category: string; currency: string; amount: number | null; name: string; budgetId?: number; itemId?: number; moldSetId?: number; compatibleModels?: string; styleName?: string; setName?: string; versionNo?: number; note?: string; sourceSystem?: string; actualStatus?: string; actualDate?: string|null; actualBasis?: string|null; actualCorrectionOfId?: number|null; actualReplacedById?: number|null; calculationMode?: string; sourceValues?: Record<string,FinanceValue>; actualAmount?: number; actualCoveredTotal?: number }
+export interface InvestmentCurrency { currency: string; knownTotal: number | null; missingCount: number; complete: boolean; categories: { category: string; knownTotal: number | null; missingCount: number; count: number }[] }
+export interface InvestmentSummary { rows: InvestmentLine[]; references: InvestmentLine[]; currencyGroups: InvestmentCurrency[] }
+export interface FinanceSummary { currencyGroups: Record<string, FinanceValue>[]; rule: string; investment?: InvestmentSummary }
+export interface FinanceQuery { projectId?:number; page: number; size: number; keyword?: string; kind?: 'platform' | 'mold'; state?: string; productLineId?: number; productId?: number; itemId?: number; currency?: string; budgetId?: number; expenseId?:number; sourceSystem?: 'manual'|'erp'; actualStatus?: 'draft'|'confirmed'; expenseCategory?: string }
 export interface FinanceChange { field: string; before: FinanceValue; after: FinanceValue }
 export interface FinancePatch { id: number; changes: FinanceChange[]; reason?: string }
 export interface FinanceResult { id: number; status: 'saved' | 'invalid' | 'conflict' | 'forbidden'; message: string; conflicts: { field: string; before: FinanceValue; current: FinanceValue; attempted: FinanceValue }[]; row: FinanceRow | null }
@@ -16,7 +20,7 @@ export interface FinancePreview<T> { token: string; rows: T[]; total: number; no
 const root = (entity: FinanceEntity) => entity === 'budget' ? '/development-budgets' : '/development-expenses'
 export async function getFinanceRows(entity: FinanceEntity, query: FinanceQuery): Promise<PageResponse<FinanceRow>> { return unwrapPage(await request.get(root(entity), { params: query })) }
 export async function getFinanceOptions(): Promise<FinanceOptions> { return unwrapResponse(await request.get('/development-budgets/options')) }
-export async function getFinanceSummary(entity: FinanceEntity, query: FinanceQuery): Promise<{ currencyGroups: Record<string, FinanceValue>[]; rule: string }> { return unwrapResponse(await request.get(`${root(entity)}/summary`, { params: query })) }
+export async function getFinanceSummary(entity: FinanceEntity, query: FinanceQuery): Promise<FinanceSummary> { return unwrapResponse(await request.get(`${root(entity)}/summary`, { params: query })) }
 export async function createFinanceRow(entity: FinanceEntity, payload: Record<string, unknown>): Promise<FinanceRow> { return unwrapResponse(await request.post(root(entity), payload)) }
 export async function saveFinanceRows(entity: FinanceEntity, rows: FinancePatch[]): Promise<FinanceResult[]> { return unwrapResponse(await request.post(`${root(entity)}/batch-save`, { rows })) }
 export async function getFinanceHistory(entity: FinanceEntity, id: number, page = 1): Promise<PageResponse<FinanceHistory>> { return unwrapPage(await request.get(`${root(entity)}/${id}/history`, { params: { page, size: 20 } })) }

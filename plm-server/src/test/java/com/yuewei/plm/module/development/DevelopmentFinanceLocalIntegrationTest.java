@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.yuewei.plm.common.security.CurrentUser;
 import com.yuewei.plm.common.security.CurrentUserContext;
 import com.yuewei.plm.module.operationlog.service.OperationLogService;
+import com.yuewei.plm.module.moldapplication.LocalMoldTestDatabase;
 import com.yuewei.plm.module.pilot.PilotAccessService;
 import com.yuewei.plm.module.project.dto.ProjectCostItemCreateDTO;
 import com.yuewei.plm.module.project.dto.ProjectCostItemUpdateDTO;
@@ -26,12 +27,14 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.mock;
 
 /** Opt-in local snapshot only. Schema, all accounts and all business fixtures roll back. */
-@EnabledIfEnvironmentVariable(named="PLM_COLLAB_TEST_DB_URL",matches="jdbc:postgresql://127\\.0\\.0\\.1:15432/plm_data_management\\?currentSchema=plm")
+@EnabledIfEnvironmentVariable(named="PLM_COLLAB_TEST_DB_URL",matches="jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/plm_data_management\\?currentSchema=plm")
 class DevelopmentFinanceLocalIntegrationTest {
     JdbcTemplate jdbc;DataSourceTransactionManager tx;TransactionStatus scope;PilotAccessService access;DevelopmentFinanceService service;DevelopmentFinanceImportService imports;long product,item;CurrentUser admin;
     final ObjectMapper json=new ObjectMapper().findAndRegisterModules();
     @BeforeEach void begin()throws Exception {
-        var data=new DriverManagerDataSource(System.getenv("PLM_COLLAB_TEST_DB_URL"),"postgres",System.getenv("PLM_COLLAB_TEST_DB_PASSWORD"));jdbc=new JdbcTemplate(data);tx=new DataSourceTransactionManager(data);scope=tx.getTransaction(new DefaultTransactionDefinition());
+        var data=new DriverManagerDataSource(System.getenv("PLM_COLLAB_TEST_DB_URL"),"postgres",System.getenv("PLM_COLLAB_TEST_DB_PASSWORD"));jdbc=new JdbcTemplate(data);LocalMoldTestDatabase.verify(System.getenv("PLM_COLLAB_TEST_DB_URL"),jdbc);tx=new DataSourceTransactionManager(data);scope=tx.getTransaction(new DefaultTransactionDefinition());
+        if(jdbc.queryForObject("select count(*) from information_schema.columns where table_schema='plm' and table_name='plm_project_cost_item' and column_name='actual_amount'",Long.class)==0)try(var migration=getClass().getResourceAsStream("/db/migration/V20261105_1600__project_cost_actuals.sql")){jdbc.execute(new String(migration.readAllBytes(),StandardCharsets.UTF_8));}
+        if(jdbc.queryForObject("select count(*) from information_schema.columns where table_schema='plm' and table_name='plm_development_budget' and column_name='freight_amount'",Long.class)==0)try(var migration=getClass().getResourceAsStream("/db/migration/V20261105_1630__inline_cost_corrections.sql")){jdbc.execute(new String(migration.readAllBytes(),StandardCharsets.UTF_8));}
         schema("plm_pilot_account","V20261012_1000__pilot_access.sql");schema("plm_development_budget","V20261012_1100__development_finance.sql");
         access=new PilotAccessService(jdbc,json);service=new DevelopmentFinanceService(jdbc,json,access,tx,mock(OperationLogService.class));imports=new DevelopmentFinanceImportService(service,mock(DevelopmentErpReadClient.class));
         var actor=jdbc.queryForList("select user_id,username,display_name from sys_user where deleted_flag=0 and status='active' and all_permissions=true order by user_id limit 1").get(0);admin=new CurrentUser(((Number)actor.get("user_id")).longValue(),actor.get("username").toString(),actor.get("display_name").toString(),true);CurrentUserContext.set(admin);
@@ -82,7 +85,7 @@ class DevelopmentFinanceLocalIntegrationTest {
     @Test void realFinancePermissionsAndObjectScopesRejectForgedAdministrator() {
         long id=jdbc.queryForObject("select max(user_id)+100 from sys_user",Long.class);jdbc.update("insert into sys_user(user_id,user_code,user_name,login_name,username,display_name,status,all_permissions) values(?,?,?,?,?,?,'active',false)",id,"finance-it-"+id,"财务权限测试","finance-it-"+id,"finance-real-"+id,"财务权限测试");jdbc.update("insert into plm_pilot_account(user_id,role_code,permissions,all_objects,created_by,updated_by) values(?,'domestic','[]'::jsonb,false,'test','test')",id);CurrentUserContext.set(new CurrentUser(id,"forged","forged",true));assertThatThrownBy(()->service.page("expense",new Query())).hasMessageContaining("finance:read");
         jdbc.update("update plm_pilot_account set role_code='finance',permissions='[\"finance:read\",\"finance:write\"]'::jsonb where user_id=?",id);assertThat(service.page("budget",new Query()).getContent()).isEmpty();assertThatThrownBy(()->service.createExpense(new CreateExpense("无对象授权",product,item,null,null,"CNY"),null)).hasMessageContaining("授权");
-        jdbc.update("insert into plm_pilot_scope(user_id,entity_type,entity_id) values(?,'item',?)",id,item);jdbc.update("insert into plm_pilot_scope(user_id,entity_type,entity_id) values(?,'product',?)",id,product);long expense=expense("CNY");assertThat(patch("expense",expense,Map.of("state","confirmed"),"无确认权限").status()).isEqualTo("forbidden");
+        jdbc.update("insert into plm_pilot_scope(user_id,entity_type,entity_id) values(?,'item',?)",id,item);jdbc.update("insert into plm_pilot_scope(user_id,entity_type,entity_id) values(?,'product',?)",id,product);long expense=expense("CNY");assertThat(patch("expense",expense,Map.of("state","confirmed"),"无确认权限").status()).isEqualTo("forbidden");assertThat(patch("expense",expense,Map.of("actualAmount",20,"actualDate","2026-11-05","actualBasis","合成依据"),"仅草稿").status()).isEqualTo("saved");assertThat(patch("expense",expense,Map.of("actualStatus","confirmed"),"实际仍须财务确认权限").status()).isEqualTo("forbidden");
     }
     @Test void serverPaginationLimitsRenderedPageAndSearchHitsAcrossPages() {
         for(int n=0;n<55;n++)service.createExpense(new CreateExpense("Paging fixture "+n,product,item,null,null,"CNY"),null);var q=new Query();q.setItemId(item);assertThat(service.page("expense",q).getContent()).hasSize(50);q.setPage(2);assertThat(service.page("expense",q).getContent()).hasSize(5);q.setPage(1);q.setKeyword("fixture 3");assertThat(service.page("expense",q).getTotalElements()).isEqualTo(11);
@@ -104,4 +107,94 @@ class DevelopmentFinanceLocalIntegrationTest {
         var path=Path.of(System.getenv("PLM_FINANCE_SOURCE_XLSX"));byte[] source=Files.readAllBytes(path);long before=jdbc.queryForObject("select count(*) from plm_development_budget",Long.class);var preview=imports.previewBudget(new MockMultipartFile("file",path.getFileName().toString(),"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",source));
         assertThat(preview).containsEntry("total",4);var rows=(List<Map<String,Object>>)preview.get("rows");assertThat(rows).extracting(r->r.get("rowNo")).containsExactly(2,3,4,5);assertThat(rows.get(0)).containsEntry("kind","platform").containsEntry("productLineId",null).containsEntry("calculatedTotal",new BigDecimal("21702.30"));assertThat(((Map<String,JsonNode>)rows.get(0).get("values")).get("transportRate").decimalValue()).isEqualByComparingTo("74.68");assertThat(Files.readAllBytes(path)).isEqualTo(source);assertThat(jdbc.queryForObject("select count(*) from plm_development_budget",Long.class)).isEqualTo(before);
     }
+    @SuppressWarnings("unchecked") Map<String,Object> investment(String entity,Query q){return (Map<String,Object>)service.summary(entity,q).get("investment");}
+    @SuppressWarnings("unchecked") List<Map<String,Object>> investmentGroups(String entity,Query q){return (List<Map<String,Object>>)investment(entity,q).get("currencyGroups");}
+    long actual(String currency,String category,int amount){long id=expense(currency);var result=patch("expense",id,Map.of("expenseCategory",category,"actualAmount",amount,"actualDate","2026-11-05","actualBasis","合成合同与付款依据","actualStatus","confirmed"),"隔离实际费用确认");assertThat(result.status()).as(result.message()).isEqualTo("saved");return id;}
+    long posted(String currency,String category,int amount){String voucher="actual-it-"+UUID.randomUUID();var preview=imports.previewErp(new ErpPreview(List.of(new ErpLine(voucher,"1","合成实际入账",currency,BigDecimal.valueOf(amount),"2026-11-05",amount<0?"synthetic-original/1":null,1))));imports.commitErp(new ErpCommit(preview.get("token").toString(),List.of(new ErpDecision(1,false,product,item,null,null,"合成合同归属"))),null);long id=jdbc.queryForObject("select project_cost_item_id from plm_project_cost_item where erp_voucher_id=?",Long.class,voucher);assertThat(patch("expense",id,Map.of("expenseCategory",category),"明确入账费用分类").status()).isEqualTo("saved");return id;}
+    @Test void projectInvestmentUsesCompleteLedgerAndDoesNotAddPlatformCeilingOrAmortisation(){
+        long ceiling=budget("platform","CNY");patch("budget",ceiling,Map.of("budgetAmount",99999),"整体预算仅参考");
+        long molds=budget("mold","CNY");patch("budget",molds,Map.of("moldCost",1000,"moldWeight",1,"transportRate",10,"fuelRate",2,"customsCost",30),"明确套费用");
+        jdbc.update("insert into plm_collaboration_item_project(item_id,project_id,linked_by) values(?,?,?)",item,product,admin.username());
+        long design=((Number)service.createBudget(new CreateBudget("platform","设计估算",product,null,null,null,"CNY","design"),null).get("budgetId")).longValue();patch("budget",design,Map.of("budgetAmount",80),"设计预计");
+        var q=new Query();q.setProjectId(product);q.setSize(1);var result=investment("budget",q);assertThat((List<?>)result.get("rows")).hasSize(4);assertThat((List<?>)result.get("references")).hasSize(1);
+        assertThat((BigDecimal)investmentGroups("budget",q).get(0).get("knownTotal")).isEqualByComparingTo("1122");assertThat(service.detail("budget",ceiling).get("budgetAmount")).isEqualTo(new BigDecimal("99999.00"));
+    }
+    @Test void actualsRequireTheirOwnConfirmationAndNeverAdoptDeclarationOrApproval(){
+        long id=expense("CNY");patch("expense",id,Map.of("declaredAmount",100,"requestedAmount",200,"approvedAmount",150,"approvalStatus","approved","approvalInstanceId","synthetic-approval"),"旧事实互不替代");var q=new Query();q.setItemId(item);assertThat(investmentGroups("expense",q).get(0).get("knownTotal")).isNull();
+        assertThat(patch("expense",id,Map.of("actualAmount",90),"未确认实际").status()).isEqualTo("saved");assertThat(investmentGroups("expense",q).get(0).get("knownTotal")).isNull();
+        assertThat(patch("expense",id,Map.of("actualStatus","confirmed"),"缺少依据").status()).isEqualTo("invalid");
+        assertThat(patch("expense",id,Map.of("actualDate","2026-11-05","actualBasis","合成发票已发生","actualStatus","confirmed"),"实际确认").status()).isEqualTo("saved");
+        assertThat((BigDecimal)investmentGroups("expense",q).get(0).get("knownTotal")).isEqualByComparingTo("90");assertThat(patch("expense",id,Map.of("actualAmount",10),"不能覆写已确认实际").status()).isEqualTo("invalid");assertThat(patch("expense",id,Map.of("expenseCategory","design"),"不可改变核销归属").status()).isEqualTo("invalid");
+    }
+    @Test void partialAndRepeatedErpCoverageDoesNotDoubleCountManualActuals(){
+        long manual=actual("CNY","mold",1000),a=posted("CNY","mold",400),b=posted("CNY","mold",300);var values=Map.<String,Object>of("actualManualExpenseId",manual,"actualCoveredAmount",400);assertThat(patch("expense",a,values,"第一笔覆盖").status()).isEqualTo("saved");assertThat(patch("expense",a,values,"重试不累加").status()).isEqualTo("saved");assertThat(patch("expense",b,Map.of("actualManualExpenseId",manual,"actualCoveredAmount",300),"第二笔覆盖").status()).isEqualTo("saved");
+        var q=new Query();q.setItemId(item);assertThat((BigDecimal)investmentGroups("expense",q).get(0).get("knownTotal")).isEqualByComparingTo("1000");assertThat(service.detail("expense",manual).get("actualCoveredTotal")).isEqualTo(new BigDecimal("700.00"));assertThat(patch("expense",manual,Map.of("state","void"),"有核销不可直接作废").status()).isEqualTo("invalid");
+    }
+    @Test void coverageRejectsWrongCurrencyExcessAndMissingRealActualAndKeepsErpOriginal(){
+        long manual=actual("CNY","customs",100),erp=posted("CNY","customs",200),usd=posted("USD","customs",100);assertThat(patch("expense",usd,Map.of("actualManualExpenseId",manual,"actualCoveredAmount",100),"不能混币").status()).isEqualTo("invalid");assertThat(patch("expense",erp,Map.of("actualManualExpenseId",manual,"actualCoveredAmount",101),"不能超出实际").status()).isEqualTo("invalid");assertThat(patch("expense",erp,Map.of("actualManualExpenseId",manual,"actualCoveredAmount",-1),"不能反向覆盖").status()).isEqualTo("invalid");
+        assertThat(service.detail("expense",erp)).containsEntry("actualManualExpenseId",null).containsEntry("erpPostedAmount",new BigDecimal("200.00"));
+    }
+    @Test void negativeReversalCoveragePreservesNetPostingAndRemainingManualAmount(){
+        long manual=actual("CNY","transport",100),erp=posted("CNY","transport",80),reversal=posted("CNY","transport",-20);patch("expense",erp,Map.of("actualManualExpenseId",manual,"actualCoveredAmount",80),"原入账覆盖");assertThat(patch("expense",reversal,Map.of("actualManualExpenseId",manual,"actualCoveredAmount",-20),"明确冲销覆盖").status()).isEqualTo("saved");var q=new Query();q.setItemId(item);assertThat((BigDecimal)investmentGroups("expense",q).get(0).get("knownTotal")).isEqualByComparingTo("100");assertThat(service.detail("expense",manual).get("actualCoveredTotal")).isEqualTo(new BigDecimal("60.00"));
+    }
+    @Test void actualSummaryIsNotTruncatedAtFiftyRowsAndKeepsZeroAndCurrencies(){
+        for(int n=0;n<55;n++)actual("CNY","sample",n==0?0:1);actual("USD","sample",2);var q=new Query();q.setItemId(item);q.setSize(1);assertThat(investmentGroups("expense",q)).hasSize(2).anySatisfy(g->{assertThat(g.get("currency")).isEqualTo("CNY");assertThat((BigDecimal)g.get("knownTotal")).isEqualByComparingTo("54");});assertThat((List<?>)investment("expense",q).get("rows")).hasSize(56);
+    }
+
+    @Test void unlinkedPostingsRequireExplicitReconciliationInsteadOfSilentlyCountingBoth(){
+        long manual=actual("CNY","mold",100),erp=posted("CNY","mold",100);var q=new Query();q.setItemId(item);
+        assertThat((BigDecimal)investmentGroups("expense",q).get(0).get("knownTotal")).isEqualByComparingTo("100");
+        assertThat((List<Map<String,Object>>)investment("expense",q).get("rows")).anySatisfy(row->assertThat(row).containsEntry("id",manual).containsEntry("amount",null).containsKey("note"));
+        assertThat(patch("expense",erp,Map.of("actualReconciliation","independent"),"合同核对：确为另一笔费用").status()).isEqualTo("saved");assertThat((BigDecimal)investmentGroups("expense",q).get(0).get("knownTotal")).isEqualByComparingTo("200");
+    }
+    @Test void replayOfTheSameActualPatchDoesNotDuplicateHistoryOrRequireNewConfirmation(){
+        long id=expense("CNY");var before=service.detail("expense",id);var changes=Map.<String,Object>of("actualAmount",50,"actualDate","2026-11-05","actualBasis","合成凭据","actualStatus","confirmed").entrySet().stream().map(e->new Change(e.getKey(),json.valueToTree(before.get(e.getKey())),json.valueToTree(e.getValue()))).toList();var batch=new Batch(List.of(new Patch(id,changes,"原请求重放")));assertThat(service.save("expense",batch,null).get(0).status()).isEqualTo("saved");long count=jdbc.queryForObject("select count(*) from plm_development_finance_history where entity_type='expense' and entity_id=?",Long.class,id);assertThat(service.save("expense",batch,null).get(0).status()).isEqualTo("saved");assertThat(jdbc.queryForObject("select count(*) from plm_development_finance_history where entity_type='expense' and entity_id=?",Long.class,id)).isEqualTo(count);
+    }
+
+    @Test void confirmedActualCorrectionKeepsOriginalAndTransfersOnlyExplicitErpCoverage(){
+        long old=actual("CNY","mold",1000),erp=posted("CNY","mold",400);patch("expense",erp,Map.of("actualManualExpenseId",old,"actualCoveredAmount",400),"明确原核销");
+        jdbc.update("update plm_project_cost_item set cost_name=? where project_cost_item_id=?","模具制作费（更正）（更正）",old);
+        var dto=new CreateExpense("更正",product,item,null,null,"CNY",null,old);long correction=((Number)service.createExpense(dto,null).get("expenseId")).longValue();assertThat(service.createExpense(dto,null).get("expenseId")).isEqualTo(correction);
+        assertThat(service.detail("expense",correction)).containsEntry("description","模具制作费");assertThat(service.detail("expense",old)).containsEntry("description","模具制作费（更正）（更正）");
+        patch("expense",correction,Map.of("actualAmount",1200,"actualDate","2026-11-05","actualBasis","合成发票更正"),"保存更正草稿");var q=new Query();q.setItemId(item);assertThat((BigDecimal)investmentGroups("expense",q).get(0).get("knownTotal")).isEqualByComparingTo("1000");
+        assertThat(patch("expense",correction,Map.of("actualStatus","confirmed"),"合成合同金额更正").status()).isEqualTo("saved");assertThat((BigDecimal)investmentGroups("expense",q).get(0).get("knownTotal")).isEqualByComparingTo("1200");assertThat(service.detail("expense",old)).containsEntry("actualAmount",new BigDecimal("1000.00")).containsEntry("actualReplacedById",correction);assertThat(service.detail("expense",erp)).containsEntry("actualManualExpenseId",correction).containsEntry("erpPostedAmount",new BigDecimal("400.00"));assertThat(service.history("expense",old,1,20).getContent()).anySatisfy(h->assertThat(h).containsEntry("fieldName","actualReplacedById"));
+        assertThat(service.createExpense(new CreateExpense("更正",product,item,null,null,"CNY",null,correction),null)).containsEntry("description","模具制作费");
+    }
+    @Test void correctionsCannotUndercutCoveredActualAndManualCandidatesFilterBeforePagination(){
+        long old=actual("CNY","design",500),erp=posted("CNY","design",300);patch("expense",erp,Map.of("actualManualExpenseId",old,"actualCoveredAmount",300),"原核销");long draft=expense("CNY");actual("CNY","sample",20);
+        var q=new Query();q.setItemId(item);q.setSourceSystem("manual");q.setActualStatus("confirmed");q.setExpenseCategory("design");q.setSize(1);assertThat(service.page("expense",q).getTotalElements()).isEqualTo(1);assertThat(service.page("expense",q).getContent()).singleElement().satisfies(row->assertThat(row.get("expenseId")).isEqualTo(old));
+        long correction=((Number)service.createExpense(new CreateExpense("更正",product,item,null,null,"CNY",null,old),null).get("expenseId")).longValue();assertThat(patch("expense",correction,Map.of("actualAmount",100,"actualDate","2026-11-05","actualBasis","合成","actualStatus","confirmed"),"低于已核销").status()).isEqualTo("invalid");assertThat(service.detail("expense",old).get("actualReplacedById")).isNull();assertThat(service.detail("expense",erp).get("actualManualExpenseId")).isEqualTo(old);
+    }
+    @Test void inlineMoldFreightOverridesTheCombinedFreightOnceAndCanReturnToRateCalculation(){
+        long id=budget("mold","CNY");patch("budget",id,Map.of("moldCost",1000,"moldWeight",2,"transportRate",10,"fuelRate",3,"customsCost",20),"原重量费率");assertThat(service.detail("budget",id).get("calculatedTotal")).isEqualTo(new BigDecimal("1046.00"));patch("budget",id,Map.of("freightAmount",50),"直接填写含燃油运费");assertThat(service.detail("budget",id).get("calculatedTotal")).isEqualTo(new BigDecimal("1070.00"));var q=new Query();q.setItemId(item);assertThat((BigDecimal)investmentGroups("budget",q).get(0).get("knownTotal")).isEqualByComparingTo("1070");var clear=new HashMap<String,Object>();clear.put("freightAmount",null);patch("budget",id,clear,"清除覆盖回到原费率");assertThat(service.detail("budget",id).get("calculatedTotal")).isEqualTo(new BigDecimal("1046.00"));
+    }
+
+    @Test void exportedBudgetsKeepExplicitFreightAndClassificationsForRoundTrip()throws Exception{
+        long id=budget("mold","CNY");patch("budget",id,Map.of("moldCost",100,"freightAmount",25,"customsCost",5),"合成直接运费");var q=new Query();q.setItemId(item);var bytes=imports.exportBudgets(q);try(var workbook=new org.apache.poi.xssf.usermodel.XSSFWorkbook(new java.io.ByteArrayInputStream(bytes))){var sheet=workbook.getSheetAt(0);int col=-1;for(var cell:sheet.getRow(0))if("模具运费总额（含燃油）".equals(cell.getStringCellValue()))col=cell.getColumnIndex();assertThat(col).isGreaterThanOrEqualTo(0);assertThat(sheet.getRow(1).getCell(col).getNumericCellValue()).isEqualTo(25);}
+        var preview=imports.previewBudget(new MockMultipartFile("file","synthetic-freight.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",bytes));var row=((List<Map<String,Object>>)preview.get("rows")).get(0);assertThat(((Map<String,JsonNode>)row.get("values")).get("freightAmount").decimalValue()).isEqualByComparingTo("25");
+    }
+
+    @Test void projectSummaryIncludesPlatformMappedExpensesWithoutPullingUnrelatedArchives(){
+        long id=((Number)service.createExpense(new CreateExpense("平台合成实际",product,null,null,null,"CNY"),null).get("expenseId")).longValue();patch("expense",id,Map.of("expenseCategory","design","actualAmount",25,"actualDate","2026-11-05","actualBasis","平台设计依据","actualStatus","confirmed"),"平台直接费用");actual("CNY","mold",100);var q=new Query();q.setProjectId(product);assertThat(service.page("expense",q).getContent()).singleElement().satisfies(row->assertThat(row.get("expenseId")).isEqualTo(id));assertThat((BigDecimal)investmentGroups("expense",q).get(0).get("knownTotal")).isEqualByComparingTo("25");
+    }
+
+    @Test void staleDisplayedBudgetCannotOverwriteAnInterveningCostChange(){
+        long id=budget("mold","CNY");patch("budget",id,Map.of("moldCost",100),"原显示金额");var q=new Query();q.setItemId(item);var line=((List<Map<String,Object>>)investment("budget",q).get("rows")).get(0);var before=(Map<String,Object>)line.get("sourceValues");patch("budget",id,Map.of("moldCost",130),"另一位财务已修订");var stale=new Patch(id,List.of(new Change("moldCost",json.valueToTree(before.get("moldCost")),json.valueToTree(110))),"旧页面修改");assertThat(service.save("budget",new Batch(List.of(stale)),null).get(0).status()).isEqualTo("conflict");assertThat(service.detail("budget",id).get("moldCost")).isEqualTo(new BigDecimal("130.00"));
+    }
+    @Test void confirmedCorrectionStillAllowsNotesAndNormalVoidingWithoutRevivingOriginal(){
+        long original=actual("CNY","design",100);long correction=((Number)service.createExpense(new CreateExpense("更正",product,item,null,null,"CNY",null,original),null).get("expenseId")).longValue();assertThat(patch("expense",correction,Map.of("actualAmount",120,"actualDate","2026-11-05","actualBasis","合成更正","actualStatus","confirmed"),"金额核对").status()).isEqualTo("saved");assertThat(patch("expense",correction,Map.of("notes","更正后的补充说明"),"补充备注").status()).isEqualTo("saved");assertThat(patch("expense",correction,Map.of("state","void"),"原费用作废规则").status()).isEqualTo("saved");assertThat(service.detail("expense",original)).containsEntry("actualAmount",new BigDecimal("100.00")).containsEntry("actualReplacedById",correction);assertThat(service.detail("expense",correction)).containsEntry("actualAmount",new BigDecimal("120.00")).containsEntry("state","void");
+    }
+    @Test void pendingReplacementKeepsCurrentActualCompleteAndUnitCostsUseItUntilTheSavedChangeTakesEffect(){
+        long budget=((Number)service.createBudget(new CreateBudget("platform","已知模具预计",product,null,null,null,"CNY","mold"),null).get("budgetId")).longValue();patch("budget",budget,Map.of("budgetAmount",12000),"合成预计");
+        long original=((Number)service.createExpense(new CreateExpense("模具制作费",null,null,null,null,"CNY",product),null).get("expenseId")).longValue();patch("expense",original,Map.of("expenseCategory","mold","actualAmount",4000,"actualDate","2026-11-05","actualBasis","合成实际依据","actualStatus","confirmed"),"合成实际");
+        var workflow=new com.yuewei.plm.module.project.development.DevelopmentUnitCostWorkflow(access,new com.yuewei.plm.module.project.development.UnitCostSheetCalculator(new com.yuewei.plm.module.bom.service.BomCostCalculator()),mock(com.yuewei.plm.module.bom.service.ProductBomWorkflowService.class),jdbc,mock(com.yuewei.plm.module.project.development.DevelopmentWorkflowStore.class),service);
+        var input=new LinkedHashMap<String,Object>(Map.of("currency","CNY","taxBasis","source","useProjectInvestment",true,"rows",List.of(Map.of("id","tool","category","tooling","mode","divide","unitPrice",99999,"allocationQty",100))));
+        long draft=((Number)service.createExpense(new CreateExpense("模具制作费",null,null,null,null,"CNY",product,original),null).get("expenseId")).longValue();patch("expense",draft,Map.of("actualAmount",5000,"actualDate","2026-11-05","actualBasis","合成待保存变更"),"合成变更草稿");
+        var q=new Query();q.setProjectId(product);var aggregate=(Map<String,Object>)service.summary("expense",q).get("investment");var groups=(List<Map<String,Object>>)aggregate.get("currencyGroups");var parts=(List<Map<String,Object>>)groups.get(0).get("categories");assertThat(parts).anySatisfy(part->assertThat(part).containsEntry("category","mold").containsEntry("missingCount",0).containsEntry("knownTotal",new BigDecimal("4000.00")));
+        assertThat(((List<Map<String,Object>>)aggregate.get("rows"))).hasSize(2);
+        var before=workflow.preview(product,input);var rows=(List<Map<String,Object>>)before.get("rows");assertThat(rows).anySatisfy(row->{assertThat(row.get("category")).isEqualTo("tooling");assertThat((BigDecimal)row.get("unitPrice")).isEqualByComparingTo("4000");});
+        assertThat(patch("expense",draft,Map.of("actualStatus","confirmed"),"合成正式保存").status()).isEqualTo("saved");
+        var after=(List<Map<String,Object>>)workflow.preview(product,before).get("rows");assertThat(after).anySatisfy(row->{assertThat(row.get("category")).isEqualTo("tooling");assertThat((BigDecimal)row.get("unitPrice")).isEqualByComparingTo("5000");});assertThat(service.detail("expense",original)).containsEntry("actualAmount",new BigDecimal("4000.00"));
+    }
+
 }

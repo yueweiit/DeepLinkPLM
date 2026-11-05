@@ -24,10 +24,10 @@ export function parseFinancePaste(text: string) { return text.replace(/\r/g, '')
 export function financeValue(text: string, numeric: boolean): FinanceValue { const value = text.trim(); if (!value) return null; if (!numeric) return value; if (!/^\d+(?:\.\d+)?$/.test(value)) throw new Error('金额须为非负数字，未知留空'); return value }
 export function previewFormula(row: FinanceRow) {
   if (row.calculationMode === 'manual') return row.budgetAmount == null || row.budgetAmount === '' || !Number.isFinite(Number(row.budgetAmount)) || Number(row.budgetAmount)<0 ? null : Number(row.budgetAmount)
-  const fields = ['moldCost', 'moldWeight', 'transportRate', 'fuelRate', 'customsCost']
+  const fields = row.freightAmount==null||row.freightAmount===''?['moldCost','moldWeight','transportRate','fuelRate','customsCost']:['moldCost','freightAmount','customsCost']
   if (fields.some(k => row[k] == null || row[k] === '' || !Number.isFinite(Number(row[k])) || Number(row[k]) < 0)) return null
   const round = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
-  return round(Number(row.moldCost) + round(Number(row.moldWeight) * Number(row.transportRate)) + round(Number(row.moldWeight) * Number(row.fuelRate)) + Number(row.customsCost))
+  return round(Number(row.moldCost) + (row.freightAmount==null||row.freightAmount===''?round(Number(row.moldWeight)*Number(row.transportRate))+round(Number(row.moldWeight)*Number(row.fuelRate)):Number(row.freightAmount)) + Number(row.customsCost))
 }
 export function previewBreakEvenQuantity(row: FinanceRow) {
   const total=previewFormula(row)

@@ -50,6 +50,8 @@ import {
   getPhoneModelOptions,
 } from "@/api/modules/phoneReference";
 import { archiveMoldFiles, getMoldApplication, getResearchMoldApplicationContext, saveResearchMoldCoding, moldBusinessStatusNames, type MoldApplication, type ResearchCodingInput } from "@/api/modules/moldApplications";
+import type {EngineeringPlan} from '@/api/modules/moldApplications';
+import {getManufacturingRelation} from '@/api/modules/manufacturing';
 import MoldApplicationEditor from "@/views/mold-applications/components/MoldApplicationEditor.vue";
 import MoldApplicationDetailDrawer from "@/views/mold-applications/components/MoldApplicationDetailDrawer.vue";
 import PhoneModelMultiSelect from "@/components/PhoneModelMultiSelect/index.vue";
@@ -91,7 +93,7 @@ import SupplierFeedbackPanel from "./components/SupplierFeedbackPanel.vue";
 import EngineeringBasisPanel from "./components/EngineeringBasisPanel.vue";
 import DocumentPreview from "@/views/file/components/DocumentPreview.vue";
 import StageReadinessChecklist from "./components/StageReadinessChecklist.vue";
-import UnitCostSheet from "./components/UnitCostSheet.vue";
+import ProjectCostWorkspace from "./components/ProjectCostWorkspace.vue";
 import SharedCompatiblePhoneSelector from "@/views/mold/components/SharedCompatiblePhoneSelector.vue";
 const ProjectBomPanel = defineAsyncComponent(
   () => import("./components/ProjectBomPanel.vue"),
@@ -143,8 +145,6 @@ async function showMaterials(focusUpload=false){
   target?.scrollIntoView?.({block:'start',behavior:'smooth'});
   if(focusUpload)target?.querySelector<HTMLElement>('[data-readiness-focus="product3d-upload"], [data-readiness-focus="upload"]')?.focus({preventScroll:true});
 }
-const costSheet=ref<InstanceType<typeof UnitCostSheet>|null>(null);
-async function changeCostType(value:any){if(costType.value==='unit'&&value!=='unit'&&costSheet.value&&!(await costSheet.value.canLeave()))return;costType.value=String(value);}
 const rows = ref<ProductResearchRow[]>([]),
   total = ref(0),
   page = ref(1),
@@ -243,8 +243,6 @@ const finances = ref<{ budgets: FinanceRow[]; expenses: FinanceRow[] }>({
   financeSummary = ref<Form>({}),
   financePage = ref(1),
   financeTotals = ref({budget:0,expense:0}),
-  financeTotal = computed(()=>costType.value==='budget'?financeTotals.value.budget:financeTotals.value.expense),
-  costType = ref("unit"),
   quotes = ref<Form[]>([]);
 const moldChoices = ref<Form[]>([]),
   manualMoldLinkOpen=ref(false),
@@ -254,8 +252,7 @@ const moldChoices = ref<Form[]>([]),
   reuseConfirmed=ref(false),reuseReason=ref("");
 const moldApplicationEditor=ref<InstanceType<typeof MoldApplicationEditor>>();
 const moldApplicationDetails=ref<InstanceType<typeof MoldApplicationDetailDrawer>>();
-const otherPhoneOpen=ref(false),otherPhoneIds=ref<number[]>([]),otherPhoneVersion=ref(0),otherPhoneOpening=ref(false);
-let otherPhoneContext:MoldApplicationContext|undefined;
+const otherPhoneOpening=ref(false);
 let moldApplicationEpoch=0;
 const publicationOpen = ref(false),
   publication = reactive({ reason: "", dueDate: "", risk: false });
@@ -1025,7 +1022,6 @@ async function openLinkedCost(row:Form,type:"budget"|"expense") {
     openSource(type==="budget"?"/development-budgets":"/development-expenses",{projectId:id.value,...(type==="budget"?{kind:row.budgetKind,budgetId:row.budgetId}:{expenseId:row.expenseId})});
   } catch(e) {error.value=e instanceof Error?e.message:'关联成本载入失败';ElMessage.error(error.value);}
 }
-watch(costType,()=>{financePage.value=1;if(workspace.value==='cost' && costType.value!=='unit' && id.value)void loadFinance().catch(e=>{error.value=e instanceof Error?e.message:'成本载入失败'});});
 async function loadFinance() {
   if (!canMoney.value) return;
   const project=id.value, requestedPage=financePage.value;
@@ -1156,20 +1152,20 @@ function openMoldApplicationEntry(){const application=primaryMoldApplication.val
 async function showApplicationProgress(applicationId:number,projectId=id.value,initial?:MoldApplication){await moldApplicationDetails.value?.open(applicationId,{projectId:projectId||undefined,initial});}
 async function openOtherPhone(projectId=id.value){
   if(!projectId||busy.value||otherPhoneOpening.value)return;
-  const context={epoch:++moldApplicationEpoch,project:projectId,auth:user.token,host:id.value};otherPhoneContext=context;otherPhoneIds.value=[];otherPhoneOpening.value=true;
+  const context={epoch:++moldApplicationEpoch,project:projectId,auth:user.token,host:id.value};otherPhoneOpening.value=true;
   moldApplicationDetails.value?.close();
-  try{const project=await getProductResearchDetail(projectId);if(!currentMoldApplication(context))return;if(project.productId!==projectId||!project.moldApplicationEntry?.canCreate||!project.moldApplicationEntry.eligible)throw Error(project.moldApplicationEntry?.reason||'当前账号无填写开模申请权限');otherPhoneVersion.value=project.workflow.version;otherPhoneOpen.value=true;}
-  catch(e){if(currentMoldApplication(context))ElMessage.error(uiText(e instanceof Error?e.message:'载入失败'));}finally{if(currentMoldApplication(context))otherPhoneOpening.value=false;}
-}
-async function continueOtherPhone(){
-  const context=otherPhoneContext,phone=otherPhoneIds.value[0];if(!context||!phone||!currentMoldApplication(context)||otherPhoneOpening.value)return;
-  otherPhoneOpening.value=true;
-  try{const source=await getResearchMoldApplicationContext({projectId:context.project,version:otherPhoneVersion.value,phoneModelId:phone});if(!currentMoldApplication(context))return;if(source.productLineId!==context.project||source.sourceSnapshot?.research?.projectId!==context.project||source.phoneModelId!==phone)throw Error('返回的项目申请资料不匹配，请刷新后重试');otherPhoneOpen.value=false;
+  try{const project=await getProductResearchDetail(projectId);if(!currentMoldApplication(context))return;if(project.productId!==projectId||!project.moldApplicationEntry?.canCreate||!project.moldApplicationEntry.eligible)throw Error(project.moldApplicationEntry?.reason||'当前账号无填写开模申请权限');const source=await getResearchMoldApplicationContext({projectId,version:project.workflow.version});if(!currentMoldApplication(context))return;if(source.productLineId!==projectId||source.sourceSnapshot?.research?.projectId!==projectId)throw Error('返回的项目申请资料不匹配，请刷新后重试');
     if(source.existingApplication){await loadMoldApplicationEditor(source.existingApplication.applicationId,context);return;}
     await moldApplicationEditor.value?.openResearch(source,{projectInputUnsaved:context.project===id.value&&dirty.value});
   }catch(e){if(currentMoldApplication(context))ElMessage.error(uiText(e instanceof Error?e.message:'载入失败'));}finally{if(currentMoldApplication(context))otherPhoneOpening.value=false;}
 }
-function cancelOtherPhone(){++moldApplicationEpoch;otherPhoneOpen.value=false;otherPhoneContext=undefined;otherPhoneOpening.value=false;otherPhoneIds.value=[];}
+async function confirmEngineeringReuse(projectId:number,plan:EngineeringPlan){
+ await action(async()=>{
+  const project=await getProductResearchDetail(projectId);if((project.workflow.revision?.stage||project.currentStepNo)!==5)throw Error('适配关系可以先维护；项目正式采用请在模具设计阶段办理，不会跳过研发步骤');
+  const relations=await Promise.all(plan.specifications.map(row=>getManufacturingRelation(row.manufacturingRelationId!)));const sets=[...new Set(relations.map(row=>row.moldSetId))];if(sets.length!==1)throw Error('本次沿用须明确同一实物套，不同模具请分别办理');
+  const updated=await researchAction(projectId,'mold_link',project.workflow.version,{moldSetId:sets[0],reuseConfirmed:true,reason:'采用逐规格工程确认的共模及制造关系',engineeringPlan:plan});if(projectId===id.value)detail.value=updated;collaboration.changed();moldApplicationEditor.value?.invalidate?.();ElMessage.success(uiText('已确认沿用，原编码、物料与历史保留，未发起新审批'));await refresh();
+ });
+}
 function editDrawerApplication(row:MoldApplication){const project=row.sourceSnapshot?.research?.projectId||row.productLineId;if(project)void editMoldApplication(row.applicationId,project);}
 function applicationChanged(){void refresh().catch(()=>{});}
 async function prepareMoldApplication(){
@@ -1213,7 +1209,7 @@ async function archiveApplicationFiles(application:Form){
   else ElMessage.success(uiText('原审批附件已归档，可直接预览和下载'));
  });
 }
-watch(()=>[id.value,user.token],()=>{++moldApplicationEpoch;moldApplicationDetails.value?.close();moldApplicationEditor.value?.invalidate?.();otherPhoneOpen.value=false;otherPhoneContext=undefined;otherPhoneOpening.value=false;otherPhoneIds.value=[];});
+watch(()=>[id.value,user.token],()=>{++moldApplicationEpoch;moldApplicationDetails.value?.close();moldApplicationEditor.value?.invalidate?.();otherPhoneOpening.value=false;});
 async function confirmNoMold(){await action(async()=>{await command('no_mold',{reason:noMoldReason.value,references:materialReferences(keys.value)});dirty.value=false;ElMessage.success(uiText('已核对当前方案的无需开模依据'));});}
 async function restartMold(mold: Form) {
   await action(async () => {
@@ -1352,7 +1348,7 @@ function resultLabel(value: string) {
 </script>
 
 <template>
-  <section ref="pageElement" class="launch-page" v-loading="loading">
+  <section ref="pageElement" class="launch-page" :class="{ 'cost-page-layout': workspace==='cost' }" v-loading="loading">
     <el-alert
       v-if="error"
       :title="error"
@@ -1404,7 +1400,7 @@ function resultLabel(value: string) {
             <div class="supplier-line"><span v-if="row.supplierNames?.length">{{row.supplierNames.join('、')}}</span><el-button class="supplier-feedback-summary" link :type="row.supplierFeedbackSummary?.nextSupplierPending&&!row.supplierFeedbackSummary?.restricted?'warning':undefined" :disabled="row.supplierFeedbackSummary?.restricted" :aria-label="uiText('查看{value0}的供应商反馈原因与附件',{value0:row.productName})" @click="routeTo(row.currentStepNo||1,row.productId,'supplier-feedback')">{{uiText(supplierFeedbackLabel(row.supplierFeedbackSummary))}}</el-button></div>
             <div v-for="application in applicationHighlights(row)" :key="application.applicationId" class="approval-line"><span>{{applicationPhoneLabel(application)}} · {{applicationStatus(application)}}</span><span v-if="application.businessStatus==='rejected'||application.refusal" class="approval-reason">{{application.refusal?.reason||uiText('审批意见未提供')}}</span><el-button link type="primary" @click="showApplicationProgress(application.applicationId,row.productId)">{{uiText(application.terminal?'查看原审批':'查看审批进度')}}</el-button></div>
           </div>
-          <div class="row-actions"><el-button type="primary" link @click="routeTo(row.currentStepNo||1,row.productId)">{{uiText('查看／办理')}}</el-button><el-popover v-if="row.moldApplicationSummary?.totalCount" trigger="click" :width="340" :popper-style="{maxWidth:'calc(100vw - 24px)'}"><template #reference><el-button link>{{uiText('审批记录（{value0}）',{value0:row.moldApplicationSummary.totalCount})}}</el-button></template><div class="application-choices"><el-button v-for="application in row.moldApplicationSummary.applications" :key="application.applicationId" text @click="showApplicationProgress(application.applicationId,row.productId)">{{applicationPhoneLabel(application)}} · {{applicationStatus(application)}}</el-button></div></el-popover><el-button v-if="row.moldApplicationSummary?.canCreate" link type="primary" :disabled="otherPhoneOpening" @click="openOtherPhone(row.productId)">{{uiText(row.moldApplicationSummary.totalCount?'选择其他型号':'发起LEMOS开模申请')}}</el-button><el-button v-if="row.currentStepNo===1&&row.status==='draft'&&user.hasPermission('documents:write')" link type="danger" @click="deleteProjectDraft(row)">{{uiText('删除草稿')}}</el-button></div>
+          <div class="row-actions"><el-button type="primary" link @click="routeTo(row.currentStepNo||1,row.productId)">{{uiText('查看／办理')}}</el-button><el-popover v-if="row.moldApplicationSummary?.totalCount" trigger="click" :width="340" :popper-style="{maxWidth:'calc(100vw - 24px)'}"><template #reference><el-button link>{{uiText('审批记录（{value0}）',{value0:row.moldApplicationSummary.totalCount})}}</el-button></template><div class="application-choices"><el-button v-for="application in row.moldApplicationSummary.applications" :key="application.applicationId" text @click="showApplicationProgress(application.applicationId,row.productId)">{{applicationPhoneLabel(application)}} · {{applicationStatus(application)}}</el-button></div></el-popover><el-button v-if="row.moldApplicationSummary?.canCreate" link type="primary" :disabled="otherPhoneOpening" @click="openOtherPhone(row.productId)">{{uiText(row.moldApplicationSummary.totalCount?'办理其他模具需求':'发起LEMOS开模申请')}}</el-button><el-button v-if="row.currentStepNo===1&&row.status==='draft'&&user.hasPermission('documents:write')" link type="danger" @click="deleteProjectDraft(row)">{{uiText('删除草稿')}}</el-button></div>
         </article>
       </div>
       <el-pagination
@@ -1442,7 +1438,7 @@ function resultLabel(value: string) {
           </el-dropdown>
         </div>
       </header>
-      <section v-if="stage.step!==5&&showMoldApplicationEntry&&applications.length" class="research-mold-entry" :aria-label='uiText("LEMOS开模申请")'><el-button v-if="canPrepareMoldApplication" link type="primary" :disabled="busy||otherPhoneOpening" @click="openOtherPhone()">{{uiText('选择其他型号')}}</el-button>
+      <section v-if="stage.step!==5&&showMoldApplicationEntry&&applications.length" class="research-mold-entry" :aria-label='uiText("LEMOS开模申请")'><el-button v-if="canPrepareMoldApplication" link type="primary" :disabled="busy||otherPhoneOpening" @click="openOtherPhone()">{{uiText('办理其他模具需求')}}</el-button>
         <div v-for="application in applications" :key="application.applicationId" class="research-application-row">
           <span><strong>{{application.approvalNo||uiText('申请 #{value0}',{value0:(application.applicationId)})}}</strong> · {{applicationPhoneLabel(application)}} · {{applicationStatus(application)}}</span>
           <el-button v-if="application.status==='draft'&&application.canEditDraft===true&&moldApplicationEntry?.canCreate" link type="primary" :disabled="busy" @click="editMoldApplication(application.applicationId)">{{ uiText("继续填写") }}</el-button>
@@ -1478,162 +1474,8 @@ function resultLabel(value: string) {
             >{{ uiText("计划上市 ") }}{{ confirmedPlan.launchDate }}</span
           >
         </header>
-        <div class="list-scroll" :class="{ 'unit-cost-workspace': workspace === 'cost' && costType === 'unit' }">
-          <template v-if="workspace === 'cost'">
-            <div class="toolbar">
-              <el-radio-group :model-value="costType" @change="changeCostType"
-                ><el-radio-button value="unit">{{ uiText("单件成本") }}</el-radio-button><el-radio-button value="budget">{{ uiText("预算") }}</el-radio-button
-                ><el-radio-button value="quote">{{ uiText("报价") }}</el-radio-button
-                ><el-radio-button value="expense"
-                  >{{ uiText("费用") }}</el-radio-button
-                ></el-radio-group
-              ><el-button
-                v-if="
-                  canFinanceWrite && parallelWritable && !['quote','unit'].includes(costType)
-                "
-                type="primary"
-                @click="
-                  openTask('cost', {
-                    type: costType,
-                    name: costType === 'budget' ? '项目开发预算' : '',
-                  })
-                "
-                >{{ uiText("登记") }}{{
-                  costType === "budget" ? uiText('项目预算') : uiText('费用')
-                }}</el-button
-              ><el-button
-                v-if="
-                  costType === 'quote' &&
-                  parallelWritable &&
-                  canFinanceWrite
-                "
-                @click="openTask('quote', { unit: '每件' })"
-                >{{ uiText("新增供方报价") }}</el-button
-              >
-            </div>
-            <UnitCostSheet ref="costSheet" v-if="costType==='unit'" :detail="detail" @updated="childUpdated"/>
-            <template v-else>
-            <p class="muted">{{ uiText(" 目标单件成本：") }}{{ profile.targetCost ?? uiText('待定') }}
-              {{ profile.currency }}／{{ profile.costUnit }}{{ uiText("。预算、报价、申报和 ERP 入账分开核对。 ") }}</p>
-            <div
-              class="summary-line"
-              v-for="group in financeSummary[costType]?.currencyGroups || []"
-              :key="String(group.currencyCode)"
-            >
-              <strong
-                >{{ group.currencyCode }} ·
-                {{
-                  costType === "budget"
-                    ? group.budgetKind === "platform"
-                      ? uiText('项目总预算')
-                      : uiText('模具分项预算')
-                    : uiText('费用')
-                }}</strong
-              ><span v-if="costType === 'budget'">
-                {{ group.budgetTotal ?? uiText('待定') }}{{ uiText(" · 未知 ") }}{{ group.unknownCount }}{{ uiText(" 项") }}</span
-              ><span v-else>{{ uiText(" 申报 ") }}{{ group.declaredTotal ?? uiText('待定') }}{{ uiText(" · 审批 ") }}{{ group.approvedTotal ?? uiText('待定') }}{{ uiText(" · ERP净额 ") }}{{ group.erpPostedNet ?? uiText('待定') }}</span
-              >
-            </div>
-            <template v-if="costType !== 'quote'"
-              ><article
-                v-for="row in costType === 'budget'
-                  ? finances.budgets
-                  : finances.expenses"
-                :key="String(row.budgetId || row.expenseId)"
-                class="business-row"
-              >
-                <strong>{{ row.budgetName || row.description }}</strong>
-                <div>
-                  {{ row.currencyCode }} ·
-                  {{
-                    costType === "budget"
-                      ? uiText('预算 {value0}',{value0:(row.calculatedTotal ?? row.budgetAmount ?? "未知")})
-                      : uiText('申报 {value0} · {value1}',{value0:(row.declaredAmount ?? "未知"),value1:(row.sourceSystem === "erp" ? "ERP 入账" : "手工记录")})
-                  }}
-                </div>
-                <div class="row-actions">
-                  <el-button link @click="openLinkedCost(row,costType==='budget'?'budget':'expense')">{{ uiText("查看原台账与历史") }}</el-button><el-button link @click="inspect(row, '原台账当前值')"
-                    >{{ uiText("详情") }}</el-button
-                  ><el-button
-                    v-if="
-                      canFinanceWrite &&
-                      parallelWritable && ownedCost(row) &&
-                      (costType === 'budget' ? row.budgetKind === 'platform' : row.state === 'draft')
-                    "
-                    link
-                    type="primary"
-                    @click="
-                      openTask('cost', {
-                        type: costType,
-                        id: row.budgetId || row.expenseId,
-                        name: row.budgetName || row.description,
-                        amount: row.budgetAmount ?? row.declaredAmount,
-                        currency: row.currencyCode,
-                        category: row.expenseCategory || 'other',
-                        expectedUpdatedAt: row.updatedAt,
-                        expectedVersionNo: row.versionNo,
-                      })
-                    "
-                    >{{ uiText("修改留痕") }}</el-button
-                  >
-                </div>
-              </article>
-              <el-pagination
-                v-if="financeTotal > 50"
-                v-model:current-page="financePage"
-                :total="financeTotal"
-                :page-size="50"
-                layout="prev,pager,next,total"
-                @current-change="loadFinance"
-            /></template>
-            <template v-else
-              ><article
-                v-for="q in quotes"
-                :key="q.eventId"
-                class="business-row"
-              >
-                <strong
-                  >{{ q.supplierName }} · {{ q.amount }} {{ q.currency }}／{{
-                    q.unit
-                  }}</strong
-                ><span>{{ q.conditions || uiText('条件见版本详情') }}</span
-                ><el-button link @click="inspect(q, '样品报价版本')"
-                  >{{ uiText("查看版本") }}</el-button
-                >
-              </article>
-              <article
-                v-for="m in molds"
-                :key="m.moldSetId"
-                class="business-row"
-              >
-                <strong>{{ m.assetNumber || m.setName }}{{ uiText(" · 原模具报价") }}</strong
-                ><span
-                  >{{ m.quoteAmount ?? uiText('未知') }} {{ m.quoteCurrency }} ·
-                  {{ m.quoteConfirmed ? uiText('已确认') : uiText('待核对') }}</span
-                ><el-button
-                  link
-                  @click="
-                    openSource('/molds', { moldSetId: m.moldSetId })
-                  "
-                  >{{ uiText("维护原报价") }}</el-button
-                >
-              </article></template
-            >
-            <div class="row-actions">
-              <el-button
-                @click="
-                  openSource('/development-budgets', { projectId: id, kind: 'platform' })
-                "
-                >{{ uiText("原预算台账") }}</el-button
-              ><el-button
-                @click="
-                  openSource('/development-expenses', { projectId: id })
-                "
-                >{{ uiText("原费用归集") }}</el-button
-              >
-            </div>
-            </template>
-          </template>
+        <div class="list-scroll" :class="{ 'cost-page-scroll': workspace === 'cost' }">
+          <ProjectCostWorkspace v-if="workspace === 'cost'" :detail="detail" @updated="childUpdated" @source="openLinkedCost" @quote="openTask('quote',{unit:'每件'})" />
           <template v-else-if="workspace === 'promotion'"
             ><div class="toolbar">
               <h3>{{ uiText("渠道推广") }}</h3>
@@ -2563,8 +2405,7 @@ function resultLabel(value: string) {
       ></el-dialog
     >
     <MoldApplicationDetailDrawer ref="moldApplicationDetails" :project-id="id" research-host @edit="editDrawerApplication" @changed="applicationChanged" @deleted="applicationChanged" @other-phone="openOtherPhone"/>
-    <MoldApplicationEditor :key="id" ref="moldApplicationEditor" @saved="moldApplicationSaved" @submitted="moldApplicationSubmitted" @progress="showApplicationProgress"/>
-    <el-dialog :model-value="otherPhoneOpen" @update:model-value="(value:boolean)=>{if(!value)cancelOtherPhone()}" :title="uiText('选择要继续申请的手机型号')" width="min(620px,94vw)" :close-on-click-modal="false"><PhoneModelMultiSelect v-model="otherPhoneIds" :multiple="false" :disabled="otherPhoneOpening" :aria-label="uiText('选择其他型号')"/><template #footer><el-button :disabled="otherPhoneOpening" @click="cancelOtherPhone">{{uiText('取消')}}</el-button><el-button type="primary" :loading="otherPhoneOpening" :disabled="!otherPhoneIds.length" @click="continueOtherPhone">{{uiText('为所选型号填写申请')}}</el-button></template></el-dialog>
+    <MoldApplicationEditor :key="id" ref="moldApplicationEditor" @saved="moldApplicationSaved" @submitted="moldApplicationSubmitted" @progress="showApplicationProgress" @reuse="confirmEngineeringReuse"/>
   </section>
 </template>
 
@@ -2664,9 +2505,7 @@ h3,.work-heading{font-size:14px;font-weight:700;line-height:1.5;margin:0 0 12px}
 .save-bar .el-button--primary{font-weight:600}
 .readonly-notice{background:var(--el-fill-color-light);padding:8px 12px;line-height:1.6;border-radius:4px;flex:none}
 .list-scroll{flex:1;min-height:0;overflow:auto;overflow-x:hidden;background:var(--el-bg-color);border:1px solid var(--el-border-color-lighter);border-radius:6px}
-.unit-cost-workspace{display:flex;flex-direction:column;gap:8px;overflow:hidden;padding:8px}
-.unit-cost-workspace>.toolbar{flex:none}
-.unit-cost-workspace :deep(.unit-cost-sheet){flex:1;min-height:0}
+.launch-page.cost-page-layout{overflow-y:auto;overflow-x:hidden}.cost-page-layout>.heading,.cost-page-layout>.toolbar,.cost-page-layout>.business-relations{flex:none}.list-scroll.cost-page-scroll{flex:none;overflow:visible;background:transparent;border:0;border-radius:0}
 .project-row,.business-row,.mold-row{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--el-border-color-lighter);overflow-wrap:anywhere;min-height:44px}
 .approval-line,.phone-line{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 8px;min-width:0;overflow-wrap:anywhere}.approval-line{margin-top:5px}.approval-reason{color:var(--el-color-danger)}.application-choices{display:flex;flex-direction:column;align-items:flex-start;max-height:min(440px,60vh);overflow-y:auto;overflow-x:hidden}.application-choices .el-button{height:auto;white-space:normal;text-align:left;max-width:100%}
 .project-row>div:first-child>strong{font-size:14px;font-weight:700}

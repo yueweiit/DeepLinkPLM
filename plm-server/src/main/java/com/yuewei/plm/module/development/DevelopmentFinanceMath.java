@@ -10,7 +10,7 @@ public final class DevelopmentFinanceMath {
     public static final BigDecimal TRANSPORT_RATE=new BigDecimal("74.68");
     public static final BigDecimal FUEL_RATE=new BigDecimal("33.18");
     /** The same nullable formula used by SQL row summaries; alias b is code-owned. */
-    public static final String SQL_TOTAL="case when b.calculation_mode='manual' then b.budget_amount when b.mold_cost is not null and b.mold_weight is not null and b.transport_rate is not null and b.fuel_rate is not null and b.customs_cost is not null then b.mold_cost+round(b.mold_weight*b.transport_rate,2)+round(b.mold_weight*b.fuel_rate,2)+b.customs_cost end";
+    public static final String SQL_TOTAL="case when b.calculation_mode='manual' then b.budget_amount when b.mold_cost is not null and (b.freight_amount is not null or (b.mold_weight is not null and b.transport_rate is not null and b.fuel_rate is not null)) and b.customs_cost is not null then b.mold_cost+coalesce(b.freight_amount,round(b.mold_weight*b.transport_rate,2)+round(b.mold_weight*b.fuel_rate,2))+b.customs_cost end";
     private DevelopmentFinanceMath() {}
     public static BusinessException invalid(String message) {return new BusinessException(40001,message);}
     public static BigDecimal decimal(Object value) {return value==null?null:new BigDecimal(value.toString());}
@@ -19,12 +19,14 @@ public final class DevelopmentFinanceMath {
         if("manual".equals(row.get("calculationMode"))) return decimal(row.get("budgetAmount"));
         Object mold=row.get("moldCost"),customs=row.get("customsCost");
         BigDecimal transport=multiply(row.get("moldWeight"),row.get("transportRate")),fuel=multiply(row.get("moldWeight"),row.get("fuelRate"));
-        return mold==null||customs==null||transport==null||fuel==null?null:decimal(mold).add(decimal(customs)).add(transport).add(fuel).setScale(2,RoundingMode.HALF_UP);
+        BigDecimal freight=decimal(row.get("freightAmount"));if(freight==null&&transport!=null&&fuel!=null)freight=transport.add(fuel);
+        return mold==null||customs==null||freight==null?null:decimal(mold).add(decimal(customs)).add(freight).setScale(2,RoundingMode.HALF_UP);
     }
     public static void calculate(Map<String,Object> row) {
         if(row.containsKey("budgetKind")) {
             row.put("transportCost",multiply(row.get("moldWeight"),row.get("transportRate")));
             row.put("fuelCost",multiply(row.get("moldWeight"),row.get("fuelRate")));
+            BigDecimal freight=decimal(row.get("freightAmount"));if(freight==null&&row.get("transportCost")!=null&&row.get("fuelCost")!=null)freight=decimal(row.get("transportCost")).add(decimal(row.get("fuelCost")));row.put("freightTotal",freight);
             BigDecimal total=total(row);row.put("calculatedTotal",total);
             BigDecimal sale=decimal(row.get("salePrice")),unit=decimal(row.get("unitProductionCost"));
             BigDecimal margin=sale==null||unit==null?null:sale.subtract(unit);row.put("unitMargin",margin);

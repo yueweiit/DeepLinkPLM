@@ -1,0 +1,169 @@
+<script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { onBeforeRouteLeave,onBeforeRouteUpdate } from 'vue-router'
+import { ElMessage,ElMessageBox } from 'element-plus'
+import { t as uiText } from '@/locales'
+import { useUserStore } from '@/stores/user'
+import { createFinanceRow, getFinanceRows, getFinanceSummary, saveFinanceRows, type FinanceEntity, type FinanceRow, type FinanceChange, type InvestmentLine, type InvestmentSummary } from '@/api/modules/development'
+import type { ProductResearchDetail } from '@/api/modules/productResearch'
+import UnitCostSheet from './UnitCostSheet.vue'
+import ProjectCostOverview from './ProjectCostOverview.vue'
+const props=defineProps<{detail:ProductResearchDetail}>()
+const emit=defineEmits<{updated:[ProductResearchDetail];source:[FinanceRow,FinanceEntity];quote:[]}>()
+const user=useUserStore(),unit=ref<InstanceType<typeof UnitCostSheet>>()
+const empty=():InvestmentSummary=>({rows:[],references:[],currencyGroups:[]})
+const estimated=ref<InvestmentSummary>(empty()),actual=ref<InvestmentSummary>(empty()),loading=ref(false),error=ref(''),saving=ref(false)
+const categories=[{key:'mold',name:'模具制作费'},{key:'transport',name:'模具运费（含燃油）'},{key:'customs',name:'模具清关费'},{key:'design',name:'设计费'},{key:'sample',name:'打样费'},{key:'other',name:'其他开发费用'}]
+const currencies=computed(()=>{const values=[...new Set([...estimated.value.currencyGroups.map(g=>g.currency),...actual.value.currencyGroups.map(g=>g.currency)])].sort();return values.length?values:['CNY']})
+const writable=computed(()=>user.hasPermission('finance:write')&&props.detail.canWrite&&props.detail.status!=='archived'&&!['frozen','abandoned'].includes(props.detail.lockStatus||''))
+const confirmable=computed(()=>writable.value&&user.hasPermission('finance:confirm'))
+const overview=computed(()=>unit.value?.overview)
+const money=(v:number|null|undefined)=>v==null?uiText('待补'):Number(v).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:4})
+const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
+function categoryTotal(summary:InvestmentSummary,currency:string,key:string){return summary.currencyGroups.find(g=>g.currency===currency)?.categories.find(c=>c.category===key)}
+function sources(key:string,currency:string){const rows=[...estimated.value.rows,...actual.value.rows].filter(row=>row.category===key&&row.currency===currency);const replaced=new Set(rows.filter(r=>r.entity==='expense'&&r.actualCorrectionOfId).map(r=>Number(r.actualCorrectionOfId)));return rows.filter(r=>r.entity!=='expense'||!replaced.has(r.id))}
+const displayName=(value:unknown)=>String(value??'').replace(/(?:[（(]更正[）)]\s*)+$/u,'')
+function amountSource(entity:FinanceEntity,key:string,currency:string):InvestmentLine|null{
+ const rows=sources(key,currency).filter(s=>s.entity===entity)
+ return rows.length===1?rows[0]:rows.length?null:{entity,id:0,category:key,currency,amount:null,name:categories.find(c=>c.key===key)!.name,sourceSystem:'manual',actualStatus:'draft'}
+}
+const references=computed(()=>[...estimated.value.references,...estimated.value.rows.filter(r=>r.category==='unclassified')])
+interface InlineEdit{source:InvestmentLine;amount:string;date:string;basis:string;record?:FinanceRow}
+const edits=reactive(new Map<string,InlineEdit>()),reason=ref('项目成本页编辑保存'),editing=ref(false),expanded=ref<string[]>([])
+const editKey=(s:InvestmentLine)=>`${s.entity}:${s.id||s.currency}:${s.category}`
+function hasPendingCorrection(s:InvestmentLine){return actual.value.rows.some(row=>row.actualCorrectionOfId===s.id&&row.actualStatus==='draft')}
+function amountEditable(s:InvestmentLine){return editing.value&&writable.value&&(s.entity==='budget'||s.sourceSystem!=='erp'&&!hasPendingCorrection(s)&&(s.actualStatus!=='confirmed'||confirmable.value))}
+function originalAmount(s:InvestmentLine){return s.entity==='expense'&&s.sourceSystem!=='erp'?s.actualAmount??s.amount:s.amount}
+function inputAmount(s:InvestmentLine){return edits.get(editKey(s))?.amount??(originalAmount(s)==null?'':String(originalAmount(s)))}
+function editAmount(s:InvestmentLine,value:string){
+ if(!amountEditable(s))return
+ const key=editKey(s),previous=edits.get(key)
+ if(!previous&&value===(originalAmount(s)==null?'':String(originalAmount(s))))return
+ edits.set(key,previous?{...previous,amount:value}:{source:s,amount:value,date:s.actualDate||today(),basis:s.actualBasis||uiText('项目成本页登记金额')})
+ if(!s.id&&value==='')edits.delete(key)
+}
+let generation=0,sourceRequest=0,manualRequest=0
+async function load(){
+ const active=++generation,project=props.detail.productId,token=user.token;loading.value=true;error.value=''
+ try{const [b,e]=await Promise.all([getFinanceSummary('budget',{projectId:project,page:1,size:50}),getFinanceSummary('expense',{projectId:project,page:1,size:50})]);if(active!==generation||project!==props.detail.productId||token!==user.token)return;estimated.value=b.investment||empty();actual.value=e.investment||empty()}
+ catch(e){if(active===generation)error.value=e instanceof Error?e.message:uiText('成本载入失败')}
+ finally{if(active===generation)loading.value=false}
+}
+watch([()=>props.detail.productId,()=>user.token],()=>{edits.clear();estimated.value=empty();actual.value=empty();if(user.token)void load()},{immediate:true})
+async function readSource(source:InvestmentLine){const result=await getFinanceRows(source.entity,{page:1,size:1,...(source.entity==='budget'?{budgetId:source.id}:{expenseId:source.id})});if(!result.content[0])throw Error(uiText('来源已不可读取'));return result.content[0]}
+function patchValue(changes:FinanceChange[],row:FinanceRow,field:string,after:string|number|null){if(after!==(row[field]??null))changes.push({field,before:row[field]??null,after})}
+async function saveAmounts(confirmActual=false,onlyKey?:string){
+ if(saving.value||!writable.value)return false
+ if(confirmActual&&!confirmable.value)return false
+ saving.value=true;error.value='';const project=props.detail.productId;const current=[...edits.entries()].filter(([key,edit])=>(!onlyKey||key===onlyKey))
+ try{
+  const pending=new Map<string,{entity:FinanceEntity;row:FinanceRow;changes:FinanceChange[];keys:string[]}>()
+  for(const [key,edit]of current){
+   const amount=edit.amount.trim()===''?null:Number(edit.amount)
+   if(amount!==null&&(!Number.isFinite(amount)||amount<0))throw Error(uiText('请填写有效的非负金额'))
+   if(edit.source.entity==='expense'&&edit.source.actualStatus==='confirmed'&&amount===null)throw Error(uiText('已确认实际金额不可清空，请到原台账作废'))
+   let row=edit.record
+   if(!row&&edit.source.id){row=edit.source.sourceValues?{...edit.source.sourceValues,currencyCode:edit.source.currency,[edit.source.entity==='budget'?'budgetId':'expenseId']:edit.source.id}:edit.source.entity==='budget'?{budgetId:edit.source.id,currencyCode:edit.source.currency,calculationMode:edit.source.calculationMode||'manual',costCategory:edit.source.category,budgetAmount:edit.source.amount,versionNo:edit.source.versionNo}:{expenseId:edit.source.id,currencyCode:edit.source.currency,sourceSystem:edit.source.sourceSystem||'manual',expenseCategory:edit.source.category,actualStatus:edit.source.actualStatus||'draft',actualAmount:edit.source.actualAmount??edit.source.amount,actualDate:edit.source.actualDate||null,actualBasis:edit.source.actualBasis||null}}
+   if(row?.sourceSystem==='erp')throw Error(uiText('ERP入账金额不可手工改写'))
+   if(!row||!edit.record&&edit.source.entity==='expense'&&edit.source.actualStatus==='confirmed'){
+    row=await createFinanceRow(edit.source.entity,edit.source.entity==='budget'?{kind:'platform',name:edit.source.name,productLineId:project,currency:edit.source.currency,costCategory:edit.source.category}:row?{description:row.description||edit.source.name,actualCorrectionOfId:row.expenseId,currency:row.currencyCode}:{description:edit.source.name,productId:project,currency:edit.source.currency})
+   }
+   edit.record=row
+   const id=Number(edit.source.entity==='budget'?row.budgetId:row.expenseId),recordKey=`${edit.source.entity}:${id}`
+   const job=pending.get(recordKey)||{entity:edit.source.entity,row,changes:[],keys:[]};job.keys.push(key)
+   if(edit.source.entity==='budget'){
+    const field=row.calculationMode==='mold_formula'?({mold:'moldCost',transport:'freightAmount',customs:'customsCost'}[edit.source.category as 'mold']):'budgetAmount'
+    patchValue(job.changes,row,field,amount)
+    for(const guard of ['calculationMode','costCategory'])if(!job.changes.some(c=>c.field===guard))job.changes.push({field:guard,before:row[guard]??null,after:row[guard]??null})
+    if(row.calculationMode==='mold_formula'&&edit.source.category==='transport')for(const guard of ['moldWeight','transportRate','fuelRate'])if(!job.changes.some(c=>c.field===guard))job.changes.push({field:guard,before:row[guard]??null,after:row[guard]??null})
+   }else{
+    patchValue(job.changes,row,'expenseCategory',edit.source.category);patchValue(job.changes,row,'actualAmount',amount);patchValue(job.changes,row,'actualDate',edit.date||null);patchValue(job.changes,row,'actualBasis',edit.basis.trim()||null)
+    if(confirmActual&&amount!==null)patchValue(job.changes,row,'actualStatus','confirmed')
+   }
+   pending.set(recordKey,job)
+  }
+  for(const job of pending.values()){
+   if(!job.changes.length){if(project===props.detail.productId)job.keys.forEach(key=>edits.delete(key));continue}
+   const result=(await saveFinanceRows(job.entity,[{id:Number(job.entity==='budget'?job.row.budgetId:job.row.expenseId),changes:job.changes,reason:reason.value.trim()||(!job.row.actualCorrectionOfId&&job.entity==='expense'?uiText('登记实际费用'):Number(job.row.versionNo)===1?uiText('首次成本估算'):'')}]))[0]
+   if(!result||result.status!=='saved')throw Error(result?.message||uiText('保存结果待核对，请刷新来源后检查'))
+   if(project===props.detail.productId)job.keys.forEach(key=>edits.delete(key))
+  }
+  if(project!==props.detail.productId)return true;await load();return true
+ }catch(e){error.value=e instanceof Error?e.message:String(e);return false}finally{saving.value=false}
+}
+async function beginEdit(){editing.value=true;await nextTick();unit.value?.beginEdit();expanded.value=categories.filter(c=>currencies.value.some(currency=>!amountSource('budget',c.key,currency)||!amountSource('expense',c.key,currency))).map(c=>c.key)}
+function cancelEdit(){edits.clear();discardSource();panelOpen.value=false;record.value=null;unit.value?.cancelEdit();editing.value=false}
+async function saveAll(){
+ if(saving.value||!editing.value)return
+ if(confirmable.value)for(const source of actual.value.rows.filter(s=>s.sourceSystem==='manual'&&s.actualStatus!=='confirmed'&&s.actualAmount!=null)){const key=editKey(source);if(!edits.has(key))edits.set(key,{source,amount:String(source.actualAmount),date:source.actualDate||today(),basis:source.actualBasis||uiText('项目成本页登记金额')})}
+ if(edits.size&&!(await saveAmounts(confirmable.value)))return
+ if(sourceDirty.value){await saveSource();if(sourceDirty.value||panelError.value)return}
+ const saved=await unit.value?.saveProjectCosts();if(saved===false)return
+ editing.value=false;await load();ElMessage.success(uiText(confirmable.value?'成本已保存并重新计算':'成本已保存；实际费用待财务确认'))
+}
+function toggleCategory(key:string){expanded.value=expanded.value.includes(key)?expanded.value.filter(k=>k!==key):[...expanded.value,key]}
+// Source details and ERP reconciliation stay on the page; amount editing uses the cells above.
+const panelOpen=ref(false),panel=ref<HTMLElement>(),entity=ref<FinanceEntity>('expense'),record=ref<FinanceRow|null>(null),category=ref('mold'),panelError=ref('')
+const input=reactive<Record<string,string|number|null>>({})
+const canEditSource=computed(()=>editing.value&&writable.value&&(entity.value==='budget'||record.value?.sourceSystem==='erp'?entity.value==='budget'||confirmable.value:record.value?.actualStatus!=='confirmed'))
+const fields=computed(()=>entity.value==='budget'?record.value?.calculationMode==='mold_formula'?[['moldWeight','模具重量 KG'],['transportRate','运输费率／KG'],['fuelRate','燃油费率／KG']]:[]:record.value?.sourceSystem==='erp'?[['actualReconciliation','核销方式'],['actualManualExpenseId','原手工实际费用ID'],['actualCoveredAmount','本条覆盖金额']]:[])
+const manualChoices=ref<FinanceRow[]>([]),manualPage=ref(1),manualTotal=ref(0),manualKeyword=ref('')
+watch([()=>props.detail.productId,()=>user.token],()=>{sourceRequest++;manualRequest++;panelOpen.value=false;record.value=null;editing.value=false},{flush:'sync'})
+function reconciliationChanged(value:unknown){if(value==='independent'){input.actualManualExpenseId=null;input.actualCoveredAmount=null}}
+async function loadManual(keyword='',more=false){if(!record.value)return;const active=++manualRequest,project=props.detail.productId;manualKeyword.value=keyword;manualPage.value=more?manualPage.value+1:1;const result=await getFinanceRows('expense',{projectId:project,page:manualPage.value,size:50,sourceSystem:'manual',actualStatus:'confirmed',expenseCategory:String(record.value.expenseCategory),currency:record.value.currencyCode,keyword:keyword||undefined});if(active!==manualRequest||project!==props.detail.productId)return;manualChoices.value=more?[...manualChoices.value,...result.content]:result.content;manualTotal.value=result.totalElements}
+async function openSource(source:InvestmentLine){
+ if(record.value&&entity.value===source.entity&&Number(source.entity==='budget'?record.value.budgetId:record.value.expenseId)===source.id){panelOpen.value=true;await nextTick();panel.value?.scrollIntoView({block:'start'});return}if(sourceDirty.value){error.value=uiText('请先保存或放弃当前来源资料修改');return}const active=++sourceRequest,project=props.detail.productId,token=user.token;entity.value=source.entity;panelError.value=''
+ try{const row=await readSource(source);if(active!==sourceRequest||project!==props.detail.productId||token!==user.token)return;record.value=row;Object.keys(input).forEach(k=>delete input[k]);fields.value.forEach(([key])=>input[key]=row[key]??null);category.value=String(entity.value==='budget'?row.costCategory||'':row.expenseCategory||'mold');panelOpen.value=true;if(row.sourceSystem==='erp')await loadManual();await nextTick();panel.value?.scrollIntoView({block:'start'})}
+ catch(e){error.value=e instanceof Error?e.message:String(e)}
+}
+const sourceDirty=computed(()=>!!record.value&&(category.value!==String(entity.value==='budget'?record.value.costCategory||'':record.value.expenseCategory||'mold')||fields.value.some(([key])=>String(input[key]??'')!==String(record.value?.[key]??''))))
+async function leave(){
+ if(saving.value||unit.value?.busy){ElMessage.info(uiText('正在保存，请等待保存结果'));return false}
+ if(!edits.size&&!sourceDirty.value&&!unit.value?.dirty)return true
+ try{await ElMessageBox.confirm(uiText('有未保存的成本修改，离开将放弃本页未保存内容。'),uiText('未保存修改'),{confirmButtonText:uiText('放弃并离开'),cancelButtonText:uiText('继续填写')});return true}catch{return false}
+}
+onBeforeRouteLeave(leave);onBeforeRouteUpdate(leave)
+const beforeUnload=(event:BeforeUnloadEvent)=>{if(edits.size||sourceDirty.value||unit.value?.dirty||saving.value||unit.value?.busy){event.preventDefault();event.returnValue=''}}
+window.addEventListener('beforeunload',beforeUnload);onBeforeUnmount(()=>window.removeEventListener('beforeunload',beforeUnload))
+function discardSource(){if(!record.value)return;category.value=String(entity.value==='budget'?record.value.costCategory||'':record.value.expenseCategory||'mold');fields.value.forEach(([key])=>input[key]=record.value?.[key]??null)}
+
+async function saveSource(){
+ if(!record.value||saving.value||!canEditSource.value)return;const row=record.value;saving.value=true;panelError.value=''
+ try{const changes:FinanceChange[]=[];for(const[key]of fields.value)patchValue(changes,row,key,key==='actualReconciliation'?String(input[key]):input[key]==null||input[key]===''?null:Number(input[key]));patchValue(changes,row,entity.value==='budget'?'costCategory':'expenseCategory',category.value||null);if(!changes.length)return;const result=(await saveFinanceRows(entity.value,[{id:Number(entity.value==='budget'?row.budgetId:row.expenseId),changes,reason:reason.value}]))[0];if(record.value!==row)return;if(!result||result.status!=='saved')throw Error(result?.message||uiText('保存结果待核对'));record.value=null;panelOpen.value=false;await load()}
+ catch(e){panelError.value=e instanceof Error?e.message:String(e)}finally{saving.value=false}
+}
+</script>
+<template>
+<main class="project-cost-workspace" :aria-label="uiText('项目成本')" v-loading="loading">
+<header class="cost-edit-bar"><strong>{{uiText('项目成本')}}</strong><span v-if="editing">{{uiText('直接修改金额，保存后统一计算')}}</span><el-button v-if="writable&&!editing" type="primary" @click="beginEdit">{{uiText('编辑')}}</el-button><template v-if="editing"><el-button :disabled="saving||unit?.busy" @click="cancelEdit">{{uiText('取消')}}</el-button><el-button type="primary" :loading="saving||unit?.busy" @click="saveAll">{{uiText('保存')}}</el-button></template></header><p v-if="error" role="alert" class="cost-error">{{error}}</p>
+<ProjectCostOverview :title="uiText('成本总览')" :currencies="currencies" :estimates="estimated.currencyGroups" :actuals="actual.currencyGroups" :unit="overview" :pending-investment="edits.size>0"/>
+<section class="cost-section"><header><h3>{{uiText('一、模具与研发投入')}}</h3><span>{{uiText('模具运至墨西哥 · 预计与实际分别核算')}}</span><el-button :disabled="saving||editing" @click="load">{{uiText('刷新')}}</el-button></header>
+<table class="investment-table"><thead><tr><th>{{uiText('费用项目')}}</th><th>{{uiText('预计金额')}}</th><th>{{uiText('实际已发生')}}</th><th>{{uiText('来源')}}</th></tr></thead><tbody>
+<template v-for="currency in currencies" :key="currency"><tr class="currency-title"><th colspan="4">{{currency}}</th></tr><template v-for="c in categories" :key="c.key"><tr class="category-row"><th>{{uiText(c.name)}}</th>
+<td :data-label="uiText('预计金额')"><input v-if="amountSource('budget',c.key,currency)&&amountEditable(amountSource('budget',c.key,currency)!)" class="amount-input" :class="{changed:edits.has(editKey(amountSource('budget',c.key,currency)!))}" type="number" step="0.01" min="0" :aria-label="`${currency} ${uiText(c.name)} ${uiText('预计金额')}`" :placeholder="uiText('待补')" :value="inputAmount(amountSource('budget',c.key,currency)!)" :disabled="saving" @input="editAmount(amountSource('budget',c.key,currency)!,($event.target as HTMLInputElement).value)"/><strong v-else>{{money(categoryTotal(estimated,currency,c.key)?.knownTotal)}}</strong></td>
+<td :data-label="uiText('实际已发生')"><input v-if="amountSource('expense',c.key,currency)&&amountEditable(amountSource('expense',c.key,currency)!)" class="amount-input" :class="{changed:edits.has(editKey(amountSource('expense',c.key,currency)!))}" type="number" step="0.01" min="0" :aria-label="`${currency} ${uiText(c.name)} ${uiText('实际金额')}`" :placeholder="uiText('待补')" :value="inputAmount(amountSource('expense',c.key,currency)!)" :disabled="saving" @input="editAmount(amountSource('expense',c.key,currency)!,($event.target as HTMLInputElement).value)"/><strong v-else>{{money(categoryTotal(actual,currency,c.key)?.knownTotal)}}</strong></td>
+<td><el-button v-if="sources(c.key,currency).length" link type="primary" @click="toggleCategory(c.key)">{{uiText(expanded.includes(c.key)?'收起明细':'查看明细')}}</el-button></td></tr>
+<tr v-for="source in expanded.includes(c.key)?sources(c.key,currency):[]" :key="`${source.entity}-${source.id}-${c.key}`" class="source-row"><td><span>{{displayName(source.name)}}</span><small>{{[source.compatibleModels,source.setName].filter(Boolean).join(' · ')||uiText('本项目')}} · {{source.entity==='budget'?'B':'E'}}{{source.id}}<template v-if="source.versionNo"> · V{{source.versionNo}}</template></small></td>
+<td :data-label="uiText('预计金额')"><input v-if="source.entity==='budget'&&!amountSource('budget',c.key,currency)&&amountEditable(source)" class="amount-input" type="number" step="0.01" :aria-label="`B${source.id} ${uiText(c.name)} ${uiText('预计金额')}`" :disabled="saving" :value="inputAmount(source)" @input="editAmount(source,($event.target as HTMLInputElement).value)"/><span v-else>{{source.entity==='budget'?money(source.amount):'—'}}</span></td>
+<td :data-label="uiText('实际已发生')"><input v-if="source.entity==='expense'&&!amountSource('expense',c.key,currency)&&amountEditable(source)" class="amount-input" type="number" step="0.01" :aria-label="`E${source.id} ${uiText(c.name)} ${uiText('实际金额')}`" :disabled="saving" :value="inputAmount(source)" @input="editAmount(source,($event.target as HTMLInputElement).value)"/><span v-else>{{source.entity==='expense'?money(source.sourceSystem!=='erp'&&source.actualStatus==='draft'?source.actualAmount:source.amount):'—'}}</span><small v-if="source.note" class="cost-warning">{{source.note}}</small><small v-if="source.entity==='expense'">{{uiText(source.sourceSystem==='erp'?'ERP入账净额':'手工费用')}}<template v-if="source.actualCoveredTotal"> · {{uiText('已核销')}} {{money(source.actualCoveredTotal)}} · {{uiText('计入本页')}} {{money(source.amount)}}</template></small></td>
+<td><el-button link type="primary" @click="openSource(source)">{{uiText('查看来源')}}</el-button></td></tr>
+</template></template></tbody></table>
+<div v-if="references.length" class="source-references"><h4>{{uiText('预算参考与待核对')}}</h4><div v-for="row in references" :key="`${row.entity}-${row.id}`"><span>{{row.name}} · {{row.currency}} {{money(row.amount)}} · {{row.note||uiText('分类待核对，未计入合计')}}</span><el-button link @click="openSource(row)">{{uiText('查看来源')}}</el-button></div></div>
+<div class="source-references"><h4>{{uiText('供方报价参考')}} <el-button v-if="writable" link type="primary" @click="emit('quote')">{{uiText('新增供方报价')}}</el-button></h4><p v-for="q in detail.events.filter(e=>e.kind==='quote')" :key="q.eventId">{{q.data.supplierName}} · {{q.data.amount}} {{q.data.currency}}／{{q.data.unit}} · {{uiText('报价不重复计入投入')}}</p></div>
+<section v-if="panelOpen&&record" ref="panel" class="cost-source-form source-references" :aria-label="uiText('来源与核销资料')"><header><h4>{{displayName(record.budgetName||record.description)}} · {{record.currencyCode}}</h4><el-button :disabled="saving" @click="panelOpen=false">{{uiText('收起')}}</el-button></header><label><span>{{uiText('费用分类')}}</span><el-select v-model="category" :disabled="!canEditSource||saving"><el-option v-if="entity==='budget'" value="project_total" :label="uiText('项目总预算（仅参考）')"/><el-option v-for="c in categories" :key="c.key" :value="c.key" :label="uiText(c.name)"/></el-select></label>
+<label v-for="[key,label] in fields" :key="key" v-show="!['actualManualExpenseId','actualCoveredAmount'].includes(key)||input.actualReconciliation!=='independent'"><span>{{uiText(label)}}</span><el-select v-if="key==='actualReconciliation'" v-model="input[key]" @change="reconciliationChanged" :disabled="!canEditSource||saving"><el-option value="pending" :label="uiText('关联原手工费用')"/><el-option value="independent" :label="uiText('独立费用，无需核销')"/></el-select><el-select v-else-if="key==='actualManualExpenseId'" v-model="input[key]" clearable filterable remote :remote-method="loadManual" :disabled="!canEditSource||saving" :placeholder="uiText('搜索已确认的原手工实际费用')"><el-option v-for="m in manualChoices" :key="m.expenseId" :value="m.expenseId!" :label="`E${m.expenseId} · ${displayName(m.description)} · ${m.currencyCode} ${m.actualAmount}`"/><template #footer><el-button v-if="manualChoices.length<manualTotal" link @click="loadManual(manualKeyword,true)">{{uiText('加载下一页')}}</el-button></template></el-select><input v-else v-model="input[key]" type="number" step="any" :disabled="!canEditSource||saving" :aria-label="uiText(label)"/></label>
+<p v-if="record.sourceSystem==='manual'">{{uiText('实际发生依据')}}：{{record.actualBasis||'—'}} · {{record.actualDate||'—'}}</p><p v-if="record.sourceSystem==='erp'" class="muted">{{uiText('仅维护费用关联和覆盖金额，ERP原始金额保持只读。')}}</p><p v-if="panelError" role="alert" class="cost-error">{{panelError}}</p><div><el-button link @click="emit('source',record,entity)">{{uiText('查看原台账与历史')}}</el-button><el-button v-if="sourceDirty" :disabled="saving" @click="discardSource">{{uiText('放弃来源修改')}}</el-button><el-button v-if="canEditSource" :loading="saving" @click="saveSource">{{uiText('保存来源资料')}}</el-button></div></section>
+</section>
+<section class="cost-section unit-section"><header><h3>{{uiText('二、产品单件成本')}}</h3><span>{{uiText('摊销自动采用上方已保存费用，分摊数量可修改')}}</span></header><UnitCostSheet ref="unit" :detail="detail" embedded :editing="editing" @updated="emit('updated',$event)"/></section>
+<ProjectCostOverview :title="uiText('成本汇总')" :currencies="currencies" :estimates="estimated.currencyGroups" :actuals="actual.currencyGroups" :unit="overview" :pending-investment="edits.size>0"/>
+<footer class="cost-save"><span>{{uiText('单件成本与整款研发投入分别汇总')}}</span><el-button v-if="editing" type="primary" :loading="saving||unit?.busy" @click="saveAll">{{uiText('保存')}}</el-button></footer>
+</main>
+</template>
+<style scoped>
+.project-cost-workspace{display:flex;flex-direction:column;gap:14px;min-width:0;container:project-cost/inline-size;font-size:13px}.cost-section{padding:12px;border:1px solid var(--el-border-color-light);border-radius:6px;background:var(--el-bg-color);min-width:0}.cost-section>header{display:flex;align-items:center;gap:6px 16px;flex-wrap:wrap;margin-bottom:10px}.cost-section h3{font-size:16px;font-weight:700;color:var(--el-text-color-primary);margin:0}.cost-section>header>span,.muted{font-size:12px;color:var(--el-text-color-secondary)}.cost-section>header>.el-button{margin-left:auto}.investment-table{width:100%;border-collapse:collapse;table-layout:fixed}.investment-table th,.investment-table td{padding:7px 9px;border:1px solid var(--el-border-color-lighter);text-align:left;overflow-wrap:anywhere;vertical-align:middle}.investment-table thead{background:var(--el-color-primary-light-9);color:var(--el-text-color-primary);font-weight:700}.investment-table th:first-child{width:38%}.investment-table th:last-child{width:24%}.currency-title{background:var(--el-fill-color-light)}.category-row{background:var(--el-color-primary-light-9)}.category-row th{font-weight:700}.source-row small{display:block;color:var(--el-text-color-secondary);font-size:12px;line-height:1.5}.investment-table strong{font-variant-numeric:tabular-nums}.row-actions{display:flex;gap:4px;flex-wrap:wrap}.row-actions .el-button{margin:0}.source-references{border-top:1px solid var(--el-border-color-lighter);margin-top:10px;padding-top:8px}.source-references h4{font-size:13px;margin:0 0 6px}.source-references>div{display:flex;justify-content:space-between;align-items:center;gap:8px}.source-references p{margin:4px 0}.cost-save{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:8px 0;flex-wrap:wrap}.cost-save>span{margin-right:auto;color:var(--el-text-color-secondary)}.cost-error{color:var(--el-color-danger);margin:0}.cost-source-form{display:flex;flex-direction:column;gap:12px}.cost-source-form label{display:flex;flex-direction:column;gap:5px}.cost-source-form label>span{font-weight:700;color:var(--el-text-color-primary);background:var(--el-fill-color-light);padding:5px 8px}.cost-source-form input{height:30px;box-sizing:border-box;width:100%;border:1px solid var(--el-border-color);border-radius:4px;padding:3px 8px;color:var(--el-text-color-primary);background:var(--el-bg-color);font:inherit}.cost-source-form input:focus{outline:2px solid var(--el-color-primary-light-5);border-color:var(--el-color-primary)}.cost-source-form input:disabled{background:var(--el-disabled-bg-color)}@container project-cost (max-width:700px){.investment-table,.investment-table tbody{display:block}.investment-table thead{display:none}.investment-table tr{display:grid;grid-template-columns:1fr 1fr}.investment-table td,.investment-table th{width:auto!important;min-width:0}.category-row>th,.source-row>td:first-child,.currency-title th{grid-column:1/-1}.investment-table td[data-label]::before{content:attr(data-label);display:block;font-size:12px;font-weight:600;color:var(--el-text-color-secondary);margin-bottom:3px}.investment-table tr>td:last-child{grid-column:1/-1}.cost-save{justify-content:flex-start}.cost-save>span{width:100%}}
+.amount-input{box-sizing:border-box;width:100%;min-width:0;height:30px;font:inherit;font-weight:700;color:var(--el-text-color-primary);border:1px solid transparent;border-radius:4px;padding:4px 6px;background:transparent;font-variant-numeric:tabular-nums}.amount-input:hover{background:var(--el-bg-color);border-color:var(--el-border-color)}.amount-input:focus{outline:2px solid var(--el-color-primary-light-5);border-color:var(--el-color-primary);background:var(--el-bg-color)}.amount-input.changed{background:var(--el-color-warning-light-9);border-color:var(--el-color-warning-light-5)}.investment-table small{display:block;color:var(--el-text-color-secondary);font-size:12px}.inline-details td{background:var(--el-fill-color-lighter)}.inline-details p{font-size:12px;margin:0 0 6px;color:var(--el-text-color-secondary)}.inline-actual-fields{display:grid;grid-template-columns:180px minmax(0,1fr);gap:10px}.inline-actual-fields label,.inline-reason{display:flex;flex-direction:column;gap:4px}.inline-actual-fields span,.inline-reason>span{font-weight:600;color:var(--el-text-color-primary);font-size:12px}.inline-actual-fields input,.inline-reason input{box-sizing:border-box;width:100%;min-height:30px;border:1px solid var(--el-border-color);border-radius:4px;font:inherit;padding:4px 7px;color:var(--el-text-color-primary);background:var(--el-bg-color)}.inline-actual-fields input:focus,.inline-reason input:focus{outline:2px solid var(--el-color-primary-light-5);border-color:var(--el-color-primary)}.inline-reason{margin-top:12px}.cost-source-form{padding-top:12px}.cost-source-form>header{display:flex;align-items:center;justify-content:space-between}.cost-source-form>label{max-width:620px}@container project-cost (max-width:700px){.inline-details>td{grid-column:1/-1}.inline-actual-fields{grid-template-columns:1fr}}
+</style>
+
+<style scoped>
+.cost-edit-bar{position:sticky;top:0;z-index:5;background:var(--el-bg-color);border:1px solid var(--el-border-color-light);border-radius:5px;display:flex;align-items:center;gap:8px;padding:9px 12px;box-shadow:0 2px 6px #00000008}.cost-edit-bar>strong{font-size:16px}.cost-edit-bar>span{color:var(--el-text-color-secondary);font-size:12px}.cost-edit-bar>.el-button:first-of-type{margin-left:auto}.cost-edit-bar .el-button{margin-top:0}.cost-edit-bar+.cost-error{position:sticky;top:54px;z-index:5;background:var(--el-bg-color);padding:7px;margin:0}@container project-cost (max-width:700px){.cost-edit-bar>span{display:none}}
+</style>

@@ -9,6 +9,7 @@ import com.yuewei.plm.module.code.entity.CodeItem;
 import com.yuewei.plm.module.code.service.CodeItemService;
 import com.yuewei.plm.module.pilot.PilotAccessService;
 import com.yuewei.plm.module.masterdata.ProductMoldLifecycleService;
+import com.yuewei.plm.module.manufacturing.ManufacturingIdentityService;
 import com.yuewei.plm.repository.ProductRepository;
 import com.yuewei.plm.repository.entity.Product;
 import com.yuewei.plm.service.ProductService;
@@ -31,6 +32,8 @@ public class ResearchProductCodingService {
     private final ProductionConfirmationService production;
     private final ProductCodeGenerator productCodes;
     private final PilotAccessService access;
+    @org.springframework.beans.factory.annotation.Autowired
+    private ManufacturingIdentityService manufacturingIdentities;
 
     @Transactional
     public Map<String,Object> ensurePrefix(long researchProjectId, String actor) {
@@ -90,7 +93,41 @@ public class ResearchProductCodingService {
     }
 
     @Transactional
-    public Map<String,Object> provision(long researchProjectId, long phoneModelId, Long applicationId, String actor) {
+    public Map<String,Object> provision(long researchProjectId,long phoneModelId,Long applicationId,String actor,String holeType,String structureDescription) {
+        if(!Set.of("large","precision","other").contains(text(holeType))||text(structureDescription).length()>1000
+            ||"other".equals(holeType)&&text(structureDescription).isEmpty())
+            throw new BusinessException(40001,"正式制造编码前请明确孔型及其他孔型的结构说明");
+        return provisionNew(researchProjectId,phoneModelId,applicationId,actor,holeType,text(structureDescription));
+    }
+
+    @Transactional
+    public Map<String,Object> provisionManufacturing(long researchProjectId,long businessPhoneId,Long applicationId,String actor,Map<String,Object> resolution) {
+        access.requireProduct(researchProjectId);
+        if(!"reuse".equals(resolution.get("status"))||!Boolean.TRUE.equals(resolution.get("sharedMaterial")))
+            throw new BusinessException(40901,"仅共模或尚未确认的关系不能生成成品编码，请先明确原制造物料");
+        var confirmed=manufacturingIdentities.requireResolved(new ManufacturingIdentityService.ResolveInput(researchProjectId,businessPhoneId,
+            text(resolution.get("holeType")),text(resolution.get("structureDescription")),number(resolution.get("relationId")),number(resolution.get("relationVersion"))));
+        if(!Boolean.TRUE.equals(confirmed.get("sharedMaterial")))throw new BusinessException(40901,"共用生产物料依据已变化，请重新核对");
+        var skus=manufacturingIdentities.resolvedSkus(confirmed);
+        var productRows=new ArrayList<Map<String,Object>>();
+        for(var sku:skus){
+            var row=new LinkedHashMap<String,Object>();row.put("productId",sku.get("id"));row.put("code",sku.get("code"));row.put("finishedProductCode",sku.get("code"));
+            row.put("phoneModelId",businessPhoneId);row.put("businessPhoneModelCode",map(confirmed.get("businessPhone")).get("phoneModelCode"));
+            row.put("phoneModelCode",confirmed.get("manufacturingPhoneCode"));row.put("manufacturingPhoneCode",confirmed.get("manufacturingPhoneCode"));
+            row.put("manufacturingProductId",confirmed.get("manufacturingProductId"));row.put("modelName",map(confirmed.get("businessPhone")).get("modelName"));
+            for(String field:List.of("colorCode","operationCode"))row.put(field,sku.get(field));row.put("manufacturingName",sku.get("name"));productRows.add(row);
+        }
+        var result=new LinkedHashMap<String,Object>();result.put("status","ready");result.put("reuseExisting",true);result.put("scopeStatus","confirmed_manufacturing");
+        result.put("productSpecificCode",skus.get(0).get("productSpecificCode"));result.put("productCodePrefix","N"+text(skus.get(0).get("productSpecificCode")));
+        result.put("relationId",confirmed.get("relationId"));result.put("relationVersion",confirmed.get("relationVersion"));
+        result.put("businessPhone",confirmed.get("businessPhone"));result.put("manufacturingProductId",confirmed.get("manufacturingProductId"));result.put("manufacturingPhoneCode",confirmed.get("manufacturingPhoneCode"));
+        result.put("skuIds",skus.stream().map(sku->sku.get("id")).toList());result.put("codes",skus.stream().map(sku->sku.get("code")).toList());result.put("generatedProductCodes",result.get("codes"));result.put("products",productRows);
+        var operations=skus.stream().map(sku->text(sku.get("operationCode"))).distinct().toList();result.put("operationCode",operations.size()==1?operations.get(0):"");
+        result.put("operationOptions",operations.stream().map(code->Map.of("code",code,"name","原制造SKU工序")).toList());
+        result.put("missingFields",List.of());result.put("missingMessages",List.of());result.put("missing",List.of());return result;
+    }
+
+    private Map<String,Object> provisionNew(long researchProjectId,long phoneModelId,Long applicationId,String actor,String holeType,String structureDescription) {
         access.requireProduct(researchProjectId);
         ProductMoldLifecycleService.requireActive(jdbc, "product", researchProjectId);
         var result = new LinkedHashMap<>(ensurePrefix(researchProjectId, actor));
@@ -104,7 +141,7 @@ public class ResearchProductCodingService {
         var options = operationOptions();
         result.put("operationOptions", options);
         var application = applicationId == null ? Map.<String,Object>of() : jdbc.queryForMap("""
-            select project_id,product_line_id,phone_model_id,execution_resolution_json::text resolution
+            select project_id,product_line_id,phone_model_id,approval_no,execution_resolution_json::text resolution
             from plm_mold_application where application_id=? and deleted_flag=0
             """, applicationId);
         if (!application.isEmpty() && (number(application.get("phone_model_id")) != phoneModelId
@@ -132,8 +169,8 @@ public class ResearchProductCodingService {
         }
         if (fields.isEmpty() && !scopedColors.isEmpty()) {
             var phone = phones.get(0);
-            var variantDraft = variant(project, phoneModelId, text(phone.get("code_value")), text(phone.get("model_name")), actor);
-            if (variantDraft == null) { fields.add("phoneModelId"); messages.add("原项目的型号资料存在身份或历史编码冲突，已保留原记录"); }
+            var variantDraft = variant(project, phoneModelId, text(phone.get("code_value")), text(phone.get("model_name")), actor,holeType,structureDescription,text(application.get("approval_no")));
+            if (variantDraft == null) { fields.add("manufacturingSpecification"); messages.add("原项目的型号、孔型或结构存在身份或历史编码冲突，已保留原记录，请核对制造归属"); }
             else {
                 Product variant = variantDraft.product();
                 if (variantDraft.created()) createdProductIds.add(variant.getProductId());
@@ -207,7 +244,7 @@ public class ResearchProductCodingService {
     }
 
     private record VariantDraft(Product product, boolean created) {}
-    private VariantDraft variant(Product project, long phoneModelId, String phoneCode, String model, String actor) {
+    private VariantDraft variant(Product project,long phoneModelId,String phoneCode,String model,String actor,String holeType,String structureDescription,String approvalNo) {
         var matches = jdbc.queryForList("""
             select product_id from plm_product where parent_product_id=? and product_type='model_variant'
               and deleted_flag=0 and (phone_model_member_id=? or phone_model_code=?) order by product_id
@@ -222,7 +259,8 @@ public class ResearchProductCodingService {
                 && !Set.of("frozen", "abandoned").contains(text(existing.getLockStatus()))
                 && Objects.equals(existing.getPhoneModelMemberId(), phoneModelId)
                 && Objects.equals(existing.getPhoneModelCode(), phoneCode)
-                && Objects.equals(existing.getProductSpecificCode(), project.getProductSpecificCode()) ? new VariantDraft(existing, false) : null;
+                && Objects.equals(existing.getProductSpecificCode(), project.getProductSpecificCode())
+                && sameManufacturingSpecification(id,holeType,structureDescription) ? new VariantDraft(existing, false) : null;
         }
         Product value = new Product();
         value.setParentProductId(project.getProductId()); value.setProductType("model_variant");
@@ -236,7 +274,18 @@ public class ResearchProductCodingService {
         value.setStatus("draft"); value.setDeletedFlag(0); value.setCreatedAt(LocalDateTime.now());
         value.setUpdatedAt(value.getCreatedAt()); value.setCreatedBy(actor); value.setUpdatedBy(actor);
         products.insert(value);
+        jdbc.update("""
+            insert into plm_project_requirement_form(project_id,ding_talk_approval_no,hole_type,manufacturing_structure_description,status,created_by,updated_by)
+            values(?,?,?,?, 'draft',?,?)
+            """,value.getProductId(),approvalNo,holeType,structureDescription,actor,actor);
         return new VariantDraft(value, true);
+    }
+
+    private boolean sameManufacturingSpecification(long productId,String holeType,String structureDescription) {
+        var forms=jdbc.queryForList("select hole_type,manufacturing_structure_description from plm_project_requirement_form where project_id=? and deleted_flag=0 for share",productId);
+        if(forms.size()!=1)return false;
+        String known=com.yuewei.plm.common.util.ManufacturingHole.canonicalHole(text(forms.get(0).get("hole_type")));
+        return known.equals(holeType)&&text(forms.get(0).get("manufacturing_structure_description")).equals(text(structureDescription));
     }
 
     private Map<String,Object> adoptedBasis(long projectId) {

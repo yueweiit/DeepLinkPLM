@@ -2,6 +2,9 @@ package com.yuewei.plm.module.project.development;
 
 import com.yuewei.plm.module.bom.service.ProductBomWorkflowService;
 import com.yuewei.plm.module.pilot.PilotAccessService;
+import com.yuewei.plm.module.development.DevelopmentFinanceService;
+import com.yuewei.plm.module.development.DevelopmentTypes;
+import java.math.BigDecimal;
 import java.util.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -17,9 +20,10 @@ public class DevelopmentUnitCostWorkflow {
     private final ProductBomWorkflowService boms;
     private final JdbcTemplate jdbc;
     private final DevelopmentWorkflowStore store;
+    private final DevelopmentFinanceService finance;
 
     public boolean handles(String action) {return Set.of("unit_cost_save","unit_cost_confirm","unit_cost_delete","unit_cost_void","unit_cost_from_bom").contains(action);}
-    public Map<String,Object> preview(Map<String,Object> input) {access.requirePermission("finance:read");return calculator.calculate(clean(input));}
+    public Map<String,Object> preview(long id,Map<String,Object> input) {access.requirePermission("finance:read");return calculator.calculate(projectInvestment(id,clean(input)));}
     public void action(long id,Map<String,Object> state,String action,Map<String,Object> data,ProductDevelopmentService service) {
         access.requireFinanceWrite();
         var versions=LaunchReviewWorkflow.records(state.get("unitCostVersions"));
@@ -52,7 +56,7 @@ public class DevelopmentUnitCostWorkflow {
             for(String group:List.of("process","tooling","tool_transport","development")){var row=new LinkedHashMap<String,Object>();row.put("id",UUID.randomUUID().toString());row.put("category",group);row.put("name",UnitCostSheetCalculator.label(group));row.put("mode","unit");rows.add(row);}
             input.put("rows",rows);state.put("unitCostDraft",calculator.calculate(input));return;
         }
-        var sheet=calculator.calculate(clean(data));
+        var sheet=calculator.calculate(projectInvestment(id,clean(data)));
         var references=service.snapshotReferences(id,service.refs(data.get("references")));sheet.put("references",references);
         var previous=map(state.get("unitCostDraft"));
         if(number(previous.get("bomId"))>0&&number(previous.get("bomId"))==number(sheet.get("bomId")))service.sameTechnical(LaunchReviewWorkflow.records(previous.get("references")).stream().filter(r->"bom".equals(r.get("type"))).toList(),references.stream().filter(r->"bom".equals(r.get("type"))).toList());
@@ -84,6 +88,45 @@ public class DevelopmentUnitCostWorkflow {
     }
     private Map<String,Object> clean(Map<String,Object> data) {
         var copy=new LinkedHashMap<>(data);for(String key:List.of("id","status","confirmedBy","confirmedAt","voidReason","voidedBy","voidedAt","bomCostSnapshotId","adoptedQuote","bomVersion","groups","totals","bomResult","complete","missing","warnings"))copy.remove(key);return copy;
+    }
+    private Map<String,Object> projectInvestment(long id,Map<String,Object> input) {
+        if(!Boolean.TRUE.equals(input.get("useProjectInvestment")))return input;
+        var query=new DevelopmentTypes.Query();query.setProjectId(id);
+        var estimates=map(finance.summary("budget",query).get("investment"));
+        var actuals=map(finance.summary("expense",query).get("investment"));
+        String currency=text(input.get("currency"));
+        var basis=new ArrayList<Map<String,Object>>();
+        for(String category:List.of("mold","transport","customs","design","sample","other")) {
+            var actual=investmentPart(actuals,currency,category);var estimate=investmentPart(estimates,currency,category);
+            boolean useActual=actual.get("knownTotal")!=null&&number(actual.get("missingCount"))==0;
+            var selected=useActual?actual:estimate;
+            var entry=new LinkedHashMap<String,Object>();entry.put("category",category);entry.put("currency",currency);
+            entry.put("amount",number(selected.get("missingCount"))==0?selected.get("knownTotal"):null);
+            entry.put("basis",useActual?"actual":"estimated");
+            entry.put("sources",LaunchReviewWorkflow.records((useActual?actuals:estimates).get("rows")).stream().filter(r->currency.equals(text(r.get("currency")))&&category.equals(r.get("category"))).toList());
+            basis.add(entry);
+        }
+        var oldRows=LaunchReviewWorkflow.records(input.get("rows"));var rows=new ArrayList<Map<String,Object>>();
+        oldRows.stream().filter(r->!Set.of("tooling","tool_transport","development").contains(text(r.get("category")))).forEach(rows::add);
+        var originalRows=new ArrayList<>(LaunchReviewWorkflow.records(input.get("investmentOriginalRows")));
+        for(var row:oldRows)if(Set.of("tooling","tool_transport","development").contains(text(row.get("category")))&&!text(row.get("id")).equals("project-investment-"+row.get("category"))&&!originalRows.contains(row))originalRows.add(new LinkedHashMap<>(row));
+        input.put("investmentOriginalRows",originalRows);
+        for(String group:List.of("tooling","tool_transport","development")) {
+            var categories=switch(group){case "tooling"->List.of("mold");case "tool_transport"->List.of("transport","customs");default->List.of("design","sample","other");};
+            var previous=oldRows.stream().filter(r->group.equals(r.get("category"))).toList();
+            var row=new LinkedHashMap<String,Object>();var managed=previous.stream().filter(r->("project-investment-"+group).equals(r.get("id"))).findFirst();if(managed.isPresent())row.putAll(managed.get());else if(previous.size()==1)row.putAll(previous.get(0));
+            row.put("id","project-investment-"+group);row.put("category",group);row.put("name",UnitCostSheetCalculator.label(group));row.put("mode","divide");
+            var quantities=previous.stream().filter(r->"divide".equals(r.get("mode"))&&r.get("allocationQty")!=null).map(r->new BigDecimal(r.get("allocationQty").toString()).stripTrailingZeros()).distinct().toList();
+            row.put("allocationQty",quantities.size()==1&&previous.stream().allMatch(r->"divide".equals(r.get("mode"))&&r.get("allocationQty")!=null)?quantities.get(0):null);
+            BigDecimal total=BigDecimal.ZERO;boolean complete=true;
+            for(var entry:basis)if(categories.contains(entry.get("category"))){if(entry.get("amount")==null)complete=false;else total=total.add(new BigDecimal(entry.get("amount").toString()));}
+            row.put("unitPrice",complete?total:null);row.put("investmentCategories",categories);row.put("description","自动采用上方已保存费用：实际优先，无完整实际时沿用预计；同币种，不重复计入");
+            row.remove("unitCost");row.remove("displayCost");rows.add(row);
+        }
+        input.put("rows",rows);input.put("investmentBasis",basis);return input;
+    }
+    private Map<String,Object> investmentPart(Map<String,Object> summary,String currency,String category) {
+        return LaunchReviewWorkflow.records(summary.get("currencyGroups")).stream().filter(g->currency.equals(g.get("currency"))).flatMap(g->LaunchReviewWorkflow.records(g.get("categories")).stream()).filter(c->category.equals(c.get("category"))).findFirst().orElse(Map.of("missingCount",1));
     }
     private com.yuewei.plm.module.bom.service.BomCostCalculator.Result calculatorResult(Map<String,Object> sheet) {return (com.yuewei.plm.module.bom.service.BomCostCalculator.Result)sheet.get("bomResult");}
 }

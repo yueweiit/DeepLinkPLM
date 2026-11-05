@@ -8,7 +8,7 @@ import { useUserStore } from '@/stores/user'
 import { previewUnitCost, researchAction, type ProductResearchDetail, type UnitCostRow, type UnitCostSheet, type UnitCostExtraColumn } from '@/api/modules/productResearch'
 import { costGroups as groups, costModes, costColumns, costColumnLabel, validateCostExtraColumns, newCostRow, pasteCostRows, patchCostRows, fillCostRows, type CostColumn } from './unitCostEditing'
 
-const props = defineProps<{ detail: ProductResearchDetail }>()
+const props = defineProps<{ detail: ProductResearchDetail; embedded?: boolean; editing?: boolean }>()
 const emit = defineEmits<{ updated: [ProductResearchDetail] }>()
 const user = useUserStore()
 const busy = ref(false), calculating = ref(false), dirty = ref(false), error = ref(''), selected = ref('draft')
@@ -27,9 +27,9 @@ const batchColumns = computed<CostColumn[]>(() => [...costColumns, ...visibleExt
 const hasRowColumns = computed(() => !!sheet.visibleOptionalColumns?.length || !!visibleExtraColumns.value.length)
 const versions = computed(() => ((props.detail.workflow.unitCostVersions || []) as UnitCostSheet[]))
 const canWrite = computed(() => user.hasPermission('finance:write') && props.detail.canWrite && !['archived'].includes(props.detail.status) && !['frozen', 'abandoned'].includes(props.detail.lockStatus || ''))
-const editable = computed(() => canWrite.value && selected.value === 'draft')
+const editable = computed(() => canWrite.value && selected.value === 'draft' && (!props.embedded || props.editing))
 const writable = computed(() => editable.value && !busy.value)
-const allChecked = computed(() => sheet.rows.length > 0 && sheet.rows.every(row => checkedIds.value.includes(row.id)))
+const allChecked = computed(() => sheet.rows.some(row=>!row.investmentCategories) && sheet.rows.filter(row=>!row.investmentCategories).every(row => checkedIds.value.includes(row.id)))
 const routes = computed(() => (props.detail.bomRoutes || []).filter(r => r.bomId === sheet.bomId))
 const directPurchase = computed(() => (props.detail.workflow.plan as Record<string, any>)?.method === 'direct' && (props.detail.workflow.plan as Record<string, any>)?.needsMold === false)
 const quotes = computed(() => props.detail.events.filter(e => e.kind === 'quote'))
@@ -43,13 +43,15 @@ function invalidatePreview() { clearTimeout(timer); generation++; calculating.va
 function assign(value: UnitCostSheet) {
   invalidatePreview(); hydrating = true
   Object.keys(sheet).forEach(k => delete (sheet as any)[k]); Object.assign(sheet, empty(), copy(value))
+  if(props.embedded&&selected.value==='draft')sheet.useProjectInvestment=true
   calculated.value = copy(value); dirty.value = false; checkedIds.value = []; expandedIds.value = []; undoEdit.value = null; syncBatchField(); hydrating = false
 }
-watch(() => props.detail.productId, () => { selected.value = 'draft'; assign((props.detail.workflow.unitCostDraft as UnitCostSheet) || empty()); if (!sheet.totals) void calculate() }, { immediate: true })
+watch(() => props.detail.productId, () => { const confirmed=props.embedded&&!props.detail.workflow.unitCostDraft?[...versions.value].reverse().find(v=>!v.voidReason):undefined;selected.value = confirmed?String(confirmed.id):'draft'; assign((props.detail.workflow.unitCostDraft as UnitCostSheet) || confirmed || empty()); if (!sheet.totals||sheet.useProjectInvestment) void calculate() }, { immediate: true })
 async function calculate() {
   if (busy.value) return
+  if(selected.value!=='draft'&&sheet.useProjectInvestment){calculated.value=copy(sheet);return}
   const current = ++generation; calculating.value = true
-  try { const result = await previewUnitCost(props.detail.productId, copy(sheet)); if (current === generation) { calculated.value = result; error.value = '' } }
+  try { const result = await previewUnitCost(props.detail.productId, copy(sheet)); if (current === generation) { calculated.value = result; if(sheet.useProjectInvestment){hydrating=true;sheet.rows=copy(result.rows);sheet.investmentBasis=result.investmentBasis;sheet.investmentOriginalRows=result.investmentOriginalRows;hydrating=false} error.value = '' } }
   catch (e) { if (current === generation) { calculated.value = null; error.value = e instanceof Error ? e.message : uiText('核算失败，请重试') } }
   finally { if (current === generation) calculating.value = false }
 }
@@ -64,6 +66,8 @@ function money(value: number | null | undefined) { return value == null ? uiText
 function groupName(key: string) { return uiText(groups.find(group => group.key === key)?.name || key) }
 function modeName(key: string) { return uiText(costModes.find(mode => mode.key === key)?.name || key) }
 function basisQuantity(row: UnitCostRow) { return row.mode === 'divide' ? row.allocationQty : row.mode === 'usage' ? row.quantity : null }
+const allocationQuantity=computed(()=>{const values=[...new Set(sheet.rows.filter(r=>r.investmentCategories).map(r=>r.allocationQty??null))];return values.length===1?values[0]:null})
+function setAllocationQuantity(value:string){if(!writable.value)return;const amount=value===''?null:Number(value);if(amount!==null&&(!Number.isFinite(amount)||amount<=0))return;sheet.rows=sheet.rows.map(r=>r.investmentCategories?{...r,allocationQty:amount}:r)}
 function priceLabel(row: UnitCostRow) { return row.mode === 'divide' ? uiText('费用总额') : row.mode === 'usage' ? uiText('原料单价') : uiText('单件金额') }
 function quantityLabel(row: UnitCostRow) { return row.mode === 'divide' ? uiText('分摊数量') : uiText('材料用量') }
 function syncBatchField() { if (!batchColumns.value.includes(batchField.value)) { batchField.value = 'taxIncluded'; batchValue.value = '' } }
@@ -88,7 +92,7 @@ function showColumn(column: UnitCostExtraColumn, event: Event) { changeColumns(e
 function changeRows(action: () => UnitCostRow[]) {
   if (!writable.value) return
   try {
-    const next = action(); if (next.length > 200) throw Error(uiText('成本明细最多200项，请调整后重试。')); rememberEdit(); sheet.rows = next
+    const next = action(); if (next.length > 200) throw Error(uiText('成本明细最多200项，请调整后重试。'));if(sheet.useProjectInvestment&&next.some(row=>['tooling','tool_transport','development'].includes(row.category)&&row.id!==`project-investment-${row.category}`))throw Error(uiText('模具及研发费用请在上方编辑')); rememberEdit(); sheet.rows = next
     checkedIds.value = checkedIds.value.filter(id => next.some(row => row.id === id)); error.value = ''
   } catch (e) { error.value = e instanceof Error ? e.message : String(e) }
 }
@@ -101,8 +105,8 @@ function paste(event: ClipboardEvent, index: number, field: CostColumn) {
   event.preventDefault(); changeRows(() => pasteCostRows(sheet.rows, text, index, field, visibleExtraColumns.value))
 }
 function applyBatch() { changeRows(() => patchCostRows(sheet.rows, checkedIds.value, batchField.value, batchValue.value === '' ? null : batchValue.value, extraColumns.value)) }
-function duplicateRows() { changeRows(() => sheet.rows.flatMap(row => checkedIds.value.includes(row.id) ? [copy(row), { ...copy(row), id: newCostRow(row.category, row.mode).id }] : [copy(row)])) }
-function deleteRows() { changeRows(() => sheet.rows.filter(row => !checkedIds.value.includes(row.id)).map(copy)) }
+function duplicateRows() { changeRows(() => sheet.rows.flatMap(row => checkedIds.value.includes(row.id)&&!row.investmentCategories ? [copy(row), { ...copy(row), id: newCostRow(row.category, row.mode).id }] : [copy(row)])) }
+function deleteRows() { changeRows(() => sheet.rows.filter(row => row.investmentCategories||!checkedIds.value.includes(row.id)).map(copy)) }
 function undo() {
   if (!writable.value || !undoEdit.value) return
   const previous = copy(undoEdit.value); sheet.rows = previous.rows
@@ -110,7 +114,7 @@ function undo() {
   if (previous.visibleOptionalColumns === undefined) delete sheet.visibleOptionalColumns; else sheet.visibleOptionalColumns = previous.visibleOptionalColumns
   undoEdit.value = null; syncBatchField(); checkedIds.value = checkedIds.value.filter(id => sheet.rows.some(row => row.id === id)); error.value = ''
 }
-function toggleAll(event: Event) { if (writable.value) checkedIds.value = (event.target as HTMLInputElement).checked ? sheet.rows.map(row => row.id) : [] }
+function toggleAll(event: Event) { if (writable.value) checkedIds.value = (event.target as HTMLInputElement).checked ? sheet.rows.filter(row=>!row.investmentCategories).map(row => row.id) : [] }
 function editWarning(row: UnitCostRow, value: string) { changeRows(() => sheet.rows.map(item => item.id === row.id ? { ...copy(item), warning: value } : copy(item))) }
 function toggleDetails(id: string) { expandedIds.value = expandedIds.value.includes(id) ? expandedIds.value.filter(value => value !== id) : [...expandedIds.value, id] }
 function keydown(event: KeyboardEvent) {
@@ -127,18 +131,18 @@ function keydown(event: KeyboardEvent) {
   else if (event.key === 'Enter' && cell.dataset.field === 'name') event.preventDefault()
 }
 async function run(fn: () => Promise<void>) {
-  if (busy.value) return
+  if (busy.value) return false
   invalidatePreview(); busy.value = true; error.value = ''
-  try { await fn() } catch (e) {
+  try { await fn();return true } catch (e) {
     if (e === 'cancel' || e === 'close') { if (dirty.value && !calculated.value) timer = setTimeout(() => void calculate(), 450) }
-    else { error.value = requestError(e); ElMessage.error(error.value) }
+    else { error.value = requestError(e); ElMessage.error(error.value) }return false
   } finally { busy.value = false }
 }
-async function save(confirm = false) { await run(async () => {
+async function save(confirm = false,quiet=false) { return await run(async () => {
   if (confirm) await ElMessageBox.confirm(uiText('确认本次核算采用的BOM路线或供方报价，以及税率和汇率依据？确认后通过新版本修订。'), uiText('确认单件成本'))
   const d = await researchAction(props.detail.productId, confirm ? 'unit_cost_confirm' : 'unit_cost_save', props.detail.workflow.version, copy(sheet)); emit('updated', d); dirty.value = false
   if (confirm) { const list = (d.workflow.unitCostVersions || []) as UnitCostSheet[]; const last = list[list.length - 1]; selected.value = String(last.id); assign(last) } else assign(d.workflow.unitCostDraft as UnitCostSheet)
-  ElMessage.success(confirm ? uiText('成本版本已确认并保存采用依据') : uiText('成本草稿已保存'))
+  if(!quiet)ElMessage.success(confirm ? uiText('成本版本已确认并保存采用依据') : uiText('成本草稿已保存'))
 }) }
 async function choose(value: string) { if (busy.value) return; if (dirty.value) { try { await ElMessageBox.confirm(uiText('当前核算有未保存修改，切换后放弃这些修改？'), uiText('未保存草稿')) } catch { return } } selected.value = value; assign(value === 'draft' ? ((props.detail.workflow.unitCostDraft as UnitCostSheet) || empty()) : versions.value.find(v => String(v.id) === value)!); if (value === 'draft' && !sheet.totals) void calculate() }
 async function create() { if (busy.value) return; if (dirty.value || props.detail.workflow.unitCostDraft) { try { await ElMessageBox.confirm(uiText('当前已有核算草稿；新建后保存会替换它。确认重新填写？'), uiText('新建核算')) } catch { return } } selected.value = 'draft'; assign(empty()); sheet.rows = groups.filter(group => !group.key.startsWith('freight')).map(group => newCostRow(group.key)) }
@@ -148,23 +152,28 @@ async function voidVersion() { await run(async () => { const reason = await ElMe
 function bomChanged() { sheet.routeId = null; sheet.references = sheet.references.filter(r => r.type !== 'bom'); if (sheet.bomId) sheet.references.push({ type: 'bom', id: sheet.bomId }) }
 async function importBom() { await run(async () => { if (!sheet.bomId || !sheet.routeId) throw Error(uiText('请先选择具体BOM及工艺路线')); if (dirty.value || props.detail.workflow.unitCostDraft) await ElMessageBox.confirm(uiText('从选定BOM读取物料、数量和已有价格；保留补充列名称，原明细及补充值将重建，未明确费用继续留空。'), uiText('从BOM带入')); const d = await researchAction(props.detail.productId, 'unit_cost_from_bom', props.detail.workflow.version, { bomId: sheet.bomId, routeId: sheet.routeId, replaceDraft: true }); emit('updated', d); selected.value = 'draft'; assign(d.workflow.unitCostDraft as UnitCostSheet) }) }
 async function leave() { if (busy.value) return false; if (dirty.value) { try { await ElMessageBox.confirm(uiText('单件成本尚未保存，离开页面？'), uiText('未保存输入')) } catch { return false } } return true }
-onBeforeRouteLeave(leave); onBeforeRouteUpdate(leave)
-defineExpose({ canLeave: leave })
+onBeforeRouteLeave(()=>props.embedded?true:leave()); onBeforeRouteUpdate(()=>props.embedded?true:leave())
+const overview = computed(() => ({ currency: sheet.currency, manufacturing: totals.value.manufacturing, base: totals.value.base, dirty: dirty.value, calculating: calculating.value, taxLabel: taxLabel.value, title: sheet.title, selected: selected.value }))
+function beginEdit(){if(!canWrite.value||busy.value)return;if(selected.value!=='draft'){const value=copy(sheet);delete value.id;delete value.status;delete value.bomCostSnapshotId;selected.value='draft';assign(value)}sheet.useProjectInvestment=true;void calculate()}
+function cancelEdit(){const draft=props.detail.workflow.unitCostDraft as UnitCostSheet|undefined;const confirmed=[...versions.value].reverse().find(v=>!v.voidReason);selected.value=draft?'draft':confirmed?String(confirmed.id):'draft';assign(draft||confirmed||empty());if(sheet.useProjectInvestment)void calculate()}
+async function saveProjectCosts(){sheet.useProjectInvestment=true;return save(false,true)}
+defineExpose({ canLeave: leave, save, saveProjectCosts, beginEdit, cancelEdit, overview, editable, busy, dirty })
 </script>
 
 <template>
-  <section class="unit-cost-sheet" :aria-label="uiText('单件成本核算')">
+  <section class="unit-cost-sheet" :class="{ embedded }" :aria-label="uiText('单件成本核算')">
     <div class="sheet-toolbar">
       <strong>{{ uiText('单件成本核算') }}</strong>
       <el-select class="version-select" :model-value="selected" :disabled="busy" :aria-label="uiText('核算版本')" @change="choose"><el-option :label="uiText('当前草稿')" value="draft"/><el-option v-for="v in versions" :key="v.id" :value="String(v.id)" :label="uiText('C{value0} · {value1}{value2}', { value0: v.id, value1: v.title, value2: v.voidReason ? ' · 已作废' : '' })"/></el-select>
       <el-input v-model="sheet.title" :disabled="!writable" :aria-label="uiText('核算名称')" :placeholder="uiText('核算名称')"/>
       <el-select class="currency-select" v-model="sheet.currency" clearable filterable allow-create default-first-option :disabled="!writable" :aria-label="uiText('核算币种')" :placeholder="uiText('币种待确认')"><el-option v-for="currency in ['CNY','MXN','USD','EUR']" :key="currency" :value="currency" :label="currency"/></el-select>
-      <template v-if="canWrite"><el-button v-if="editable" :loading="busy" type="primary" @click="save(false)">{{ uiText('保存成本草稿') }}</el-button><el-button v-if="editable" :disabled="busy" @click="save(true)">{{ uiText('确认成本版本') }}</el-button><el-button v-else :disabled="busy" @click="copyVersion">{{ uiText('复制为新版本') }}</el-button></template>
-      <details class="more-actions"><summary>{{ uiText('更多') }}</summary><div><el-button v-if="canWrite" :disabled="busy" @click="create">{{ uiText('新建核算') }}</el-button><el-button :disabled="busy" :loading="calculating" @click="calculate">{{ uiText('重新核算') }}</el-button><el-button v-if="editable && detail.workflow.unitCostDraft" :disabled="busy" type="danger" @click="removeDraft">{{ uiText('删除草稿') }}</el-button><el-button v-if="canWrite && selected !== 'draft' && !sheet.voidReason" :disabled="busy" type="danger" @click="voidVersion">{{ uiText('作废版本') }}</el-button></div></details>
+      <template v-if="canWrite"><el-button v-if="editable && !embedded" :loading="busy" type="primary" @click="save(false)">{{ uiText('保存成本草稿') }}</el-button><el-button v-if="editable && !embedded" :disabled="busy" @click="save(true)">{{ uiText('确认成本版本') }}</el-button><el-button v-else-if="selected !== 'draft' && (!embedded || editing)" :disabled="busy" @click="copyVersion">{{ uiText('复制为新版本') }}</el-button></template>
+      <details v-if="!embedded || editing" class="more-actions"><summary>{{ uiText('更多') }}</summary><div><el-button v-if="embedded && editable" :disabled="busy" @click="save(true)">{{ uiText('确认成本版本') }}</el-button><el-button v-if="canWrite" :disabled="busy" @click="create">{{ uiText('新建核算') }}</el-button><el-button :disabled="busy" :loading="calculating" @click="calculate">{{ uiText('重新核算') }}</el-button><el-button v-if="editable && detail.workflow.unitCostDraft" :disabled="busy" type="danger" @click="removeDraft">{{ uiText('删除草稿') }}</el-button><el-button v-if="canWrite && selected !== 'draft' && !sheet.voidReason" :disabled="busy" type="danger" @click="voidVersion">{{ uiText('作废版本') }}</el-button></div></details>
     </div>
+    <label v-if="embedded&&editing" class="investment-quantity"><strong>{{uiText('分摊数量')}}</strong><input type="number" min="1" step="1" :value="allocationQuantity" :disabled="!writable" :aria-label="uiText('统一分摊数量')" :placeholder="uiText('待补')" @input="setAllocationQuantity(($event.target as HTMLInputElement).value)"/><span>{{uiText('实际优先，无完整实际时用预计；数量不明留空。')}}</span></label>
     <p v-if="!canWrite" class="muted compact-note">{{ uiText('当前可查看核算。价格、税率、汇率及成本确认由具有财务维护权限的人员办理。') }}</p>
     <p v-if="sheet.voidReason" class="notice compact-note">{{ uiText('已作废：') }}{{ sheet.voidReason }}</p>
-    <div class="cost-overview" aria-live="polite"><span>{{ uiText('材料＋加工小计') }} <strong>{{ money(totals.manufacturing) }}</strong></span><span>{{ uiText('单件总成本（成品运输前）') }} <strong>{{ money(totals.base) }}</strong></span><span>{{ uiText('含海运合计') }} <strong>{{ money(totals.freight_sea) }}</strong></span><span>{{ uiText('含空运合计') }} <strong>{{ money(totals.freight_air) }}</strong></span><span>{{ uiText('待补 ') }}{{ calculated ? missing.length : '—' }}{{ uiText(' 项') }}</span><span class="overview-basis">{{ sheet.currency || uiText('币种待确认') }} · {{ taxLabel }} <small v-if="calculating">{{ uiText('正在计算…') }}</small><small v-else-if="dirty">{{ uiText('有未保存修改') }}</small></span></div>
+    <div v-if="!embedded" class="cost-overview" aria-live="polite"><span>{{ uiText('材料＋加工小计') }} <strong>{{ money(totals.manufacturing) }}</strong></span><span>{{ uiText('单件总成本（成品运输前）') }} <strong>{{ money(totals.base) }}</strong></span><span>{{ uiText('含海运合计') }} <strong>{{ money(totals.freight_sea) }}</strong></span><span>{{ uiText('含空运合计') }} <strong>{{ money(totals.freight_air) }}</strong></span><span>{{ uiText('待补 ') }}{{ calculated ? missing.length : '—' }}{{ uiText(' 项') }}</span><span class="overview-basis">{{ sheet.currency || uiText('币种待确认') }} · {{ taxLabel }} <small v-if="calculating">{{ uiText('正在计算…') }}</small><small v-else-if="dirty">{{ uiText('有未保存修改') }}</small></span></div>
     <details class="sheet-basis"><summary>{{ uiText('核算依据、税率与汇率') }} <span>{{ sheet.basisType === 'supplier_quote' ? uiText('采购成品供方报价') : uiText('BOM与工艺路线') }}<template v-if="sheet.displayCurrency"> · {{ sheet.displayCurrency }}</template></span></summary>
       <el-form :disabled="!writable" class="sheet-settings" label-position="top" @submit.prevent>
         <el-form-item :label="uiText('核算税额口径')"><el-select v-model="sheet.taxBasis" :aria-label="uiText('核算税额口径')"><el-option :label="uiText('原表估算口径（待核对）')" value="source"/><el-option :label="uiText('统一未税成本')" value="net"/><el-option :label="uiText('统一含税成本')" value="gross"/></el-select></el-form-item>
@@ -177,6 +186,7 @@ defineExpose({ canLeave: leave })
       </el-form>
       <p class="muted compact-note">{{ sheet.taxBasis === 'source' ? uiText('当前合计沿用原始估算口径，含税状态未统一，不能作为已确认成本。') : uiText('按选定税额口径核算，各行需要明确税率；不发生的费用填写0并说明。') }}</p>
       <p v-if="'sourceOutputQty' in sheet" class="muted compact-note">{{ uiText('来源 BOM 基准产量：') }}{{ sheet.sourceOutputQty ?? uiText('待确认') }}{{ uiText('。非单件基准的原用量仅作来源依据；请核对单位及单件用量，不将批量用量直接当成单件成本。') }}</p>
+      <details v-if="sheet.investmentOriginalRows?.length"><summary>{{uiText('原摊销资料')}}（{{sheet.investmentOriginalRows.length}}）</summary><p v-for="(r,i) in sheet.investmentOriginalRows" :key="i">{{r.name}} · {{r.unitPrice??uiText('待补')}} · {{r.allocationQty??uiText('待补')}}<span v-if="r.extraValues"> · {{r.extraValues}}</span></p></details>
     </details>
     <div v-if="editable" class="row-toolbar"><span>{{ uiText('已勾选') }} {{ checkedIds.length }} {{ uiText('行') }}</span><el-button :disabled="!writable" @click="addRow()">{{ uiText('新增明细') }}</el-button><el-button :disabled="!writable || !checkedIds.length" @click="duplicateRows">{{ uiText('复制选中') }}</el-button><el-button :disabled="!writable || !checkedIds.length" @click="deleteRows">{{ uiText('删除选中') }}</el-button><el-button :disabled="!writable || !undoEdit" @click="undo">{{ uiText('撤销上一步') }}</el-button><span class="paste-tip">{{ uiText('可直接粘贴 Excel 多行；Tab / Enter 连续填写') }}</span></div>
     <details class="column-settings"><summary>{{ uiText('列设置／新增列') }}</summary>
@@ -190,11 +200,11 @@ defineExpose({ canLeave: leave })
     <div ref="grid" class="cost-table-wrap" @keydown="keydown"><table class="cost-table" :class="{ 'with-conversion': !!sheet.displayCurrency }"><colgroup><col class="check-col"/><col class="category-col"/><col class="name-col"/><col class="mode-col"/><col class="amount-col"/><col class="quantity-col"/><col class="result-col"/><col v-if="sheet.displayCurrency" class="result-col"/><col class="action-col"/></colgroup>
       <thead><tr><th><input v-if="editable" type="checkbox" :checked="allChecked" :indeterminate="checkedIds.length > 0 && !allChecked" :disabled="!writable" :aria-label="uiText('勾选全部成本明细')" @change="toggleAll"/></th><th>{{ uiText('费用类型') }}</th><th>{{ uiText('费用项目') }}</th><th>{{ uiText('计算方式') }}</th><th>{{ uiText('原价／总额') }}</th><th>{{ uiText('用量／分摊数') }}</th><th>{{ uiText('单件成本') }}<small>{{ sheet.currency || uiText('币种待确认') }}</small></th><th v-if="sheet.displayCurrency">{{ uiText('换算单件') }}<small>{{ sheet.displayCurrency }}</small></th><th><span class="sr-only">{{ uiText('详情') }}</span></th></tr></thead>
       <tbody><template v-for="(row, index) in sheet.rows" :key="row.id"><tr class="cost-row" :data-cost-row="row.id">
-        <td class="cell-check"><input v-if="editable" v-model="checkedIds" type="checkbox" :value="row.id" :disabled="!writable" :aria-label="uiText('勾选成本第{value0}行', { value0: index + 1 })"/></td>
-        <td class="cell-category" :data-label="uiText('费用类型')"><select v-if="editable" :value="row.category" :disabled="!writable" :data-cell="`${index}:category`" :data-row="index" data-field="category" :aria-label="uiText('费用类型')" @change="editCell(row, 'category', ($event.target as HTMLSelectElement).value)" @paste="paste($event, index, 'category')"><option v-for="group in groups" :key="group.key" :value="group.key">{{ uiText(group.name) }}</option></select><span v-else>{{ groupName(row.category) }}</span></td>
-        <td class="cell-name" :data-label="uiText('费用项目')"><div v-if="editable" class="name-editor" :data-value="row.name + ' '"><textarea :value="row.name" rows="1" :disabled="!writable" :data-cell="`${index}:name`" :data-row="index" data-field="name" :aria-label="uiText('费用项目')" :placeholder="uiText('费用项目')" @input="editCell(row, 'name', ($event.target as HTMLTextAreaElement).value)" @paste="paste($event, index, 'name')"/></div><span v-else>{{ row.name }}</span><small v-if="row.estimated">{{ uiText('预估') }}</small><button v-if="row.warning" type="button" class="row-warning" @click="toggleDetails(row.id)">{{ uiText('待核对') }}</button></td>
-        <td class="cell-mode" :data-label="uiText('计算方式')"><select v-if="editable" :value="row.mode" :disabled="!writable" :data-cell="`${index}:mode`" :data-row="index" data-field="mode" :aria-label="uiText('计算方式')" @change="editCell(row, 'mode', ($event.target as HTMLSelectElement).value)" @paste="paste($event, index, 'mode')"><option v-for="mode in costModes" :key="mode.key" :value="mode.key">{{ uiText(mode.name) }}</option></select><span v-else>{{ modeName(row.mode) }}</span></td>
-        <td class="cell-amount numeric" :data-label="priceLabel(row)"><input v-if="editable" type="number" min="0" step="any" inputmode="decimal" :value="row.unitPrice" :disabled="!writable" :data-cell="`${index}:unitPrice`" :data-row="index" data-field="unitPrice" :aria-label="priceLabel(row)" :placeholder="uiText('待补')" @input="editCell(row, 'unitPrice', ($event.target as HTMLInputElement).value)" @paste="paste($event, index, 'unitPrice')"/><span v-else>{{ money(row.unitPrice) }}</span></td>
+        <td class="cell-check"><input v-if="editable && !row.investmentCategories" v-model="checkedIds" type="checkbox" :value="row.id" :disabled="!writable" :aria-label="uiText('勾选成本第{value0}行', { value0: index + 1 })"/></td>
+        <td class="cell-category" :data-label="uiText('费用类型')"><select v-if="editable" :value="row.category" :disabled="!writable || !!row.investmentCategories" :data-cell="`${index}:category`" :data-row="index" data-field="category" :aria-label="uiText('费用类型')" @change="editCell(row, 'category', ($event.target as HTMLSelectElement).value)" @paste="paste($event, index, 'category')"><option v-for="group in groups" :key="group.key" :value="group.key">{{ uiText(group.name) }}</option></select><span v-else>{{ groupName(row.category) }}</span></td>
+        <td class="cell-name" :data-label="uiText('费用项目')"><div v-if="editable" class="name-editor" :data-value="row.name + ' '"><textarea :value="row.name" rows="1" :disabled="!writable" :data-cell="`${index}:name`" :data-row="index" data-field="name" :aria-label="uiText('费用项目')" :placeholder="uiText('费用项目')" @input="editCell(row, 'name', ($event.target as HTMLTextAreaElement).value)" @paste="paste($event, index, 'name')"/></div><span v-else>{{ row.name }}</span><small v-if="row.investmentCategories">{{ uiText('采用上方已保存费用') }}</small><small v-if="row.estimated">{{ uiText('预估') }}</small><button v-if="row.warning" type="button" class="row-warning" @click="toggleDetails(row.id)">{{ uiText('待核对') }}</button></td>
+        <td class="cell-mode" :data-label="uiText('计算方式')"><select v-if="editable" :value="row.mode" :disabled="!writable || !!row.investmentCategories" :data-cell="`${index}:mode`" :data-row="index" data-field="mode" :aria-label="uiText('计算方式')" @change="editCell(row, 'mode', ($event.target as HTMLSelectElement).value)" @paste="paste($event, index, 'mode')"><option v-for="mode in costModes" :key="mode.key" :value="mode.key">{{ uiText(mode.name) }}</option></select><span v-else>{{ modeName(row.mode) }}</span></td>
+        <td class="cell-amount numeric" :data-label="priceLabel(row)"><input v-if="editable" type="number" min="0" step="any" inputmode="decimal" :value="row.unitPrice" :disabled="!writable || !!row.investmentCategories" :data-cell="`${index}:unitPrice`" :data-row="index" data-field="unitPrice" :aria-label="priceLabel(row)" :placeholder="uiText('待补')" @input="editCell(row, 'unitPrice', ($event.target as HTMLInputElement).value)" @paste="paste($event, index, 'unitPrice')"/><span v-else>{{ money(row.unitPrice) }}</span></td>
         <td class="cell-quantity numeric" :data-label="row.mode === 'unit' ? uiText('无需用量') : quantityLabel(row)"><input v-if="editable && row.mode !== 'unit'" type="number" min="0" step="any" inputmode="decimal" :value="basisQuantity(row)" :disabled="!writable" :data-cell="`${index}:basisQuantity`" :data-row="index" data-field="basisQuantity" :aria-label="quantityLabel(row)" :placeholder="uiText('待补')" @input="editCell(row, 'basisQuantity', ($event.target as HTMLInputElement).value)" @paste="paste($event, index, 'basisQuantity')"/><span v-else>{{ row.mode === 'unit' ? '—' : money(basisQuantity(row)) }}</span></td>
         <td class="cell-result numeric" :data-label="`${sheet.currency || uiText('币种待确认')} ${uiText('单件成本')}`"><strong>{{ money(computedRow(row.id)?.unitCost) }}</strong><small v-if="row.mode === 'usage' && row.lossPct != null">{{ uiText('损耗 ') }}{{ row.lossPct }}%</small></td><td v-if="sheet.displayCurrency" class="cell-conversion numeric" :data-label="`${sheet.displayCurrency} ${uiText('换算单件')}`">{{ money(computedRow(row.id)?.displayCost) }}</td>
         <td class="cell-detail"><button type="button" :aria-label="uiText('第{value0}行计算依据', { value0: index + 1 })" :aria-expanded="expandedIds.includes(row.id)" @click="toggleDetails(row.id)">{{ expandedIds.includes(row.id) ? uiText('收起') : uiText('详情') }}</button></td>
@@ -213,7 +223,7 @@ defineExpose({ canLeave: leave })
         <label v-if="!shown('remark')" class="detail-text">{{ uiText('备注') }}<textarea v-if="editable" :value="row.remark" :disabled="!writable" rows="2" :data-cell="`${index}:remark`" :data-row="index" data-field="remark" :aria-label="uiText('成本备注')" @input="editCell(row, 'remark', ($event.target as HTMLTextAreaElement).value)" @paste="paste($event, index, 'remark')"/><span v-else class="full-text">{{ row.remark || '—' }}</span></label>
         <label v-if="row.warning" class="detail-text warning">{{ uiText('待核对事项') }}<textarea v-if="editable" :value="row.warning" :disabled="!writable" rows="2" @input="editWarning(row, ($event.target as HTMLTextAreaElement).value)" :aria-label="uiText('待核对事项')"/><span v-else class="full-text">{{ row.warning }}</span></label><span v-if="row.sourceCell" class="source-note">{{ uiText('来源：') }}{{ row.sourceCell }}</span><span v-if="row.sourceOutputQty != null || row.sourceQuantity != null" class="source-note">{{ uiText('原BOM用量：') }}{{ row.sourceQuantity ?? uiText('待确认') }} · {{ uiText('基准产量：') }}{{ row.sourceOutputQty ?? uiText('待确认') }}</span>
         <label v-for="column in hiddenExtraColumns" :key="column.id" class="detail-text hidden-extra-value" :data-hidden-extra="column.id"><span>{{ column.label }} · {{ uiText('已隐藏的补充资料') }}</span><span class="full-text">{{ row.extraValues?.[column.id] ?? '—' }}</span></label>
-      </div></td></tr></template><tr v-if="!sheet.rows.length"><td :colspan="sheet.displayCurrency ? 9 : 8" class="empty-cost">{{ uiText('新增明细后，可直接粘贴 Excel 多行。') }}<el-button v-if="editable" link :disabled="!writable" @click="addRow()">{{ uiText('新增明细') }}</el-button></td></tr></tbody>
+      </div></td></tr></template><tr v-if="!sheet.rows.length"><td :colspan="sheet.displayCurrency ? 9 : 8" class="empty-cost">{{ uiText('新增明细后，可直接粘贴 Excel 多行。') }}<el-button v-if="editable && !embedded" link :disabled="!writable" @click="addRow()">{{ uiText('新增明细') }}</el-button></td></tr></tbody>
     </table></div>
     <p v-if="!editable && sheet.confirmedAt" class="confirmed-note">{{ sheet.confirmedBy }} · {{ sheet.confirmedAt }}<template v-if="sheet.reason"> · {{ sheet.reason }}</template></p>
   </section>
@@ -224,4 +234,6 @@ defineExpose({ canLeave: leave })
 .column-settings{flex:none;border-bottom:1px solid var(--el-border-color-lighter)}.column-settings>summary{cursor:pointer;line-height:26px}.column-settings[open]{max-height:30vh;overflow:auto;padding-bottom:6px}.optional-columns,.new-column{display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap;margin:4px 0}.optional-columns label{display:flex;align-items:center;gap:4px}.extra-column-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(250px,100%),1fr));gap:4px 10px}.extra-column-list>label{display:flex;align-items:center;gap:5px;min-width:0}.extra-column-list [data-column-label]{flex:1;width:100px;min-width:0}.extra-column-list small{color:var(--el-text-color-secondary)}.column-settings input:not([type=checkbox]),.column-settings select{min-height:28px;box-sizing:border-box;border:1px solid var(--el-border-color-light);border-radius:3px;background:var(--el-fill-color-blank);color:var(--el-text-color-regular);font:inherit;padding:3px 5px}.new-column>input{width:220px;max-width:100%}.new-column>select{width:90px}.row-columns>td{padding:5px 8px;background:var(--el-fill-color-lighter)}.row-extension-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(170px,100%),1fr));gap:5px 10px}.row-extension-grid>label{min-width:0;display:flex;flex-direction:column;gap:3px}.row-extension-grid>label>span:first-child{color:var(--el-text-color-secondary);font-size:12px;overflow-wrap:anywhere}.row-extension-grid textarea{resize:vertical;max-height:96px;overflow:auto}.row-extension-grid .full-text{max-height:96px;overflow:auto}.row-extension-grid small{display:inline!important;margin-left:3px;font-size:11px!important}.row-columns [data-extra-field]>input{font-variant-numeric:tabular-nums}
 @container cost-sheet (max-width:760px){.sheet-toolbar>.el-select{width:125px}.sheet-toolbar>.el-input{min-width:120px}.sheet-settings{grid-template-columns:repeat(2,minmax(0,1fr))}.cost-overview{gap:4px 13px}.overview-basis{margin-left:0;width:100%}.paste-tip{width:100%;margin-left:0}.cost-table colgroup,.cost-table thead{display:none}.cost-table,.cost-table tbody{display:block}.cost-row{display:grid;grid-template-columns:24px minmax(0,1fr) minmax(0,1.3fr) minmax(0,1fr) 85px 38px;grid-template-areas:'check category name name result detail' 'check mode amount quantity result detail';gap:0}.with-conversion .cost-row{grid-template-columns:24px minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) 80px 38px}.cell-check{grid-area:check}.cell-category{grid-area:category}.cell-name{grid-area:name}.cell-mode{grid-area:mode}.cell-amount{grid-area:amount}.cell-quantity{grid-area:quantity}.cell-result{grid-area:result}.cell-detail{grid-area:detail}.cost-row>td{display:flex;flex-direction:column;justify-content:center;min-width:0;border-bottom:0;padding:3px 4px}.cost-row{border-bottom:1px solid var(--el-border-color)}.cost-row td[data-label]::before{content:attr(data-label);font-size:11px;color:var(--el-text-color-secondary);line-height:16px}.cost-row>.cell-result,.cost-row>.cell-conversion{align-items:flex-end}.cost-row>.cell-name::before,.cost-row>.cell-category::before{display:none}.cell-conversion{grid-column:2/6;text-align:right;flex-direction:row!important;gap:8px;justify-content:flex-end!important;border-top:1px dashed var(--el-border-color-lighter)}.row-details,.row-columns{display:block}.row-details>td,.row-columns>td{display:block;border-right:0}.row-detail-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @container cost-sheet (max-width:440px){.cost-row{grid-template-columns:22px minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) 68px 34px}.cost-table td{padding:3px}.sheet-toolbar>.el-select{width:118px}.sheet-toolbar>.el-input{order:1;min-width:100%;flex-basis:100%}.row-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.sheet-settings{grid-template-columns:1fr}.wide-field{grid-column:1}.cost-overview>span{width:calc(50% - 8px)}.cost-overview>.overview-basis{width:100%}}
+.investment-quantity{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px;background:var(--el-color-primary-light-9)}.investment-quantity input{width:130px;min-height:28px;font:inherit;border:1px solid var(--el-border-color);border-radius:4px;padding:3px 7px}.investment-quantity span{font-size:12px;color:var(--el-text-color-secondary)}
+.unit-cost-sheet.embedded{flex:none;min-height:auto}.embedded .cost-table-wrap{flex:none;overflow:visible;scrollbar-gutter:auto}.embedded .sheet-basis[open],.embedded .column-settings[open],.embedded .cost-gaps[open]{max-height:none;overflow:visible}.embedded .row-detail-grid textarea,.embedded .row-extension-grid textarea{max-height:none;field-sizing:content}.embedded .row-extension-grid .full-text{max-height:none;overflow:visible}
 </style>

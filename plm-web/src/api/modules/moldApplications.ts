@@ -6,10 +6,13 @@ export interface MoldActivity { activityId:number; type:string; occurredAt:strin
 export type MoldBusinessStatus = 'draft'|'submitting'|'submission_unknown'|'awaiting_approval'|'approved'|'rejected'|'withdrawn'|'terminated'|'approval_unknown'
 export const moldBusinessStatusNames:Record<MoldBusinessStatus,string>={draft:'草稿',submitting:'提交中',submission_unknown:'提交待核对',awaiting_approval:'待 Tiffany 审核',approved:'Tiffany 已同意',rejected:'已拒绝',withdrawn:'已撤回',terminated:'已终止',approval_unknown:'审批待核对'}
 export type MoldExecutionIntent='new'|'new_set'|'reuse'
+export type HoleType='large'|'precision'|'other'
+export interface EngineeringSpecification {key:string;holeType:HoleType|'';structureDescription:string;phoneModelIds:number[];manufacturingRelationId?:number;manufacturingRelationVersion?:number}
+export interface EngineeringPlan {handling:'pending'|'new'|'new_set'|'reuse';specifications:EngineeringSpecification[];codePhoneModelId?:number}
 /** Server-derived policy from the real product and persisted application provenance. */
 export interface MoldSubmissionPolicy {mode:'research'|'model';requiresCodes:boolean;requiresStandardPhone:boolean;requiresTipoMapping:boolean;allowedTipos:string[];filingMissing:string[]}
 export interface MoldTargetOptions{projects:{projectId:number;productName:string}[];items:{itemId:number;moldName:string;compatibleModels:string}[];existingApplications?:{applicationId:number;approvalNo?:string|null;status:string;businessStatus?:MoldBusinessStatus;executionIntent:MoldExecutionIntent}[]}
-export interface MoldDraftInput {form:Record<string,string|null>;productLineId:number|null;phoneCodeItemId:number|null;version?:number;phoneModelId?:number|null;executionIntent?:MoldExecutionIntent;targetItemId?:number|null;targetMoldSetId?:number|null;targetProjectId?:number|null;executionReason?:string|null;draftRequestId?:string;newApplication?:boolean}
+export interface MoldDraftInput {form:Record<string,string|null>;productLineId:number|null;phoneCodeItemId:number|null;version?:number;phoneModelId?:number|null;executionIntent?:MoldExecutionIntent;targetItemId?:number|null;targetMoldSetId?:number|null;targetProjectId?:number|null;executionReason?:string|null;draftRequestId?:string;newApplication?:boolean;engineeringPlan?:EngineeringPlan}
 export interface StartMoldApplication {phoneModelId:number;sourceModelKey?:string;sourceKind?:string;sourceId?:number;productLineId?:number|null;executionIntent?:'new'|'new_set';targetItemId?:number|null;targetProjectId?:number|null;executionReason?:string;requestId?:string;newApplication?:boolean}
 export interface MoldHistoricalAssociation {associationOnly:true;reason:string;actorId:number;actorName:string;associatedAt:string;before:Record<string,number|null>;after:Record<string,number|null>}
 export interface MoldResearchSource {
@@ -28,6 +31,7 @@ export interface ResearchCoding {
   products?:{productId:number;code?:string;finishedProductCode?:string;productCode?:string;modelName?:string;colorName?:string;phoneModelId?:number;phoneModelCode?:string;colorCode?:string;operationCode?:string}[]
 }
 export interface MoldApplication {
+  engineeringPlan?:EngineeringPlan
   terminal?:boolean;isOwnDraft?:boolean;refusal?:{reason:string|null;actorId:string|null;actorName:string|null;occurredAt:string|null}|null
   applicationId:number; version:number; canEditDraft?:boolean; canDeleteDraft?:boolean; canArchiveFiles?:boolean; sourceSystem:string; instanceId:string|null; approvalNo:string|null; title:string|null
   model:string|null; tipo:string|null; generatedCodes:string|null; form:Record<string,string|null>; status:string; remoteStatus:string|null

@@ -18,7 +18,7 @@ const sourceDraft = (): Sheet => ({ title: '来源核算草稿', currency: '', t
     sourceQuantity: 0.00000001, sourceOutputQty: 10, warning: '请核对单件用量' }] })
 const simpleDraft = (): Sheet => ({ title: '测试核算', currency: 'CNY', taxBasis: 'net', references: [], totals: { base: null },
   rows: [0, 1].map(index => ({ id: `row-${index}`, category: 'material', name: `材料${index + 1}`, mode: 'unit', unitPrice: null, taxIncluded: null, taxRate: null })) })
-async function start(permissions = ['finance:read', 'finance:write'], draft = sourceDraft(), workflow: Record<string, unknown> = {}) {
+async function start(permissions = ['finance:read', 'finance:write'], draft = sourceDraft(), workflow: Record<string, unknown> = {},embedded=false) {
   const pinia = createPinia(); setActivePinia(pinia); useUserStore().permissions = permissions
   const detail = ref({ productId: 42, status: 'developing', canWrite: true, workflow: { version: 3, unitCostDraft: clone(draft), ...workflow }, materials: [], bomRoutes: [], events: [] } as unknown as ProductResearchDetail)
   vi.mocked(previewUnitCost).mockResolvedValue(clone(draft))
@@ -29,11 +29,12 @@ async function start(permissions = ['finance:read', 'finance:write'], draft = so
     else next.workflow.unitCostDraft = clone(input)
     detail.value = next; return next
   })
-  const Host = defineComponent({ setup: () => () => h(UnitCostSheet, { detail: detail.value }) })
+  const editing=ref(false)
+  const Host = defineComponent({ setup: () => () => h(UnitCostSheet, { detail: detail.value,embedded,editing:editing.value }) })
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: Host }, { path: '/other', component: { template: '<p>other</p>' } }] })
   await router.push('/'); await router.isReady()
   wrapper = mount(RouterView, { attachTo: document.body, global: { plugins: [pinia, router, ElementPlus] } }); await flushPromises()
-  return { detail, router, component: wrapper.getComponent(UnitCostSheet), currency: wrapper.findAllComponents(ElSelect).find(select => select.props('placeholder') === '币种待确认')! }
+  return { detail, router, editing, component: wrapper.getComponent(UnitCostSheet), currency: wrapper.findAllComponents(ElSelect).find(select => select.props('placeholder') === '币种待确认')! }
 }
 const button = (text: string) => {
   const found = wrapper.findAll('button').find(item => item.text() === text)
@@ -45,6 +46,43 @@ async function paste(row: number, field: string, text: string) { await cell(row,
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
 beforeEach(() => { setLanguage('zh-CN'); vi.clearAllMocks(); vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm' as any) })
 afterEach(() => { wrapper?.unmount(); vi.useRealTimers(); vi.restoreAllMocks(); setLanguage('zh-CN') })
+
+it('keeps the embedded sheet read-only until Edit, saves linked costs in the original draft and can cancel local changes', async()=>{
+  const draft=simpleDraft();draft.currency='CNY';draft.rows[0].unitPrice=2
+  const {component,editing}=await start(undefined,draft,{},true)
+  expect(wrapper.find('[data-cell]').exists()).toBe(false)
+  editing.value=true;await flushPromises();component.vm.beginEdit();await flushPromises()
+  await cell(0,'unitPrice').setValue('3');component.vm.cancelEdit();await flushPromises()
+  expect((cell(0,'unitPrice').element as HTMLInputElement).value).toBe('2')
+  await component.vm.saveProjectCosts();await flushPromises()
+  expect(researchAction).toHaveBeenCalledWith(42,'unit_cost_save',3,expect.objectContaining({useProjectInvestment:true,rows:[expect.objectContaining({unitPrice:2}),expect.anything()]}))
+  expect(ElMessageBox.confirm).not.toHaveBeenCalled()
+})
+it('edits amortisation quantity once while source amounts remain read-only',async()=>{
+  const draft=simpleDraft();draft.rows=[{id:'project-investment-tooling',category:'tooling',name:'模具摊销',mode:'divide',unitPrice:12000,allocationQty:null,investmentCategories:['mold']},{id:'project-investment-development',category:'development',name:'研发摊销',mode:'divide',unitPrice:300,allocationQty:null,investmentCategories:['design','sample','other']}]
+  const {component,editing}=await start(undefined,draft,{},true);editing.value=true;await flushPromises();component.vm.beginEdit();await flushPromises()
+  expect(cell(0,'unitPrice').attributes('disabled')).toBeDefined()
+  await wrapper.get('input[aria-label="统一分摊数量"]').setValue('30000');await component.vm.saveProjectCosts();await flushPromises()
+  expect(researchAction).toHaveBeenCalledWith(42,'unit_cost_save',3,expect.objectContaining({rows:[expect.objectContaining({allocationQty:30000,unitPrice:12000}),expect.objectContaining({allocationQty:30000,unitPrice:300})]}))
+})
+it('keeps a confirmed linked version frozen and reads newer project money only after Edit creates a new draft',async()=>{
+  const confirmed:Sheet={title:'历史确认版本',currency:'CNY',taxBasis:'source',references:[],id:1,status:'confirmed',confirmedAt:'2026-11-01',confirmedBy:'合成财务',useProjectInvestment:true,totals:{base:1},rows:[{id:'project-investment-tooling',category:'tooling',name:'历史模具',mode:'divide',unitPrice:100,allocationQty:100,unitCost:1,investmentCategories:['mold']}]}
+  const {component,editing,detail}=await start(undefined,confirmed,{unitCostDraft:undefined,unitCostVersions:[confirmed]},true)
+  expect(previewUnitCost).not.toHaveBeenCalled();expect(wrapper.text()).toContain('100.00')
+  vi.mocked(previewUnitCost).mockResolvedValue({...clone(confirmed),rows:[{...confirmed.rows[0],unitPrice:130,unitCost:1.3}],totals:{base:1.3}})
+  editing.value=true;await flushPromises();component.vm.beginEdit();await flushPromises()
+  expect(previewUnitCost).toHaveBeenCalledWith(42,expect.objectContaining({useProjectInvestment:true,rows:[expect.objectContaining({unitPrice:100})]}))
+  expect((cell(0,'unitPrice').element as HTMLInputElement).value).toBe('130')
+  expect((detail.value.workflow.unitCostVersions as Sheet[])[0].rows[0].unitPrice).toBe(100)
+  expect((detail.value.workflow.unitCostVersions as Sheet[])[0].confirmedBy).toBe('合成财务')
+})
+it('routes new mould expenses to the top table instead of accepting duplicate manual amortisation rows',async()=>{
+  const {component,editing}=await start(undefined,simpleDraft(),{},true);editing.value=true;await flushPromises();component.vm.beginEdit();await flushPromises()
+  await cell(0,'category').setValue('tooling')
+  expect(wrapper.text()).toContain('模具及研发费用请在上方编辑')
+  await component.vm.saveProjectCosts();await flushPromises()
+  expect(researchAction).toHaveBeenCalledWith(42,'unit_cost_save',3,expect.objectContaining({rows:[expect.objectContaining({category:'material'}),expect.anything()]}))
+})
 
 it('keeps an imported unknown currency, original output and source evidence visible without labelling it CNY', async () => {
   const { currency } = await start()
@@ -316,3 +354,5 @@ it('explains that a BOM replacement retains column names and rebuilds original v
   expect(ElMessageBox.confirm).toHaveBeenCalledWith(expect.stringContaining('保留补充列名称，原明细及补充值将重建'), '从BOM带入')
   expect(researchAction).not.toHaveBeenCalled()
 })
+
+it('uses the latest confirmed version in the full cost page when there is no draft, without duplicating save controls',async()=>{const confirmed={...simpleDraft(),id:5,status:'confirmed' as const,totals:{manufacturing:2,base:3}};const {component}=await start(undefined,simpleDraft(),{unitCostDraft:undefined,unitCostVersions:[confirmed]},true);expect((component.vm as any).overview).toMatchObject({selected:'5',manufacturing:2,base:3});expect(component.find('.cost-overview').exists()).toBe(false);expect(component.findAll('button').some(b=>b.text()==='保存成本草稿')).toBe(false)})

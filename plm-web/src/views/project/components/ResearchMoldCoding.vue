@@ -49,7 +49,7 @@ function productLabel(application:MoldApplication,code:string){
 
 <template>
   <section class="research-coding" :aria-label="uiText('LEMOS开模申请')" data-readiness-target="mold-authorization">
-    <header><h3>{{uiText('开模申请与编码')}}</h3><el-button v-if="canCreate" type="primary" :disabled="busy||!canPrepare" @click="applications.length?emit('other-phone'):emit('create')">{{uiText(applications.length?'选择其他型号':'发起LEMOS开模申请')}}</el-button></header>
+    <header><h3>{{uiText('开模申请与编码')}}</h3><el-button v-if="canCreate" type="primary" :disabled="busy||!canPrepare" @click="applications.length?emit('other-phone'):emit('create')">{{uiText(applications.length?'办理其他模具需求':'发起LEMOS开模申请')}}</el-button></header>
     <p v-if="!applications.length" class="coding-note">{{uiText('Tiffany 同意后，自动生成 M 码和 N 码。')}}</p>
     <article v-for="row in rows" :key="row.application.applicationId" class="coding-application">
       <div class="research-application-row">

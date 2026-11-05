@@ -281,7 +281,7 @@ public class ProductDevelopmentService {
     }
 
     public Map<String,Object> previewUnitCost(long id,Map<String,Object> input) {
-        product(id,false);return unitCosts.preview(input);
+        product(id,false);return unitCosts.preview(id,input);
     }
 
     @Transactional

@@ -7,6 +7,7 @@ const api=vi.hoisted(()=>({getPhoneBrands:vi.fn(),getPhoneSelectionBrands:vi.fn(
 const review=vi.hoisted(()=>vi.fn())
 const codes=vi.hoisted(()=>({createCodeItem:vi.fn(),updateCodeItem:vi.fn(),inspectCodeItem:vi.fn(),codeItemAction:vi.fn()}))
 vi.mock('@/api/modules/phoneReference',()=>api)
+vi.mock('@/api/modules/manufacturing',()=>({getManufacturingRelations:vi.fn().mockResolvedValue({content:[],totalElements:0,page:1,size:20,totalPages:0})}))
 vi.mock('../components/PhoneCodeGroups.vue',()=>({default:{template:'<p>型号编码组</p>'}}))
 vi.mock('../components/PhoneModelIntake.vue',()=>({default:{props:['visible','editable','keyword'],emits:['changed'],template:'<section data-test="phone-intake">待补手机型号工作区</section>'}}))
 vi.mock('@/api/modules/code',()=>({...codes,getCodeItems:vi.fn().mockResolvedValue({content:[]}),getPhoneModelReview:review}))

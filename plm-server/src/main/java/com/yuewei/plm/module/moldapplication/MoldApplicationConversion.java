@@ -25,6 +25,9 @@ public class MoldApplicationConversion {
     private final ProductCodeGenerator productCodes;private final WorkflowTemplateService templates;
     private final com.yuewei.plm.module.pilot.PilotAccessService access;private final PlatformTransactionManager transactions;
     @org.springframework.beans.factory.annotation.Autowired private com.yuewei.plm.module.product.service.ResearchProductCodingService productCoding;
+    @org.springframework.beans.factory.annotation.Autowired private com.yuewei.plm.module.manufacturing.ManufacturingIdentityService manufacturing;
+    @org.springframework.beans.factory.annotation.Autowired private com.yuewei.plm.common.util.ProductBusinessCodeGenerator businessCodes;
+    @org.springframework.beans.factory.annotation.Autowired private com.yuewei.plm.module.collaboration.CollaborationService collaboration;
     public record Convert(long version,String mode,Long projectId,Long itemId,Long moldSetId,boolean confirmCompatibility,Long phoneModelId,boolean reuseExisting,String compatibilityDigest) {
         public Convert(long version,String mode,Long projectId,Long itemId,Long moldSetId,boolean confirmCompatibility) {this(version,mode,projectId,itemId,moldSetId,confirmCompatibility,null,false,null);}
     }
@@ -106,6 +109,8 @@ public class MoldApplicationConversion {
     }
     private static Map<String,Object> associationLinks(Map<String,Object> row){var value=new LinkedHashMap<String,Object>();for(String key:List.of("phoneModelId","phoneCodeItemId","productLineId","projectId","itemId","moldSetId"))value.put(key,row.get(key));return value;}
     private Map<String,Object> eligible(long id,boolean lock){var row=service.require(id,lock);service.requireModelExecution(row);if(row.get("projectId")!=null)return row;
+        if("reuse".equals(row.get("executionIntent")))throw invalid("沿用已有模具须通过明确的工程关系及项目关联办理，不从旧申请另建制造资料");
+        if("new_set".equals(row.get("executionIntent"))&&!MoldEngineeringPlan.present(MoldEngineeringPlan.from(row)))throw invalid("加开一套前请补齐工程规格及原制造关系，不能从旧手机选择另建制造资料");
         if(!Boolean.TRUE.equals(row.get("approvalGranted"))||"TERMINATED".equals(row.get("remoteStatus")))throw invalid("申请尚未取得明确同意，或已终止");
         if(text(row.get("approvalNo"))==null)throw invalid("审批编号尚未同步完整，请先补拉再转换");
         if(!hasValidCodes(text(row.get("generatedCodes"))))throw invalid("历史申请缺少完整有效模具编码，须先在钉钉完善并同步；不能只转换其中部分编码");return row;}
@@ -153,15 +158,23 @@ public class MoldApplicationConversion {
             if(input.mode()==null||!Set.of("create","link").contains(input.mode()))throw invalid("请选择新建项目或关联已有项目");
             repo.jdbc().queryForObject("select pg_advisory_xact_lock(610131103)",(rs,n)->true);
             var p=preview(id,automatic);var config=(Map<String,Object>)p.get("config");long line=((Number)config.get("productLineId")).longValue();String phone=p.get("phoneCode").toString();
+            var engineeringPlan=MoldEngineeringPlan.from(row);MoldEngineeringPlan.requireCoding(engineeringPlan);boolean newSet=MoldEngineeringPlan.present(engineeringPlan)&&"new_set".equals(engineeringPlan.path("handling").asText());
+            var adopted=newSet?MoldEngineeringPlan.resolveReferenced(manufacturing,line,engineeringPlan):List.<Map<String,Object>>of();Map<String,Object> adoptedProducts=null;Long manufacturingProject=null;
+            if(newSet){
+                if(!"new_set".equals(row.get("executionIntent"))||!Objects.equals(input.itemId(),adopted.get(0).get("itemId"))||!Objects.equals(row.get("targetItemId"),adopted.get(0).get("itemId"))||row.get("targetMoldSetId")!=null&&!Objects.equals(row.get("targetMoldSetId"),adopted.get(0).get("moldSetId")))throw invalid("加开原主档及来源套须与工程制造关系一致");
+                adoptedProducts=adoptedProducts(line,id,adopted);if(!"ready".equals(adoptedProducts.get("status")))throw invalid(String.join("；",((List<?>)adoptedProducts.get("missingMessages")).stream().map(Object::toString).toList()));
+                var targets=new LinkedHashSet<Long>();for(var relation:adopted)targets.add(((Number)relation.get("manufacturingProductId")).longValue());if(targets.size()!=1)throw invalid("本申请涉及多个制造物料，请分别核对办理；不能以第一个手机或物料代表全部范围");manufacturingProject=targets.iterator().next();
+                if(input.projectId()!=null&&!Objects.equals(input.projectId(),manufacturingProject))throw invalid("加开目标须沿用工程确认的原制造型号产品");
+            }
             var matches=(List<Map<String,Object>>)p.get("projects");var items=(List<Map<String,Object>>)p.get("items");var molds=(List<Map<String,Object>>)p.get("moldMatches");
             int allMatches=projectMatches(row,line,phone,false).size();
-            if(allMatches>matches.size())throw new BusinessException(40103,"存在未获授权的同型号项目，请管理员核对关联，不能重复新建");
+            if(!newSet&&allMatches>matches.size())throw new BusinessException(40103,"存在未获授权的同型号项目，请管理员核对关联，不能重复新建");
             List<String> moldCodes=MoldApplicationForms.codes(text(row.get("generatedCodes")));Map<String,Object> reused=null;var newSetSnapshot=codes.reservedNewSet(id,text(row.get("generatedCodes")));if(newSetSnapshot!=null){String actual=repo.jdbc().queryForObject("select coalesce(nullif(engraved_code,''),phone_model_code) from plm_collaboration_item where item_id=? and deleted_flag=0",String.class,newSetSnapshot.get("itemId"));if(!Objects.equals(((Number)newSetSnapshot.get("itemId")).longValue(),input.itemId())||!Objects.equals(newSetSnapshot.get("engravedCode"),actual))throw invalid("加开原主档或刻码已变化，请工程核对；不能自动替换正式审批目标");}
             Long standardPhoneId=(Long)row.get("phoneModelId");if(standardPhoneId==null)standardPhoneId=codes.reservedPhoneModelId(id,text(row.get("generatedCodes")));
             if(standardPhoneId!=null&&input.phoneModelId()!=null&&!standardPhoneId.equals(input.phoneModelId()))throw invalid("明确选择的标准手机与原预留记录不同，不能自动换型号");
             if(standardPhoneId==null)standardPhoneId=input.phoneModelId();
             if(standardPhoneId==null)throw invalid("历史申请的标准手机身份待核对，请明确选择后转入");
-            if(standardPhoneId!=null)codes.references().requireSelectedPhone(standardPhoneId,((Number)((List<Map<String,Object>>)p.get("phoneMatches")).get(0).get("codeItemId")).longValue(),phone,text(row.get("model")));
+            if(standardPhoneId!=null)codes.references().requireSelectedPhone(standardPhoneId,((Number)((List<Map<String,Object>>)p.get("phoneMatches")).get(0).get("codeItemId")).longValue(),phone,service.codingModel(row));
             if(input.reuseExisting()) {
                 if(input.phoneModelId()==null||input.itemId()==null||input.moldSetId()==null)throw invalid("复用须明确选择标准手机、共模档案及适用实物套");
                 reused=codes.references().requireCompatibility(line,input.phoneModelId(),input.itemId(),input.moldSetId(),input.compatibilityDigest());
@@ -169,9 +182,10 @@ public class MoldApplicationConversion {
                 var reserved=(Map<String,Object>)p.get("reservedCompatibility");if(reserved!=null&&(!Objects.equals(reserved.get("compatibilityDigest"),reused.get("compatibilityDigest"))||((Number)reserved.get("phoneModelId")).longValue()!=input.phoneModelId()||((Number)reserved.get("itemId")).longValue()!=input.itemId()||((Number)reserved.get("moldSetId")).longValue()!=input.moldSetId()))throw new BusinessException(40901,"已确认审批的复用关系与原预留快照不一致，不能自动换套");
                 var parts=(JsonNode)reused.get("parts");moldCodes=new ArrayList<>();for(var part:parts)moldCodes.add(part.path("code").asText());
             } else if(p.get("reservedCompatibility")!=null)throw invalid("申请已明确预留原模具，转入时必须复用该套，不得重新建模具");
-            if("create".equals(input.mode())&&(!matches.isEmpty()||(!input.reuseExisting()&&!"new_set".equals(row.get("executionIntent"))&&molds.stream().anyMatch(m->m.get("inventoryId")!=null||m.get("productMoldCodeId")!=null||m.get("moldSetId")!=null))))throw new BusinessException(40901,"相同型号或模具编码已存在，请关联已有记录");
+            if(!newSet&&"create".equals(input.mode())&&(!matches.isEmpty()||(!input.reuseExisting()&&!"new_set".equals(row.get("executionIntent"))&&molds.stream().anyMatch(m->m.get("inventoryId")!=null||m.get("productMoldCodeId")!=null||m.get("moldSetId")!=null))))throw new BusinessException(40901,"相同型号或模具编码已存在，请关联已有记录");
             long project;
-            if("link".equals(input.mode())) {
+            if(newSet)project=manufacturingProject;
+            else if("link".equals(input.mode())) {
                 if(input.projectId()==null||matches.stream().noneMatch(m->Objects.equals(((Number)m.get("projectId")).longValue(),input.projectId())))throw invalid("请选择预览中的已有同型号项目");
                 access.requireProduct(input.projectId());
                 if(standardPhoneId!=null) requireProjectPhone(input.projectId(),standardPhoneId,((Number)((List<Map<String,Object>>)p.get("phoneMatches")).get(0).get("codeItemId")).longValue());
@@ -189,7 +203,7 @@ public class MoldApplicationConversion {
                     values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'draft',?,?)
                     """,project,row.get("approvalNo"),text(form.path("networkType")),text(form.path("holeType")),text(form.path("mobileFunction")),row.get("tipo"),text(form.path("priority")),text(form.path("manufacturingLocation")),text(form.path("moldMarking")),text(form.path("website")),text(form.path("remark")),expected==null?null:LocalDate.parse(expected),config.get("productSpecificCode"),phone,String.join(" / ",moldCodes),actor.username(),actor.username());
             }
-            com.yuewei.plm.module.project.ProjectRegistration.registerConverted(repo.jdbc(),project);
+            if(!newSet)com.yuewei.plm.module.project.ProjectRegistration.registerConverted(repo.jdbc(),project);
             Long codeItemId=((Number)((List<Map<String,Object>>)p.get("phoneMatches")).get(0).get("codeItemId")).longValue();
             Long item=ensureMoldItem(row,line,text(row.get("tipo")),phone,codeItemId,input.itemId(),items,actor.username());
             com.yuewei.plm.module.masterdata.ProductMoldLifecycleService.requireActive(repo.jdbc(),"product",line);
@@ -200,10 +214,14 @@ public class MoldApplicationConversion {
             if(!input.reuseExisting())ensureMoldParts(line,set,config,moldCodes,text(row.get("tipo"))+" "+text(row.get("model")),actor.username());
             // This is an intended phone/set relation, retained on the application below.
             // Confirmed compatibility members require both PC and TPU evidence; never invent that evidence.
-            if(!input.reuseExisting()&&"new_set".equals(row.get("executionIntent"))&&row.get("targetMoldSetId")!=null)repo.jdbc().update("update plm_collaboration_mold_set set source_mold_set_id=? where mold_set_id=?",row.get("targetMoldSetId"),set);
-            repo.jdbc().update("update plm_mold_application set project_id=?,item_id=?,mold_set_id=?,phone_model_id=?,execution_intent=?,status='converted',provisioning_status='ready',provisioning_error=null,execution_status='active',version_no=version_no+1,updated_at=now(),updated_by=? where application_id=?",project,item,set,standardPhoneId,input.reuseExisting()?"reuse":row.get("executionIntent"),actor.username(),id);
+            Long sourceSet=newSet?Long.valueOf(((Number)adopted.get(0).get("moldSetId")).longValue()):(Long)row.get("targetMoldSetId");
+            if(!input.reuseExisting()&&"new_set".equals(row.get("executionIntent"))&&sourceSet!=null)repo.jdbc().update("update plm_collaboration_mold_set set source_mold_set_id=? where mold_set_id=?",sourceSet,set);
+            var resolution=row.get("executionResolution") instanceof JsonNode node?node.deepCopy():repo.node("{}");if(newSet){((com.fasterxml.jackson.databind.node.ObjectNode)resolution).set("manufacturingSnapshots",repo.node(repo.json(adopted)));((com.fasterxml.jackson.databind.node.ObjectNode)resolution).set("manufacturingCoding",repo.node(repo.json(adoptedProducts)));}
+            repo.jdbc().update("update plm_mold_application set project_id=?,item_id=?,mold_set_id=?,phone_model_id=?,execution_intent=?,execution_resolution_json=?::jsonb,status='converted',provisioning_status='ready',provisioning_error=null,execution_status='active',version_no=version_no+1,updated_at=now(),updated_by=? where application_id=?",project,item,set,standardPhoneId,input.reuseExisting()?"reuse":row.get("executionIntent"),repo.json(resolution),actor.username(),id);
             if(!access.access().allObjects())for(var scope:List.of(Map.entry("product",project),Map.entry("item",item),Map.entry("mold",set)))repo.jdbc().update("insert into plm_pilot_scope(user_id,entity_type,entity_id) values(?,?,?) on conflict do nothing",actor.userId(),scope.getKey(),scope.getValue());
+            if(newSet)declareRequestedPhones(engineeringPlan,Map.of("itemId",item,"moldSetId",set),id);
             var audit=new LinkedHashMap<String,Object>();audit.put("projectId",project);audit.put("itemId",item);audit.put("moldSetId",set);audit.put("mode",input.mode());audit.put("reuseExisting",input.reuseExisting());audit.put("originalApprovalCodes",row.get("generatedCodes"));audit.put("actualMoldCodes",moldCodes);if(reused!=null)audit.put("compatibility",reused);
+            if(newSet)audit.put("manufacturingSnapshots",adopted);
             service.audit("MOLD_APPLICATION_CONVERT",id,audit,request,actor);return service.detail(id);
         });
     }
@@ -212,7 +230,11 @@ public class MoldApplicationConversion {
         return new TransactionTemplate(transactions).execute(tx->{
             service.lockPhones(selectedPhone.phoneModelId(),(Long)initial.get("phoneModelId"));service.lockResearchProject(initial);
             var row=service.require(id,true);requireTaskAuthorization(row);service.assertResearchScope(row);
-            completeResearchPhone(row,selectedPhone);
+            var engineeringPlan=MoldEngineeringPlan.from(row);MoldEngineeringPlan.requireCoding(engineeringPlan);
+            if(!MoldEngineeringPlan.present(engineeringPlan)){var form=(JsonNode)row.get("form");MoldEngineeringPlan.requireHoles(null,Map.of("holeType",form.path("holeType").asText(),"structureDescription",form.path("structureDescription").asText()));}
+            boolean reuse=MoldEngineeringPlan.present(engineeringPlan)&&"reuse".equals(engineeringPlan.path("handling").asText());
+            boolean newSet=MoldEngineeringPlan.present(engineeringPlan)&&"new_set".equals(engineeringPlan.path("handling").asText());
+            if(!reuse)completeResearchPhone(row,selectedPhone);
             long project=((Number)row.get("productLineId")).longValue();access.requireProduct(project);
             repo.jdbc().queryForObject("select pg_advisory_xact_lock(610131103)",(rs,n)->true);
             var resolution=row.get("executionResolution") instanceof JsonNode node?node.deepCopy():repo.node("{}");
@@ -222,19 +244,23 @@ public class MoldApplicationConversion {
             boolean explicitMaterials="explicit".equals(previous.path("materialSource").asText());
             var known=codes.researchMaterials(project);if(materials.isEmpty()&&!explicitMaterials&&text(known.get("conflict"))==null)for(Object code:(List<?>)known.get("materialCodes"))materials.add(code.toString());
             state.put("materialCodes",materials);state.putIfAbsent("operationCode","");
-            var prefix=productCoding.ensurePrefix(project,access.actor().username());
-            var m=explicitMaterials||text(known.get("conflict"))==null?researchMolds(row,project,materials,previous.path("m"),prefix):pendingCoding("materialCodes",known.get("conflict").toString());
+            var adopted=reuse||newSet?MoldEngineeringPlan.resolveReferenced(manufacturing,project,engineeringPlan):List.<Map<String,Object>>of();
+            if(newSet&&(!Objects.equals(row.get("targetItemId"),adopted.get(0).get("itemId"))||row.get("targetMoldSetId")!=null&&!Objects.equals(row.get("targetMoldSetId"),adopted.get(0).get("moldSetId"))))throw invalid("加开原主档及来源套须与工程制造关系一致");
+            var prefix=reuse?Map.<String,Object>of():productCoding.ensurePrefix(project,access.actor().username());
+            var m=reuse?adoptedMold(adopted.get(0)):explicitMaterials||text(known.get("conflict"))==null?researchMolds(row,project,materials,previous.path("m"),prefix):pendingCoding("materialCodes",known.get("conflict").toString());
             // A conflicting later basis cannot erase already filed mold identities.
             if(!"ready".equals(m.get("status"))&&row.get("moldSetId")!=null&&previous.path("m").path("codes").isArray()){
                 m=new LinkedHashMap<>(m);var madeCodes=new ArrayList<String>();previous.path("m").path("codes").forEach(code->madeCodes.add(code.asText()));var madeMaterials=new ArrayList<String>();previous.path("m").path("materialCodes").forEach(code->madeMaterials.add(code.asText()));m.put("codes",madeCodes);m.put("materialCodes",madeMaterials);m.put("itemId",row.get("itemId"));m.put("moldSetId",row.get("moldSetId"));
             }
+            if(!reuse&&MoldEngineeringPlan.present(engineeringPlan)&&"ready".equals(m.get("status"))&&!Boolean.TRUE.equals(m.get("reuseExisting")))declareRequestedPhones(engineeringPlan,m,id);
+            if(newSet&&"ready".equals(m.get("status"))){if(Objects.equals(m.get("moldSetId"),adopted.get(0).get("moldSetId")))throw invalid("加开须创建独立实物套，不能沿用来源套编号");repo.jdbc().update("update plm_collaboration_mold_set set source_mold_set_id=? where mold_set_id=?",adopted.get(0).get("moldSetId"),m.get("moldSetId"));}
             Long phone=(Long)row.get("phoneModelId");
-            var n=phone==null||text(row.get("researchPhoneConflict"))!=null?pendingCoding("phoneModelId",Objects.toString(row.get("researchPhoneConflict"),"标准手机型号待补齐")):productCoding.provision(project,phone,id,access.actor().username());
+            var n=reuse||newSet?adoptedProducts(project,id,adopted):phone==null||text(row.get("researchPhoneConflict"))!=null?pendingCoding("phoneModelId",Objects.toString(row.get("researchPhoneConflict"),"标准手机型号待补齐")):newProducts(project,phone,id,row,engineeringPlan);
             var fields=new LinkedHashSet<String>();var messages=new LinkedHashSet<String>();
             for(var result:List.of(m,n)){for(Object field:(List<?>)result.getOrDefault("missingFields",List.of()))fields.add(field.toString());for(Object message:(List<?>)result.getOrDefault("missingMessages",result.getOrDefault("missing",List.of())))messages.add(message.toString());}
             boolean moldReady="ready".equals(m.get("status"))||row.get("moldSetId")!=null&&previous.path("m").path("codes").isArray()&&!previous.path("m").path("codes").isEmpty();
             boolean ready=moldReady&&"ready".equals(m.get("status"))&&"ready".equals(n.get("status"));
-            state.put("productSpecificCode",prefix.getOrDefault("productSpecificCode",""));state.put("productCodePrefix",prefix.getOrDefault("productCodePrefix",""));if(text(state.get("operationCode"))==null&&text(n.get("operationCode"))!=null)state.put("operationCode",n.get("operationCode"));
+            state.put("productSpecificCode",n.getOrDefault("productSpecificCode",prefix.getOrDefault("productSpecificCode","")));state.put("productCodePrefix",n.getOrDefault("productCodePrefix",prefix.getOrDefault("productCodePrefix","")));if(text(state.get("operationCode"))==null&&text(n.get("operationCode"))!=null)state.put("operationCode",n.get("operationCode"));
             state.put("status",ready?"ready":"pending");state.put("missingFields",new ArrayList<>(fields));state.put("missingMessages",new ArrayList<>(messages));state.put("m",m);state.put("n",n);
             state.put("generatedMoldCodes",m.getOrDefault("codes",List.of()));state.put("generatedProductCodes",n.getOrDefault("codes",List.of()));
             state.put("products",n.getOrDefault("products",List.of()));
@@ -247,6 +273,45 @@ public class MoldApplicationConversion {
             service.audit("MOLD_APPLICATION_RESEARCH_CODING_PROVISION",id,Map.of("before",previous,"after",next),null,access.actor());
             return service.detail(id);
         });
+    }
+    private Map<String,Object> adoptedMold(Map<String,Object> relation) {
+        var values=new ArrayList<String>();var materials=new TreeSet<String>();for(JsonNode part:repo.node(repo.json(relation.get("parts")))){String code=part.path("code").asText();values.add(code);materials.add(businessCodes.parseMoldCode(code,null,List.of(),null).materialCode());}
+        return Map.of("status","ready","codes",values,"itemId",relation.get("itemId"),"moldSetId",relation.get("moldSetId"),"materialCodes",new ArrayList<>(materials),"reuseExisting",true,"missingFields",List.of(),"missingMessages",List.of());
+    }
+    private void declareRequestedPhones(JsonNode plan,Map<String,Object> mold,long application) {
+        long item=((Number)mold.get("itemId")).longValue(),set=((Number)mold.get("moldSetId")).longValue();
+        var current=collaboration.item(item);var before=repo.node(repo.json(current.get("compatiblePhones")));var after=(com.fasterxml.jackson.databind.node.ArrayNode)before.deepCopy();
+        boolean changed=false;
+        for(long phone:MoldEngineeringPlan.phones(plan)) {
+            com.fasterxml.jackson.databind.node.ObjectNode member=null;
+            for(JsonNode row:after)if(row.path("phoneModelId").asLong()==phone){member=(com.fasterxml.jackson.databind.node.ObjectNode)row;break;}
+            if(member==null){member=after.addObject();member.put("phoneModelId",phone);member.putArray("setCompatibilities");}
+            var fits=member.withArray("setCompatibilities");boolean declared=false;
+            for(JsonNode fit:fits)if(fit.path("moldSetId").asLong()==set){declared=true;break;}
+            if(!declared){fits.addObject().put("moldSetId",set).put("pcConfirmed",false).put("tpuConfirmed",false).putNull("pcEvidence").putNull("tpuEvidence");changed=true;}
+        }
+        if(!changed)return;
+        var change=new com.yuewei.plm.module.collaboration.CollaborationTypes.CellChange("compatiblePhones",before,after,"来源开模申请 "+application+"：仅登记声明适用范围，PC／TPU适配待工程分别确认");
+        var result=collaboration.saveMoldLedger(new com.yuewei.plm.module.collaboration.CollaborationTypes.BatchSave(List.of(new com.yuewei.plm.module.collaboration.CollaborationTypes.RowPatch("item",item,List.of(change)))),null).get(0);
+        if(!"saved".equals(result.status()))throw new BusinessException("conflict".equals(result.status())?40901:"forbidden".equals(result.status())?40103:40001,result.message());
+    }
+    private Map<String,Object> adoptedProducts(long project,long application,List<Map<String,Object>> relations) {
+        var rows=new LinkedHashMap<Long,Map<String,Object>>();var codes=new LinkedHashSet<String>();var prefixes=new LinkedHashSet<String>();var operations=new LinkedHashSet<String>();
+        for(var relation:relations) {
+            if(!Boolean.TRUE.equals(relation.get("sharedMaterial")))return pendingCoding("manufacturingProductId","已确认共模，但尚未确认共用生产物料，不生成另一套成品编码");
+            var result=productCoding.provisionManufacturing(project,((Number)((Map<?,?>)relation.get("businessPhone")).get("phoneModelId")).longValue(),application,access.actor().username(),relation);
+            if(!"ready".equals(result.get("status")))return result;
+            for(Object raw:(List<?>)result.get("products")){var value=(Map<String,Object>)raw;rows.put(((Number)value.get("productId")).longValue(),value);}
+            for(Object code:(List<?>)result.get("codes"))codes.add(code.toString());
+            prefixes.add(result.get("productSpecificCode").toString());operations.add(Objects.toString(result.get("operationCode"),""));
+        }
+        var result=new LinkedHashMap<String,Object>();result.put("status","ready");result.put("products",new ArrayList<>(rows.values()));result.put("skuIds",new ArrayList<>(rows.keySet()));result.put("codes",new ArrayList<>(codes));result.put("generatedProductCodes",new ArrayList<>(codes));result.put("manufacturingSnapshots",relations);result.put("productSpecificCode",prefixes.size()==1?prefixes.iterator().next():"");result.put("productCodePrefix",prefixes.size()==1?"N"+prefixes.iterator().next():"");result.put("operationCode",operations.size()==1?operations.iterator().next():"");result.put("missingFields",List.of());result.put("missingMessages",List.of());return result;
+    }
+    private Map<String,Object> newProducts(long project,long phone,long application,Map<String,Object> row,JsonNode plan) {
+        if(!MoldEngineeringPlan.present(plan)){var form=(JsonNode)row.get("form");return productCoding.provision(project,phone,application,access.actor().username(),com.yuewei.plm.common.util.ManufacturingHole.canonicalHole(form.path("holeType").asText()),form.path("structureDescription").asText(""));}
+        var specs=new LinkedHashMap<String,JsonNode>();for(JsonNode spec:plan.path("specifications"))specs.put(spec.path("holeType").asText()+"\u001f"+spec.path("structureDescription").asText(),spec);
+        if(specs.size()!=1)return pendingCoding("manufacturingProductId","多种结构共用模具不能自动视为同一成品，请工程逐项确认制造物料归属");
+        var spec=specs.values().iterator().next();return productCoding.provision(project,phone,application,access.actor().username(),spec.path("holeType").asText(),spec.path("structureDescription").asText());
     }
     private void completeResearchPhone(Map<String,Object> row,MoldApplicationService.ResearchPhoneSelection selected){
         if(row.get("phoneModelId")!=null&&row.get("phoneCodeItemId")!=null)return;
@@ -275,7 +340,7 @@ public class MoldApplicationConversion {
             if(old.equals(new TreeSet<>(materials))){access.requireItem((Long)row.get("itemId"));access.requireMold((Long)row.get("moldSetId"));com.yuewei.plm.module.masterdata.ProductMoldLifecycleService.requireActive(repo.jdbc(),"item",(Long)row.get("itemId"));com.yuewei.plm.module.masterdata.ProductMoldLifecycleService.requireActive(repo.jdbc(),"mold_set",(Long)row.get("moldSetId"));var retainedCodes=new ArrayList<String>();previous.path("codes").forEach(code->retainedCodes.add(code.asText()));return Map.of("status","ready","codes",retainedCodes,"itemId",row.get("itemId"),"moldSetId",row.get("moldSetId"),"materialCodes",materials,"reuseExisting",previous.path("reuseExisting").asBoolean(),"missingFields",List.of(),"missingMessages",List.of());}
         }
         String intent=Objects.toString(row.get("executionIntent"),"new");Map<String,Object> compatible=null;
-        if(row.get("moldSetId")==null&&!"new_set".equals(intent)){
+        if(row.get("moldSetId")==null&&!"new_set".equals(intent)&&!MoldEngineeringPlan.present(MoldEngineeringPlan.from(row))){
             var options=codes.references().compatibilityOptions(project,phoneCode,null);
             var selected=options.stream().filter(value->Objects.equals(value.get("phoneModelId"),phone)).filter(value->row.get("targetItemId")==null||Objects.equals(value.get("itemId"),row.get("targetItemId"))).filter(value->row.get("targetMoldSetId")==null||Objects.equals(value.get("moldSetId"),row.get("targetMoldSetId"))).toList();
             if(selected.size()>1)return pendingCoding("moldSetId","存在多套已确认共模关系，请在原申请核对真实实物套");
@@ -286,7 +351,7 @@ public class MoldApplicationConversion {
         String digest=compatible==null?null:Objects.toString(compatible.get("compatibilityDigest"),null);
         var fingerprint=new LinkedHashMap<String,Object>();fingerprint.put("materials",materials);fingerprint.put("phone",phone);fingerprint.put("item",item);fingerprint.put("set",set);
         String request="research:"+row.get("applicationId")+":"+MoldApplicationMedia.hash(repo.json(fingerprint).getBytes(java.nio.charset.StandardCharsets.UTF_8)).substring(0,24);
-        var reserved=codes.reserveResearch(new MoldApplicationCodes.Request(request,text(row.get("tipo")),text(row.get("model")),phoneCode,((Number)row.get("applicationId")).longValue(),phone,compatible==null?null:item,compatible==null?null:set,digest),project,materials,access.actor().username(),"new_set".equals(intent)?item:null);
+        var reserved=codes.reserveResearch(new MoldApplicationCodes.Request(request,text(row.get("tipo")),service.codingModel(row),phoneCode,((Number)row.get("applicationId")).longValue(),phone,compatible==null?null:item,compatible==null?null:set,digest),project,materials,access.actor().username(),"new_set".equals(intent)?item:null);
         var values=MoldApplicationForms.codes(text(reserved.get("generatedCodes")));var matches=repo.jdbc().queryForList("select item_id as \"itemId\" from plm_collaboration_item where product_line_id=? and deleted_flag=0 and phone_model_code=?",project,reserved.get("phoneModelCode"));
         if(compatible==null&&row.get("itemId")!=null)item=(Long)row.get("itemId");else if(item==null&&matches.size()==1)item=((Number)matches.get(0).get("itemId")).longValue();
         if(item!=null){var selected=repo.jdbc().queryForList("select item_id as \"itemId\" from plm_collaboration_item where item_id=? and product_line_id=? and deleted_flag=0",item,project);if(selected.size()!=1)throw invalid("模具主档不属于原新品项目");matches=new ArrayList<>(selected);}

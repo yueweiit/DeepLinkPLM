@@ -11,6 +11,8 @@ import org.springframework.stereotype.Service;
 public class PhoneModelCoverageService {
     private final JdbcTemplate jdbc;
     private final PilotAccessService access;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.yuewei.plm.module.manufacturing.ManufacturingIdentityService manufacturing;
     public static final List<String> STATES=List.of("uncovered","catalogued","draft","applying","planned","making","partial","confirmed","reusable","paused","terminated","needs_review");
     private static final List<String> PRIORITY=List.of("reusable","making","partial","confirmed","planned","applying","draft","catalogued","needs_review","paused","terminated","uncovered");
     @SuppressWarnings("unchecked")
@@ -104,6 +106,10 @@ public class PhoneModelCoverageService {
             for(String prefix:List.of("pc","tpu"))for(String suffix:List.of("PhysicalStatus","Status","Arrival","AcceptanceStatus","AcceptanceDate"))mold.remove(prefix+suffix);
             for(String field:List.of("phoneStatus","brandStatus","codeStatus","codeDeletedFlag","codeItemId"))mold.remove(field);
             var group=group(grouped,phone,line,Objects.toString(mold.get("productLineName")));((List<Map<String,Object>>)group.get("molds")).add(mold);addState(group,state);
+        }
+        if(manufacturing!=null)for(var entry:manufacturing.batchCoverage(safe).entrySet())for(var relation:entry.getValue()){
+            var group=group(grouped,entry.getKey(),nullableId(relation.get("productLineId")),Objects.toString(relation.get("productLineName")));
+            ((List<Map<String,Object>>)group.computeIfAbsent("manufacturingRelations",k->new ArrayList<Map<String,Object>>())).add(relation);
         }
         var result=new LinkedHashMap<Long,List<Map<String,Object>>>();
         grouped.forEach((phone,lines)->{var groups=new ArrayList<>(lines.values());for(var group:groups){var states=(List<String>)group.get("states");group.put("state",primaryState(states));

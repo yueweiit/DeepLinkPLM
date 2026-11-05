@@ -57,3 +57,5 @@ describe('wide shared budget and expense ledger',()=>{
     } finally {confirm.mockRestore()}
   })
 })
+
+it('records a native investment-category change in the original budget draft',async()=>{const{w}=await start();await w.get('select[data-cost-category="1"]').setValue('design');expect(w.text()).toContain('1 个待保存单元格');await button(w,'批量保存').trigger('click');await flushPromises();await w.get('textarea[placeholder="预算修订/费用作废/ERP映射原因（按适用项必填）"]').setValue('合成分类核对');await button(w,'保存修改字段').trigger('click');await flushPromises();expect(api.saveFinanceRows).toHaveBeenCalledWith('budget',[expect.objectContaining({id:1,changes:[{field:'costCategory',before:null,after:'design'}]})])})

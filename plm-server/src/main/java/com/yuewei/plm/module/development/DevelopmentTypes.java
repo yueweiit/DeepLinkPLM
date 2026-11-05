@@ -22,6 +22,9 @@ public final class DevelopmentTypes {
         @Positive private Long itemId;
         @Positive private Long budgetId;
         @Positive private Long expenseId;
+        @Pattern(regexp="manual|erp") private String sourceSystem;
+        @Pattern(regexp="draft|confirmed") private String actualStatus;
+        @Pattern(regexp="mold|transport|customs|sample|design|promotion|other") private String expenseCategory;
         @Pattern(regexp="CNY|MXN|USD|EUR") private String currency;
     }
     public record Change(@NotBlank String field, JsonNode before, JsonNode after) {}
@@ -30,9 +33,13 @@ public final class DevelopmentTypes {
     public record Result(long id,String status,String message,List<Map<String,Object>> conflicts,Map<String,Object> row) {}
     public record CreateBudget(@NotBlank @Pattern(regexp="platform|mold") String kind,
         @NotBlank @Size(max=255) String name, @Positive Long productLineId,@Positive Long itemId,
-        @Positive Long moldSetId,@Positive Long parentBudgetId,@Pattern(regexp="CNY|MXN|USD|EUR") String currency) {}
+        @Positive Long moldSetId,@Positive Long parentBudgetId,@Pattern(regexp="CNY|MXN|USD|EUR") String currency,
+        @Pattern(regexp="project_total|mold|transport|customs|design|sample|other") String costCategory) {
+        public CreateBudget(String kind,String name,Long productLineId,Long itemId,Long moldSetId,Long parentBudgetId,String currency){this(kind,name,productLineId,itemId,moldSetId,parentBudgetId,currency,null);}
+    }
     public record CreateExpense(@NotBlank @Size(max=128) String description,@Positive Long productLineId,
-        @Positive Long itemId,@Positive Long moldSetId,@Positive Long budgetId,@Pattern(regexp="CNY|MXN|USD|EUR") String currency,@Positive Long productId) {
+        @Positive Long itemId,@Positive Long moldSetId,@Positive Long budgetId,@Pattern(regexp="CNY|MXN|USD|EUR") String currency,@Positive Long productId,@Positive Long actualCorrectionOfId) {
+        public CreateExpense(String description,Long productLineId,Long itemId,Long moldSetId,Long budgetId,String currency,Long productId){this(description,productLineId,itemId,moldSetId,budgetId,currency,productId,null);}
         public CreateExpense(String description,Long productLineId,Long itemId,Long moldSetId,Long budgetId,String currency){this(description,productLineId,itemId,moldSetId,budgetId,currency,null);}
     }
     public record ImportDecision(@NotBlank @Size(max=128) String sheetName,@Positive int rowNo,boolean skip,

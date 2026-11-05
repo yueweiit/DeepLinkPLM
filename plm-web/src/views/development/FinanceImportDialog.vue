@@ -16,8 +16,8 @@ let generation = 0
 const current = (ticket:number,token:string) => ticket===generation && token===user.token
 const preview = ref<FinancePreview<BudgetImportRow | ErpImportRow>>()
 const busy = ref(false), jsonText = ref('')
-const columns = computed(() => props.entity === 'budget' ? ['moldCost','moldWeight','transportRate','fuelRate','customsCost','salePrice','unitProductionCost','budgetAmount'] : [])
-const labels:Record<string,string>={moldCost:'模具费用',moldWeight:'重量 KG',transportRate:'运输费率 / KG',fuelRate:'燃油费率 / KG',customsCost:'清关费用',salePrice:'产品售价',unitProductionCost:'单件生产成本',budgetAmount:'手工预算'}
+const columns = computed(() => props.entity === 'budget' ? ['moldCost','freightAmount','moldWeight','transportRate','fuelRate','customsCost','salePrice','unitProductionCost','budgetAmount'] : [])
+const labels:Record<string,string>={moldCost:'模具费用',freightAmount:'模具运费总额（含燃油）',moldWeight:'重量 KG',transportRate:'运输费率 / KG',fuelRate:'燃油费率 / KG',customsCost:'清关费用',salePrice:'产品售价',unitProductionCost:'单件生产成本',budgetAmount:'手工预算'}
 function open() { generation++;preview.value = undefined; jsonText.value = '';busy.value=false }
 const close = () => { open();emit('update:modelValue', false) }
 watch(() => user.token, close, {flush:'sync'})

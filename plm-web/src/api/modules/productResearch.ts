@@ -407,6 +407,7 @@ export interface UnitCostRow {
   estimated?:boolean; unitCost?:number|null; displayCost?:number|null; bomItemId?:number;
   sourceQuantity?:number|string|null;sourceOutputQty?:number|string|null;
   extraValues?:Record<string,string|number|null>;
+  investmentCategories?:string[];
 }
 export interface UnitCostSheet {
   title:string;currency:string;displayCurrency?:string;exchangeRate?:number|null;exchangeRateDate?:string|null;
@@ -417,6 +418,7 @@ export interface UnitCostSheet {
   sourceOutputQty?:number|string|null;
   basisType?:'bom'|'supplier_quote';quoteEventId?:number|null;quoteUnitNote?:string;
   extraColumns?:UnitCostExtraColumn[];visibleOptionalColumns?:UnitCostOptionalColumn[];
+  useProjectInvestment?:boolean;investmentOriginalRows?:UnitCostRow[];investmentBasis?:Record<string,unknown>[];
 }
 
 export async function getResearchReferencePage(query:PhoneObjectQuery):Promise<PhoneObjectPage<PhoneObjectOption>> {return unwrapResponse(await request.get('/product-research/reference-options/page',{params:query}))}
