@@ -1362,7 +1362,7 @@ function resultLabel(value: string) {
       show-icon
     ><el-button v-if="id&&supplierFeedbackLoadContext!==feedbackProjectContext" link :disabled="loading" @click="load">{{ uiText("重新载入") }}</el-button></el-alert>
     <template v-if="!id">
-      <header class="toolbar">
+      <header class="toolbar project-list-toolbar">
         <h2>{{ uiText("新品项目") }}</h2>
         <el-input
           v-model="keyword"
@@ -1405,8 +1405,22 @@ function resultLabel(value: string) {
           <div class="project-stage"><strong>{{row.currentStage}}{{row.workflowComplete?uiText(' · 已完成'):''}}</strong><small v-if="row.nextAction">{{uiText('当前待办')}}：{{row.nextAction}}</small><small>{{row.ownerName||uiText('负责人待分配')}} · {{row.expectedDeliveryDate||uiText('计划时间待定')}}</small>
             <div class="supplier-line"><span v-if="row.supplierNames?.length">{{row.supplierNames.join('、')}}</span><el-button class="supplier-feedback-summary" link :type="row.supplierFeedbackSummary?.nextSupplierPending&&!row.supplierFeedbackSummary?.restricted?'warning':undefined" :disabled="row.supplierFeedbackSummary?.restricted" :aria-label="uiText('查看{value0}的供应商反馈原因与附件',{value0:row.productName})" @click="routeTo(row.currentStepNo||1,row.productId,'supplier-feedback')">{{uiText(supplierFeedbackLabel(row.supplierFeedbackSummary))}}</el-button></div>
           </div>
-          <section class="project-approvals" :aria-label="uiText('开模审批')"><span v-if="!row.moldApplicationSummary?.applications.length" class="muted">{{uiText('暂无开模审批')}}</span><div v-for="application in row.moldApplicationSummary?.applications" :key="application.applicationId" class="approval-line"><div class="research-application-identity"><strong>{{applicationPhoneLabel(application)}}</strong><small class="research-application-number">{{application.approvalNo||uiText('申请 #{value0}',{value0:application.applicationId})}}</small></div><el-tag class="research-approval-status" size="small" :type="application.businessStatus==='rejected'?'danger':application.approvalGranted?'success':'info'">{{uiText(applicationStatus(application))}}</el-tag><el-button class="research-approval-open" link type="primary" @click="showApplicationProgress(application.applicationId,row.productId)">{{uiText(application.terminal?'查看原审批':'查看审批进度')}}</el-button><span v-if="application.businessStatus==='rejected'||application.refusal" class="approval-reason">{{application.refusal?.reason||uiText('审批意见未提供')}}</span></div></section>
-          <div class="row-actions project-list-actions"><el-button type="primary" link @click="routeTo(row.currentStepNo||1,row.productId)">{{uiText('查看／办理')}}</el-button><el-button v-if="row.moldApplicationSummary?.canCreate" link type="primary" :disabled="otherPhoneOpening" @click="openOtherPhone(row.productId)">{{uiText(row.moldApplicationSummary.totalCount?'办理其他模具需求':'发起LEMOS开模申请')}}</el-button><el-button v-if="row.currentStepNo===1&&row.status==='draft'&&user.hasPermission('documents:write')" link type="danger" @click="deleteProjectDraft(row)">{{uiText('删除草稿')}}</el-button></div>
+          <section class="project-approvals" :aria-label="uiText('开模审批')">
+            <strong v-if="row.moldApplicationSummary?.applications.length" class="project-approval-count">{{uiText('开模审批 · {value0}条',{value0:row.moldApplicationSummary.applications.length})}}</strong>
+            <span v-else class="muted project-approval-empty">{{uiText('暂无开模审批')}}</span>
+            <div class="project-approval-records">
+              <div v-for="application in row.moldApplicationSummary?.applications" :key="application.applicationId" class="approval-line">
+                <div class="research-application-identity">
+                  <strong>{{applicationPhoneLabel(application)}}</strong>
+                  <small class="research-application-number">{{application.approvalNo||uiText('申请 #{value0}',{value0:application.applicationId})}}</small>
+                </div>
+                <el-tag class="research-approval-status" size="small" :type="application.businessStatus==='rejected'?'danger':application.approvalGranted?'success':'info'">{{uiText(applicationStatus(application))}}</el-tag>
+                <el-button class="research-approval-open" plain size="small" type="primary" @click="showApplicationProgress(application.applicationId,row.productId)">{{uiText(application.terminal?'查看原审批':'查看审批进度')}}</el-button>
+                <span v-if="application.businessStatus==='rejected'||application.refusal" class="approval-reason">{{application.refusal?.reason||uiText('审批意见未提供')}}</span>
+              </div>
+            </div>
+          </section>
+          <div class="row-actions project-list-actions"><el-button class="project-list-open" type="primary" @click="routeTo(row.currentStepNo||1,row.productId)">{{uiText('查看／办理')}}</el-button><el-button v-if="row.moldApplicationSummary?.canCreate" link type="primary" :disabled="otherPhoneOpening" @click="openOtherPhone(row.productId)">{{uiText(row.moldApplicationSummary.totalCount?'办理其他模具需求':'发起LEMOS开模申请')}}</el-button><el-button v-if="row.currentStepNo===1&&row.status==='draft'&&user.hasPermission('documents:write')" link type="danger" @click="deleteProjectDraft(row)">{{uiText('删除草稿')}}</el-button></div>
         </article>
       </div>
       <el-pagination
@@ -2521,11 +2535,17 @@ h3,.work-heading{font-size:14px;font-weight:700;line-height:1.5;margin:0 0 12px}
 .list-scroll{flex:1;min-height:0;overflow:auto;overflow-x:hidden;background:var(--el-bg-color);border:1px solid var(--el-border-color-lighter);border-radius:6px}
 .launch-page.page-scroll-layout{overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;scroll-padding-top:90px}.page-scroll-layout>.heading,.page-scroll-layout>.toolbar,.page-scroll-layout>.business-relations,.page-scroll-layout>.research-mold-entry,.page-scroll-layout>.readonly-notice,.page-scroll-layout>.stage-context,.page-scroll-layout>.development-workspace{flex:none}.page-scroll-layout>.research-step-nav{position:sticky;top:0;z-index:5}.page-scroll-layout>.development-workspace{overflow:visible;scrollbar-gutter:auto}.list-scroll.cost-page-scroll{flex:none;overflow:visible;background:transparent;border:0;border-radius:0}
 .project-row,.business-row,.mold-row{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--el-border-color-lighter);overflow-wrap:anywhere;min-height:44px}
-.project-list-heading,.project-list .project-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.9fr) minmax(0,1.7fr) 128px;gap:12px;align-items:start;padding:10px 12px}
-.project-list-heading{position:sticky;top:0;z-index:1;background:var(--el-fill-color-light);color:var(--el-text-color-secondary);font-weight:600;border-bottom:1px solid var(--el-border-color-lighter)}
-.project-list-actions{flex-direction:column;align-items:flex-start;gap:6px}.project-list-actions .el-button{margin-left:0;white-space:normal;text-align:left;height:auto;min-height:24px}
-.project-approvals{min-width:0;display:grid;gap:8px}.project-approvals .approval-line{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:3px 8px;margin:0;padding:0 0 8px;border-bottom:1px solid var(--el-border-color-lighter)}.project-approvals .approval-line:last-child{padding-bottom:0;border:0}
-.project-approvals .approval-reason{grid-column:1/-1}.project-approvals .research-application-identity>strong{font-size:12px;line-height:18px}.project-approvals .research-application-number{font-size:11px;line-height:16px;margin:0}.project-approvals .research-approval-open{justify-self:start;margin-left:0}
+.project-list-toolbar>h2{margin-right:auto}.project-list-toolbar>.el-input{width:420px;max-width:45%;flex:0 1 420px}
+.project-list-heading,.project-list .project-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.8fr) 132px;gap:20px;align-items:start;padding:12px 14px}
+.project-list-heading{position:sticky;top:0;z-index:1;background:var(--research-label-bg);color:var(--research-label-ink);font-weight:600;border-bottom:1px solid var(--el-border-color-lighter);padding-top:9px;padding-bottom:9px}
+.project-list .project-row:hover{background:var(--el-fill-color-extra-light)}
+.project-identity,.project-stage{min-width:0;display:grid;gap:4px;align-content:start}.project-list .project-identity>strong{font-size:15px;line-height:22px}.project-stage>strong{font-size:13px;line-height:22px;color:var(--research-label-ink)}
+.project-list .project-row small{margin-top:0}.project-list .phone-line{line-height:20px}
+.project-list-actions{flex-direction:column;align-items:stretch;gap:6px}.project-list-actions .el-button{margin-left:0;white-space:normal;text-align:center;height:auto;min-height:28px;line-height:18px;justify-content:center}.project-list-open{font-weight:600;padding:6px 12px}
+.project-approvals{min-width:0;display:grid;gap:6px;align-content:start}.project-approval-count{font-size:12px;line-height:18px;color:var(--research-label-ink)}.project-approval-empty{padding-top:2px}.project-approval-records{min-width:0;display:grid;gap:6px}
+.project-approvals .approval-line{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:3px 8px;margin:0;padding:5px 8px;border:1px solid var(--el-border-color-lighter);border-radius:5px;background:var(--el-bg-color)}
+.project-approvals .research-application-identity{grid-column:1;display:block}.project-approvals .research-approval-status{grid-column:2;justify-self:end;max-width:100%;height:auto;white-space:normal;line-height:18px;text-align:right}
+.project-approvals .approval-reason{grid-column:1/-1;line-height:18px}.project-approvals .research-application-identity>strong{font-size:13px;line-height:20px}.project-approvals .research-application-number{font-size:12px;line-height:18px;margin:0;font-variant-numeric:tabular-nums}.project-approvals .research-approval-open{grid-column:3;justify-self:end;margin-left:0;max-width:100%;height:auto;min-height:24px;padding:3px 8px;line-height:18px;white-space:normal;text-align:center}
 .approval-line,.phone-line{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 8px;min-width:0;overflow-wrap:anywhere}.approval-line{margin-top:5px}.approval-reason{color:var(--el-color-danger)}.application-choices{display:flex;flex-direction:column;align-items:flex-start;max-height:min(440px,60vh);overflow-y:auto;overflow-x:hidden}.application-choices .el-button{height:auto;white-space:normal;text-align:left;max-width:100%}
 .project-row>div:first-child>strong{font-size:14px;font-weight:700}
 .project-row small,.mold-row small{display:block;margin-top:3px}
@@ -2553,7 +2573,7 @@ h3,.work-heading{font-size:14px;font-weight:700;line-height:1.5;margin:0 0 12px}
 .launch-issues{background:var(--el-color-warning-light-9);padding:10px 12px;margin:12px 0}
 input[type="file"],.el-select{max-width:100%}
 @container(max-width:850px){
- .project-list-heading{display:none}.project-list .project-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 120px;gap:8px 12px}.project-list .project-list-actions{grid-column:3;grid-row:1;justify-self:start}.project-approvals{grid-column:1/-1;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));padding-top:6px;border-top:1px solid var(--el-border-color-lighter)}.project-approvals .approval-line{grid-template-columns:auto minmax(0,1fr);align-content:start;border:0;padding:0}.project-approvals .research-application-identity{grid-column:1/-1}
+ .project-list-heading{display:none}.project-list .project-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 120px;gap:10px 16px}.project-list .project-list-actions{grid-column:3;grid-row:1}.project-approvals{grid-column:1/-1;padding-top:8px;border-top:1px solid var(--el-border-color-lighter)}.project-approval-records{grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr))}.project-approvals .approval-line{grid-template-columns:minmax(0,1fr) auto}.project-approvals .research-application-identity{grid-column:1;grid-row:1/3}.project-approvals .research-approval-open{grid-column:2}
  .research-step-nav{grid-template-columns:repeat(4,minmax(0,1fr));row-gap:10px}.launch-page.page-scroll-layout{scroll-padding-top:150px}
  .research-application-row{grid-template-columns:auto minmax(0,1fr);justify-content:stretch;gap:5px 10px;padding:6px 0}.research-application-identity{grid-column:1/-1;display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 8px}.research-application-number{max-width:100%}.research-approval-status,.research-approval-open{justify-self:start}
  .research-step-nav button:nth-child(4):before{right:50%}.research-step-nav button:nth-child(5):before{left:50%}
@@ -2561,7 +2581,7 @@ input[type="file"],.el-select{max-width:100%}
  .mold-row>.row-actions,.business-row>.row-actions,.business-row>.el-button{grid-column:1/-1;justify-self:start}
 }
 @container(max-width:520px){
- .project-list .project-row{grid-template-columns:minmax(0,1fr)}.project-list .project-list-actions{grid-column:1;grid-row:auto;flex-direction:row}.project-approvals{grid-template-columns:minmax(0,1fr)}
+ .project-list .project-row{grid-template-columns:minmax(0,1fr)}.project-list .project-list-actions{grid-column:1;grid-row:auto;flex-direction:row;flex-wrap:wrap}.project-approval-records{grid-template-columns:minmax(0,1fr)}.project-list-toolbar>h2{flex-basis:100%}.project-list-toolbar>.el-input{width:auto;max-width:none;flex:1 1 180px}
  .heading{min-width:0;flex-basis:100%}.workspace-links{margin-left:0}
  .toolbar>.el-input,.toolbar>.el-select{min-width:0;width:100%}
  .project-header>.el-button{padding-left:0}

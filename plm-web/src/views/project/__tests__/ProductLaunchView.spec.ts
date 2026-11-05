@@ -317,11 +317,22 @@ describe('research application continuity and inline approval details',()=>{
   const router=await start('/product-research');const row=wrapper.get('.project-row');expect(row.text()).toContain('本次开发型号');expect(row.text()).toContain('iPhone 18 Pro');expect(row.text()).toContain('Honor 600 lite');expect(row.text()).toContain('已拒绝');expect(row.text()).toContain('这个型号不好卖');expect(row.findAll('.approval-line')).toHaveLength(3);expect(row.text()).toContain('过去的审批意见');expect(row.text()).toContain('APP-DRAFT');expect(row.text()).toContain('APP-REFUSED');expect(row.text()).toContain('OLDER-REFUSAL');expect(row.find('.el-popover').exists()).toBe(false);expect(getMoldApplication).not.toHaveBeenCalled();
   await button('查看原审批',row).trigger('click');await flushPromises();expect(getMoldApplication).toHaveBeenCalledWith(88);expect(router.currentRoute.value.fullPath).toBe('/product-research');expect(wrapper.getComponent(MoldApplicationDetailDrawer).text()).toContain('APP-REFUSED');expect(startResearchMoldApplication).not.toHaveBeenCalled();
  });
- it('renders zero, one and two running approvals directly in the same list without extra detail queries',async()=>{
-  const application={applicationId:89,approvalNo:'APP-PRO',model:'IP 17 PRO/18 PRO',phoneModelId:2,standardPhone:{modelName:'Apple iPhone 17 Pro'},engineeringPlan:{handling:'new',codePhoneModelId:2,specifications:[{key:'pro',holeType:'large',phoneModelIds:[2,3]}]},status:'submitted',businessStatus:'awaiting_approval',terminal:false};
-  const summaries=[[],[application],[application,{...application,applicationId:90,approvalNo:'APP-PRO-MAX',model:'IP 17 PRO MAX/18 PRO MAX'}]];
-  vi.mocked(getProductResearch).mockResolvedValue({content:summaries.map((applications,index)=>({...record(),productId:42+index,productName:`项目${index}`,moldApplicationSummary:{applications,activeApplications:applications,historyApplications:[],activeCount:applications.length,historyCount:0,totalCount:applications.length,canCreate:true}})),totalElements:3} as any);
-  await start('/product-research');const rows=wrapper.findAll('.project-row');expect(rows.map(row=>row.findAll('.approval-line').length)).toEqual([0,1,2]);expect(rows[0]!.text()).toContain('暂无开模审批');expect(rows[2]!.text()).toContain('APP-PRO');expect(rows[2]!.text()).toContain('APP-PRO-MAX');expect(rows[2]!.findAll('.research-application-identity strong').map(label=>label.text())).toEqual(['IP 17 PRO/18 PRO','IP 17 PRO MAX/18 PRO MAX']);expect(rows[2]!.findAll('.research-approval-status').map(status=>status.text())).toEqual(['待 Tiffany 审核','待 Tiffany 审核']);expect(getMoldApplication).not.toHaveBeenCalled();expect(researchAction).not.toHaveBeenCalled();
+ it('shows the complete approval count and opens the chosen approval for projects with zero to three records',async()=>{
+  const application={applicationId:89,approvalNo:'APP-PRO',model:'IP 17 PRO/18 PRO',phoneModelId:2,standardPhone:{brandName:'Apple',modelName:'iPhone 17 Pro'},engineeringPlan:{handling:'new',codePhoneModelId:2,specifications:[{key:'pro',holeType:'large',phoneModelIds:[2,3]}]},status:'submitted',businessStatus:'awaiting_approval',terminal:false};
+  const proMax={...application,applicationId:90,approvalNo:'APP-PRO-MAX',model:'IP 17 PRO MAX/18 PRO MAX'};
+  const summaries=[[],[application],[application,proMax],[application,proMax,{...application,applicationId:91,approvalNo:'APP-THIRD',model:'其他开发规格'}]];
+  vi.mocked(getProductResearch).mockResolvedValue({content:summaries.map((applications,index)=>({...record(),productId:42+index,productName:`项目${index}`,moldApplicationSummary:{applications,activeApplications:applications.slice(0,1),historyApplications:[],activeCount:applications.length,historyCount:0,totalCount:applications.length,canCreate:true}})),totalElements:4} as any);
+  const router=await start('/product-research');const rows=wrapper.findAll('.project-row');
+  expect(rows.map(row=>row.findAll('.approval-line').length)).toEqual([0,1,2,3]);
+  expect(rows[0]!.text()).toContain('暂无开模审批');
+  expect(rows.slice(1).map(row=>row.get('.project-approval-count').text())).toEqual(['开模审批 · 1条','开模审批 · 2条','开模审批 · 3条']);
+  expect(rows[2]!.findAll('.research-application-identity strong').map(label=>label.text())).toEqual(['IP 17 PRO/18 PRO','IP 17 PRO MAX/18 PRO MAX']);
+  expect(rows[2]!.findAll('.research-approval-status').map(status=>status.text())).toEqual(['待 Tiffany 审核','待 Tiffany 审核']);
+  expect(rows[3]!.text()).toContain('APP-THIRD');expect(getMoldApplication).not.toHaveBeenCalled();
+  vi.mocked(getMoldApplication).mockResolvedValue({...proMax,productLineId:44,form:{model:proMax.model},files:[],activities:[]} as any);
+  await button('查看审批进度',rows[2]!.findAll('.approval-line')[1]!).trigger('click');await flushPromises();
+  expect(getMoldApplication).toHaveBeenCalledWith(90);expect(wrapper.getComponent(MoldApplicationDetailDrawer).text()).toContain('APP-PRO-MAX');
+  expect(router.currentRoute.value.fullPath).toBe('/product-research');expect(researchAction).not.toHaveBeenCalled();expect(startResearchMoldApplication).not.toHaveBeenCalled();
  });
  it('opens the full project form after rejection without choosing a phone or creating a record on open',async()=>{
   const d=current(2);d.applications=[refused()];vi.mocked(getPhoneModelOptions).mockResolvedValue([nextPhone] as any);const source=nextSource();vi.mocked(getResearchMoldApplicationContext).mockResolvedValue(source as any);const router=await launch(d);
