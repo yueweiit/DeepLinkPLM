@@ -3,6 +3,7 @@ import { t as uiText } from '@/locales'
 
 import { canSelectMoldSupplier, moldSupplierOptions } from "@/utils/supplierBusiness";
 import { partnerError as requestError } from "@/utils/partnerError";
+import { getStatusColor } from "@/utils/status";
 import { computed, defineAsyncComponent, nextTick, reactive, ref, watch } from "vue";
 import {
   useRoute,
@@ -12,7 +13,7 @@ import {
 } from "vue-router";
 import { ElMessage, ElMessageBox, genFileId, type InputInstance, type UploadRawFile, type UploadUserFile } from "element-plus";
 import { useEventListener, useResizeObserver } from "@vueuse/core";
-import { ArrowDown } from "@element-plus/icons-vue";
+import { ArrowDown, ArrowLeft, Coin } from "@element-plus/icons-vue";
 import { useUserStore } from "@/stores/user";
 import { useCollaborationWorkspace } from "@/stores/collaborationWorkspace";
 import { createProductResearch } from "@/api/modules/product";
@@ -303,9 +304,6 @@ const originalApplicationFiles=computed(()=>applications.value.filter(applicatio
 const moldApplicationEntry=computed(()=>detail.value?.moldApplicationEntry);
 const showMoldApplicationEntry=computed(()=>!workspace.value&&(!!moldApplicationEntry.value?.canCreate||user.hasPermission('collaboration:view')));
 const canPrepareMoldApplication=computed(()=>!!moldApplicationEntry.value?.eligible&&!!moldApplicationEntry.value.canCreate&&!blocked.value&&(detail.value?.status!=='released'||!!workflow.value.revision));
-const primaryMoldApplication=computed(()=>applications.value.find(application=>!['rejected','withdrawn','terminated'].includes(application.businessStatus||application.status))||applications.value[0]);
-const canContinueMoldDraft=computed(()=>primaryMoldApplication.value?.status==='draft'&&primaryMoldApplication.value.canEditDraft===true&&moldApplicationEntry.value?.canCreate);
-const moldApplicationEntryLabel=computed(()=>primaryMoldApplication.value?(canContinueMoldDraft.value?'继续LEMOS草稿':'查看LEMOS审批进度'):'发起LEMOS开模申请');
 const confirmedPlan = computed(() => (workflow.value.plan as Form) || {}),
   effectivePhones = computed<number[]>(
     () => confirmedPlan.value.phoneModelIds || profile.phoneModelIds || [],
@@ -1161,7 +1159,6 @@ function applicationHighlights(row:ProductResearchRow){
 }
 function applicationStatus(application:Form){return moldBusinessStatusNames[(application.businessStatus||application.status) as keyof typeof moldBusinessStatusNames]||'查看审批状态';}
 function applicationPhoneLabel(application:Form){const phone=phones.value.find(row=>row.phoneModelId===application.phoneModelId);return phone?phoneMemberName(phone):application.standardPhone?.modelName||application.phoneModelName||application.model||(application.phoneModelId?'标准手机资料待读取':'标准手机待补充');}
-function openMoldApplicationEntry(){const application=primaryMoldApplication.value;if(!application)return prepareMoldApplication();return canContinueMoldDraft.value?editMoldApplication(application.applicationId):showApplicationProgress(application.applicationId);}
 async function showApplicationProgress(applicationId:number,projectId=id.value,initial?:MoldApplication){await moldApplicationDetails.value?.open(applicationId,{projectId:projectId||undefined,initial});}
 async function openOtherPhone(projectId=id.value){
   if(!projectId||busy.value||otherPhoneOpening.value)return;
@@ -1425,7 +1422,7 @@ function resultLabel(value: string) {
     </template>
     <template v-else-if="detail&&detail.productId===id">
       <header class="toolbar project-header">
-        <el-button text @click="workspace ? router.push(researchBusinessRoute(workspace)) : routeTo(stage.step, 0)">{{ workspace ? uiText('全部项目') : uiText('返回列表') }}</el-button>
+        <el-button class="research-return-button" :icon="ArrowLeft" @click="workspace ? router.push(researchBusinessRoute(workspace)) : routeTo(stage.step, 0)">{{ workspace ? uiText('全部项目') : uiText('返回新品项目') }}</el-button>
         <div class="heading">
           <h2>{{ detail.productName }}</h2>
           <small
@@ -1437,8 +1434,8 @@ function resultLabel(value: string) {
           >
         </div>
         <div class="workspace-links">
-          <el-button v-if="stage.step!==5&&showMoldApplicationEntry&&(primaryMoldApplication||moldApplicationEntry?.canCreate)" type="primary" :disabled="busy||(!primaryMoldApplication&&!canPrepareMoldApplication)" @click="openMoldApplicationEntry">{{uiText(String((moldApplicationEntryLabel) ?? ''))}}</el-button>
-          <el-button v-if="canMoney" :type="workspace==='cost'?'primary':undefined" @click="openWorkspace('cost')">{{ uiText("成本") }}</el-button>
+          <el-button v-if="stage.step!==5&&showMoldApplicationEntry&&!applications.length&&moldApplicationEntry?.canCreate" type="primary" :disabled="busy||!canPrepareMoldApplication" @click="prepareMoldApplication">{{uiText('发起LEMOS开模申请')}}</el-button>
+          <el-button v-if="canMoney" class="research-cost-button" type="primary" :icon="Coin" @click="openWorkspace('cost')">{{ uiText("项目成本") }}</el-button>
           <el-dropdown trigger="click" placement="bottom-end" @command="projectCommand">
             <el-button :aria-label='uiText("项目操作")'>{{ uiText("项目操作") }}<el-icon class="project-menu-arrow"><ArrowDown/></el-icon></el-button>
             <template #dropdown><el-dropdown-menu class="research-project-menu">
@@ -1452,11 +1449,13 @@ function resultLabel(value: string) {
           </el-dropdown>
         </div>
       </header>
-      <section v-if="stage.step!==5&&showMoldApplicationEntry&&applications.length" class="research-mold-entry" :aria-label='uiText("LEMOS开模申请")'><el-button v-if="canPrepareMoldApplication" link type="primary" :disabled="busy||otherPhoneOpening" @click="openOtherPhone()">{{uiText('办理其他模具需求')}}</el-button>
+      <section v-if="stage.step!==5&&showMoldApplicationEntry&&applications.length" class="research-mold-entry" :aria-label='uiText("LEMOS开模申请")'>
+        <header class="research-approval-heading"><strong>{{uiText('开模审批 · {value0}条',{value0:applications.length})}}</strong><el-button v-if="canPrepareMoldApplication" size="small" plain type="primary" :disabled="busy||otherPhoneOpening" @click="openOtherPhone()">{{uiText('办理其他模具需求')}}</el-button></header>
         <div v-for="application in applications" :key="application.applicationId" class="research-application-row">
-          <span><strong>{{application.approvalNo||uiText('申请 #{value0}',{value0:(application.applicationId)})}}</strong> · {{applicationPhoneLabel(application)}} · {{applicationStatus(application)}}</span>
-          <el-button v-if="application.status==='draft'&&application.canEditDraft===true&&moldApplicationEntry?.canCreate" link type="primary" :disabled="busy" @click="editMoldApplication(application.applicationId)">{{ uiText("继续填写") }}</el-button>
-          <el-button v-else link type="primary" :disabled="busy" @click="showApplicationProgress(application.applicationId)">{{ uiText(application.terminal?"查看原审批":"查看审批进度") }}</el-button><span v-if="application.refusal" class="approval-reason">{{application.refusal.reason||uiText('审批意见未提供')}}</span>
+          <div class="research-application-identity" :title="application.approvalNo||uiText('申请 #{value0}',{value0:application.applicationId})"><strong>{{applicationPhoneLabel(application)}}</strong><small class="research-application-number">{{application.approvalNo||uiText('申请 #{value0}',{value0:application.applicationId})}}</small></div>
+          <el-tag class="research-approval-status" :type="getStatusColor(application.businessStatus)" size="small">{{uiText(applicationStatus(application))}}</el-tag>
+          <el-button v-if="application.status==='draft'&&application.canEditDraft===true&&moldApplicationEntry?.canCreate" class="research-approval-open" size="small" plain type="primary" :disabled="busy" @click="editMoldApplication(application.applicationId)">{{ uiText("继续填写") }}</el-button>
+          <el-button v-else class="research-approval-open" size="small" plain type="primary" :disabled="busy" @click="showApplicationProgress(application.applicationId)">{{ uiText(application.terminal?"查看原审批":"查看审批进度") }}</el-button><span v-if="application.refusal" class="approval-reason">{{application.refusal.reason||uiText('审批意见未提供')}}</span>
         </div>
       </section>
       <div v-if="!workspace && stage.step !== actualStage" class="readonly-notice">{{ uiText(" 当前项目处于") }}{{
@@ -2426,7 +2425,11 @@ function resultLabel(value: string) {
 <style scoped>
 .launch-page{height:100%;min-height:0;min-width:0;display:flex;flex-direction:column;gap:10px;overflow:hidden;container-type:inline-size;font-size:12px;--el-font-size-base:12px;--el-font-size-small:12px;--el-component-size:28px;--el-component-size-small:28px}
 .launch-page,:global(.research-entry-dialog){--research-label-bg:#e9f0fa;--research-label-ink:#174776;--research-section-bg:#dce8f7;--research-field-bg:#fff;--research-field-ink:#192639;--research-field-border:#8da3bc;--research-focus:#245fc5;--research-placeholder:#697a91}
-.research-mold-entry{border-bottom:1px solid var(--el-border-color-light);padding-bottom:8px}.research-mold-entry p{margin:0 0 4px}.research-application-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;min-width:0}.research-application-row>span{min-width:0;overflow-wrap:anywhere}
+.research-mold-entry{border:1px solid var(--el-color-primary-light-7);border-left:3px solid var(--el-color-primary);border-radius:6px;background:var(--el-color-primary-light-9);padding:7px 10px;min-width:0}
+.research-approval-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;min-height:28px;margin-bottom:3px;color:var(--research-label-ink)}
+.research-application-row{display:grid;grid-template-columns:minmax(0,380px) auto auto;justify-content:start;align-items:center;gap:4px 12px;min-width:0;min-height:42px;padding:4px 0;border-top:1px solid var(--el-color-primary-light-8)}
+.research-application-identity{min-width:0;overflow-wrap:anywhere}.research-application-identity>strong{display:block;font-size:13px;line-height:20px;color:var(--research-label-ink)}.research-application-number{display:block;font-size:11px;line-height:16px}
+.research-approval-status{font-weight:700}.research-approval-status.el-tag--info{--el-tag-bg-color:var(--el-color-primary-light-9);--el-tag-text-color:var(--el-color-primary-dark-2);--el-tag-border-color:var(--el-color-primary-light-5)}.research-application-row>.approval-reason{grid-column:1/-1;overflow-wrap:anywhere}
 .original-application-files{padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid var(--el-border-color-lighter);min-width:0}.original-application-files>header,.original-application-files>header>div{display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap}.original-application-files>header{justify-content:space-between}.original-application-files>header span,.original-application-files>p{color:var(--el-text-color-secondary);overflow-wrap:anywhere}.original-application-files>p{margin:6px 0 10px}.original-file-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,168px),1fr));gap:8px}
 .toolbar,.row-actions,.filters,.workspace-links,.stage-context,.section-heading{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
 .toolbar>h2,.heading h2{font-size:16px;font-weight:700;line-height:1.5;margin:0}
@@ -2440,6 +2443,7 @@ h3,.work-heading{font-size:14px;font-weight:700;line-height:1.5;margin:0 0 12px}
 .heading small,small,.muted{color:var(--el-text-color-secondary);font-size:12px;line-height:1.6;overflow-wrap:anywhere}
 .workspace-links{margin-left:auto;flex:none}
 .workspace-links .el-button{margin-left:0}
+.research-return-button,.research-cost-button{font-weight:600;flex:none}
 .project-menu-arrow{margin-left:6px}
 :global(.research-project-menu .el-dropdown-menu__item){font-size:12px;min-height:28px;line-height:20px;padding:4px 16px}
 :global(.research-project-menu .delete-project-command){color:var(--el-color-danger)}
@@ -2549,6 +2553,7 @@ h3,.work-heading{font-size:14px;font-weight:700;line-height:1.5;margin:0 0 12px}
 input[type="file"],.el-select{max-width:100%}
 @container(max-width:850px){
  .research-step-nav{grid-template-columns:repeat(4,minmax(0,1fr));row-gap:10px}.launch-page.page-scroll-layout{scroll-padding-top:150px}
+ .research-application-row{grid-template-columns:auto minmax(0,1fr);justify-content:stretch;gap:5px 10px;padding:6px 0}.research-application-identity{grid-column:1/-1;display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 8px}.research-application-number{max-width:100%}.research-approval-status,.research-approval-open{justify-self:start}
  .research-step-nav button:nth-child(4):before{right:50%}.research-step-nav button:nth-child(5):before{left:50%}
  .mold-row,.business-row,.project-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
  .mold-row>.row-actions,.business-row>.row-actions,.business-row>.el-button,.project-row>.row-actions{grid-column:1/-1;justify-self:start}

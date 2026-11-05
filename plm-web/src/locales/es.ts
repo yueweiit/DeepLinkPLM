@@ -2,6 +2,8 @@
 import ui from './es-ui.json'
 import dynamic from './es-dynamic.json'
 export default {
+  '返回新品项目': 'Volver a proyectos nuevos',
+  '开模审批 · {value0}条': 'Aprobaciones de moldes · {value0}',
   '修改产品名称': 'Cambiar nombre del producto',
   '请先保存当前输入，再修改产品名称': 'Guarde los cambios actuales antes de cambiar el nombre del producto.',
   '只更正当前产品名称；产品编号、已确认资料和原审批名称保持不变。': 'Solo se corrige el nombre actual. Se conservan el código, los datos confirmados y el nombre original de la aprobación.',
