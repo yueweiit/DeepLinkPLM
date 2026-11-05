@@ -2,6 +2,14 @@
 import ui from './es-ui.json'
 import dynamic from './es-dynamic.json'
 export default {
+  '修改产品名称': 'Cambiar nombre del producto',
+  '请先保存当前输入，再修改产品名称': 'Guarde los cambios actuales antes de cambiar el nombre del producto.',
+  '只更正当前产品名称；产品编号、已确认资料和原审批名称保持不变。': 'Solo se corrige el nombre actual. Se conservan el código, los datos confirmados y el nombre original de la aprobación.',
+  '请填写255字以内的产品名称': 'Escriba un nombre de producto de hasta 255 caracteres.',
+  '产品名称已更新，历史资料保留': 'Nombre actualizado; se conserva el historial.',
+  '实际产品线／新品项目': 'Línea de producto o proyecto de nuevo producto',
+  '仅关联新品项目，保留原申请全部型号；不生成编码、模具或库存。': 'Solo se vincula el proyecto. Se conservan todos los modelos de la solicitud original; no se crean códigos, moldes ni inventario.',
+  '已关联新品项目，原审批资料保留': 'Proyecto vinculado; se conserva la aprobación original.',
   "具体库位（选填）": "Ubicación específica (opcional)",
   "按实际收到的样品登记型号、颜色和数量。": "Registre el modelo, color y cantidad de las muestras recibidas.",
   "搜索库位或直接填写位置说明": "Buscar ubicación o escribir una descripción",

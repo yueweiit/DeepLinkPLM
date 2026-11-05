@@ -286,6 +286,25 @@ const nextButton=(step:number)=>step===1?'确认立项，开始画图':step===8?
 const fields=(name:string)=>wrapper.findAll('.el-form-item').find(f=>f.find('.el-form-item__label').exists()&&f.get('.el-form-item__label').text()===name)!;
 const missing=(target:string,title:string)=>({code:target.toUpperCase(),title,target,complete:false,message:`请补齐${title}`});
 
+describe('whole-page development stages and current product name',()=>{
+ it('uses one page scroll layout across all eight stages and keeps ordinary project lists unchanged',async()=>{
+  const d=current(8),router=await launch(d);
+  for(const stage of PRODUCT_RESEARCH_STAGES){await router.push(`/product-research?productId=42&step=${stage.key}`);await flushPromises();expect(wrapper.get('.launch-page').classes()).toContain('page-scroll-layout');expect(wrapper.findAll('.research-step-nav')).toHaveLength(1);expect(wrapper.findAll('.development-workspace')).toHaveLength(1);}
+  await router.push('/product-research');await flushPromises();expect(wrapper.get('.launch-page').classes()).not.toContain('page-scroll-layout');expect(wrapper.find('.list-scroll').exists()).toBe(true);expect(researchAction).not.toHaveBeenCalled();
+ });
+ it('renames through the existing workflow without changing code, stage or confirmed historical profile',async()=>{
+  const d=current(2);d.productName='韧甲手机壳';d.workflow.profileDraft.productName='韧甲手机壳';const router=await launch(d);
+  const renamed={...d,productName:'韧甲',workflow:{...d.workflow,version:3}};vi.mocked(researchAction).mockResolvedValue(renamed);vi.mocked(getProductResearchDetail).mockResolvedValue(renamed);
+  const prompt=vi.spyOn(ElMessageBox,'prompt').mockResolvedValue({value:'韧甲',action:'confirm'} as any);await projectAction('修改产品名称');await flushPromises();
+  expect(prompt).toHaveBeenCalledWith(expect.stringContaining('产品编号、已确认资料和原审批名称保持不变'), '修改产品名称',expect.objectContaining({inputValue:'韧甲手机壳'}));expect(researchAction).toHaveBeenCalledWith(42,'rename',2,{productName:'韧甲',reason:'更正产品显示名称'});expect(wrapper.get('.project-header').text()).toContain('韧甲');expect(wrapper.get('.project-header').text()).toContain(d.productCode);expect(router.currentRoute.value.query.step).toBe('drawing');
+  await router.push('/product-research?productId=42&step=initiation');await flushPromises();expect(fields('产品名称').find('input').element).toHaveProperty('value','韧甲');expect(d.workflow.profileDraft.productName).toBe('韧甲手机壳');expect(confirmTimelineNode).not.toHaveBeenCalled();
+ });
+ it('does not rename after cancelling or discard an unsaved stage form',async()=>{
+  await launch(current(1));const prompt=vi.spyOn(ElMessageBox,'prompt').mockRejectedValueOnce('cancel');await projectAction('修改产品名称');expect(researchAction).not.toHaveBeenCalled();
+  await fields('产品名称').find('input').setValue('未保存的产品名称');await projectAction('修改产品名称');expect(prompt).toHaveBeenCalledTimes(1);expect(fields('产品名称').find('input').element).toHaveProperty('value','未保存的产品名称');expect(researchAction).not.toHaveBeenCalled();
+ });
+});
+
 describe('research application continuity and inline approval details',()=>{
  const refused=()=>({applicationId:88,version:4,productLineId:42,projectId:null,approvalNo:'APP-REFUSED',status:'completed',businessStatus:'rejected',terminal:true,phoneModelId:99,model:'Honor 600 lite',canEditDraft:false,refusal:{reason:'这个型号不好卖',actorName:'周汉琴',actorId:'verified',occurredAt:'2026-10-29T10:00:00+08:00'}});
  const nextPhone={id:2,phoneModelId:2,brandId:1,brandName:'Apple',modelName:'iPhone 18 Pro',status:'enabled',phoneModelCode:'1217',codeItemId:72,aliases:[]};
@@ -378,18 +397,19 @@ describe('supplier feedback summary opens the existing project panel',()=>{
   vi.mocked(getProductResearchDetail).mockResolvedValue(current(7));const focused=focusTracker();const router=await start('/product-research?productId=42&focus=supplier-feedback');expect(router.currentRoute.value.query).toEqual({productId:'42',step:'pilot',focus:'supplier-feedback'});expect(focused).toHaveLength(1);
   window.dispatchEvent(new Event('focus'));await flushPromises();expect(focused).toHaveLength(1);
  });
- it('focuses the real feedback section and scrolls its inner workspace without another query navigation',async()=>{
+ it('focuses the real feedback section using the whole page scroll and clears the sticky stage navigation',async()=>{
   const host=document.createElement('div');document.body.appendChild(host);
   const rectangle=HTMLElement.prototype.getBoundingClientRect;
   vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement){
-   if(this.classList.contains('development-workspace'))return new DOMRect(0,100,800,500);
+   if(this.classList.contains('launch-page'))return new DOMRect(0,100,800,500);
+   if(this.classList.contains('research-step-nav'))return new DOMRect(0,100,800,80);
    if(this.getAttribute('aria-label')==='供应商反馈')return new DOMRect(0,691,800,300);
    return rectangle.call(this);
   });
   try{
    vi.mocked(getProductResearchDetail).mockResolvedValue(current(6));const router=await start('/product-research?productId=42&step=mold&focus=supplier-feedback',host);
-   const section=wrapper.get('[aria-label="供应商反馈"]').element,container=wrapper.get('.development-workspace').element;
-   expect(router.currentRoute.value.query.focus).toBe('supplier-feedback');expect(getProductResearchDetail).toHaveBeenCalledTimes(1);expect(container.scrollTop).toBe(591);expect(document.activeElement).toBe(section);expect(section.getAttribute('tabindex')).toBe('-1');
+   const section=wrapper.get('[aria-label="供应商反馈"]').element,container=wrapper.get('.launch-page').element;
+   expect(router.currentRoute.value.query.focus).toBe('supplier-feedback');expect(getProductResearchDetail).toHaveBeenCalledTimes(1);expect(container.scrollTop).toBe(503);expect(wrapper.get('.development-workspace').element.scrollTop).toBe(0);expect(document.activeElement).toBe(section);expect(section.getAttribute('tabindex')).toBe('-1');
   }finally{host.remove();}
  });
  it('keeps the old project hidden on a failed link and focuses only after retry loads the requested project',async()=>{

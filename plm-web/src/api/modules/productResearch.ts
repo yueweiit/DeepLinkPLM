@@ -343,6 +343,7 @@ export interface ResearchEvent {
   createdBy: string;
 }
 export type WorkflowAction =
+  | "rename"
   | "shipment_confirm"
   | "supplier_change"
   | "supplier_feedback"

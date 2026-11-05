@@ -32,9 +32,7 @@ public class MoldApplicationConversion {
         public Convert(long version,String mode,Long projectId,Long itemId,Long moldSetId,boolean confirmCompatibility) {this(version,mode,projectId,itemId,moldSetId,confirmCompatibility,null,false,null);}
     }
     public record AssociationPreview(Long phoneModelId,Long productLineId) {}
-    public record Association(long version,long phoneModelId,long productLineId,Long projectId,Long itemId,Long moldSetId,String reason,boolean confirmPhoneCorrection) {
-        public Association(long version,long phone,long line,long project,long item,long set,String reason,boolean correct){this(version,phone,line,Long.valueOf(project),Long.valueOf(item),Long.valueOf(set),reason,correct);}
-    }
+    public record Association(long version,Long phoneModelId,long productLineId,Long projectId,Long itemId,Long moldSetId,String reason,boolean confirmPhoneCorrection) {}
     private Map<String,Object> historical(long id,boolean lock){
         service.convertPermission();var row=service.require(id,lock);
         if(!"dingtalk".equals(row.get("sourceSystem")))throw invalid("此入口仅核对历史申请；PLM新执行继续使用原建档流程");return row;
@@ -45,16 +43,26 @@ public class MoldApplicationConversion {
         if(line==null)try{line=((Number)codes.config(text(row.get("tipo"))).get("productLineId")).longValue();}catch(BusinessException ignored){}
         Long phoneId=selection.phoneModelId()==null?(Long)row.get("phoneModelId"):selection.phoneModelId();Map<String,Object> phone=phoneId==null?null:codes.references().requireEnabledModels(List.of(phoneId)).get(phoneId);
         var projects=new ArrayList<Map<String,Object>>();var items=new ArrayList<Map<String,Object>>();var sets=new ArrayList<Map<String,Object>>();
+        Map<String,Object> researchProject=null;
         if(line!=null){
             final long selectedLine=line;if(lines.stream().noneMatch(value->Objects.equals(value.get("productId"),selectedLine)))throw invalid("所选产品线不存在或未获授权");
+            researchProject=researchAssociationProject(row,line);
+            if(researchProject==null){
             projects.addAll(repo.jdbc().queryForList("select p.product_id as \"projectId\",p.product_name as \"productName\",p.model,p.phone_model_code as \"phoneModelCode\",p.phone_model_member_id as \"phoneModelId\",ip.item_id as \"linkedItemId\" from plm_product p left join plm_collaboration_item_project ip on ip.project_id=p.product_id where "+ProjectRegistration.modelCandidateSql("p")+" and p.deleted_flag=0 and p.parent_product_id=? and "+access.visibleSqlClause("product","p.product_id")+" order by p.product_id desc",line));
             for(var project:projects){String problem=phone==null?"请先选择标准手机":associationProjectProblem(project,phone);project.put("blockedReason",problem);}
             items.addAll(repo.jdbc().queryForList("select i.item_id as \"itemId\",coalesce(i.mold_name,i.style_name) as \"moldName\",i.compatible_models as \"compatibleModels\",coalesce(nullif(i.engraved_code,''),i.phone_model_code) as \"engravedCode\" from plm_collaboration_item i where i.deleted_flag=0 and i.product_line_id=? and "+access.visibleSqlClause("item","i.item_id")+" order by i.item_id desc",line));
             for(var project:projects)if(project.get("linkedItemId")!=null&&items.stream().noneMatch(item->Objects.equals(item.get("itemId"),project.get("linkedItemId")))){project.put("blockedReason","该项目已关联未获授权的模具主档，请联系工程或管理员核对");project.remove("linkedItemId");}
             sets.addAll(repo.jdbc().queryForList(associationSetSql()+" where i.product_line_id=? and i.deleted_flag=0 and s.deleted_flag=0 and "+access.visibleSqlClause("item","i.item_id")+" and "+access.visibleSqlClause("mold","s.mold_set_id")+" order by s.item_id,s.set_no",line));
             for(var set:sets)set.put("blockedReason",hasPhysicalFacts(set)?null:"该套仍属拟制或缺少实物事实，请先在模具详情核对实物");
+            }
         }
-        var result=new LinkedHashMap<String,Object>();result.put("application",service.detail(id));result.put("productLines",lines);result.put("selectedProductLineId",line);result.put("standardPhone",phone);result.put("projects",projects);result.put("items",items);result.put("sets",sets);return result;
+        var result=new LinkedHashMap<String,Object>();result.put("application",service.detail(id));result.put("productLines",lines);result.put("selectedProductLineId",line);result.put("standardPhone",phone);result.put("projects",projects);result.put("items",items);result.put("sets",sets);result.put("researchProject",researchProject);return result;
+    }
+    private Map<String,Object> researchAssociationProject(Map<String,Object> row,long line){
+        var values=repo.jdbc().queryForList("select product_id as \"projectId\",product_name as \"productName\" from plm_product where product_id=? and product_type='product_line' and development_mode='launch_v1' and deleted_flag=0",line);
+        if(values.isEmpty())return null;
+        if(!service.usesResearchProcess(row))throw invalid("新品项目须关联LEMOS-新产品开模审批，不能使用型号开模流程");
+        return values.get(0);
     }
     private static String associationSetSql(){return """
         select s.mold_set_id as "moldSetId",s.item_id as "itemId",s.set_no as "setNo",s.set_name as "setName",s.opened_date as "openedDate",s.actual_ship_date as "actualShipDate",
@@ -76,16 +84,23 @@ public class MoldApplicationConversion {
     /** Save every verified level independently. No physical stock, codes, costs or OA result is created. */
     public Map<String,Object> associateHistory(long id,Association input,HttpServletRequest request){
         var original=historical(id,false);
-        if(input.version()<1||input.phoneModelId()<1||input.productLineId()<1)throw invalid("请选择标准手机和产品；项目、主档、套可分层补齐");
+        if(input.version()<1||input.productLineId()<1||input.phoneModelId()!=null&&input.phoneModelId()<1)throw invalid("请选择有效的产品及关联资料");
         if(text(input.reason())==null||input.reason().trim().length()>4000)throw invalid("请填写4000字以内的历史关联核对原因");
         if(input.moldSetId()!=null&&input.itemId()==null)throw invalid("关联具体套时须明确所属主档");
-        var actor=access.actor();
         return new TransactionTemplate(transactions).execute(tx->{
             service.lockPhones((Long)original.get("phoneModelId"),input.phoneModelId());var row=historical(id,true);
             if(((Number)row.get("version")).longValue()!=input.version())throw new BusinessException(40901,"历史申请已更新，请刷新核对");
-            if(row.get("phoneModelId")!=null&&!Objects.equals(row.get("phoneModelId"),input.phoneModelId())&&!input.confirmPhoneCorrection())throw invalid("历史申请已关联另一标准手机；更正须明确确认并保留原因");
-            var phone=codes.references().requireEnabledModels(List.of(input.phoneModelId())).get(input.phoneModelId());access.requireProduct(input.productLineId());
+            access.requireProduct(input.productLineId());
             com.yuewei.plm.module.masterdata.ProductMoldLifecycleService.requireActive(repo.jdbc(),"product",input.productLineId());
+            if(researchAssociationProject(row,input.productLineId())!=null){
+                if(input.projectId()!=null&&!Objects.equals(input.projectId(),input.productLineId())||input.itemId()!=null||input.moldSetId()!=null)throw invalid("此处仅关联新品项目；模具及制造资料须另行工程确认");
+                if(!Objects.equals(input.phoneModelId(),row.get("phoneModelId")))throw invalid("关联新品项目不改写原申请的手机范围，请保留原手机关联");
+                var after=associationLinks(row);after.put("productLineId",input.productLineId());after.put("projectId",input.productLineId());
+                return saveAssociation(id,row,after,input.reason(),request);
+            }
+            if(input.phoneModelId()==null)throw invalid("请选择标准手机和产品；项目、主档、套可分层补齐");
+            if(row.get("phoneModelId")!=null&&!Objects.equals(row.get("phoneModelId"),input.phoneModelId())&&!input.confirmPhoneCorrection())throw invalid("历史申请已关联另一标准手机；更正须明确确认并保留原因");
+            var phone=codes.references().requireEnabledModels(List.of(input.phoneModelId())).get(input.phoneModelId());
             if(input.itemId()!=null)com.yuewei.plm.module.masterdata.ProductMoldLifecycleService.requireActive(repo.jdbc(),"item",input.itemId());
             if(input.moldSetId()!=null)com.yuewei.plm.module.masterdata.ProductMoldLifecycleService.requireActive(repo.jdbc(),"mold_set",input.moldSetId());
             if(input.itemId()!=null){access.requireItem(input.itemId());var items=repo.jdbc().queryForList("select product_line_id from plm_collaboration_item where item_id=? and deleted_flag=0 for update",input.itemId());if(items.size()!=1||!Objects.equals(items.get(0).get("product_line_id"),input.productLineId()))throw invalid("模具主档与所选产品不一致");}
@@ -99,13 +114,17 @@ public class MoldApplicationConversion {
             }
             if(input.moldSetId()!=null){access.requireMold(input.moldSetId());var sets=repo.jdbc().queryForList(associationSetSql()+" where s.mold_set_id=? and s.deleted_flag=0 and i.deleted_flag=0 for update of s",input.moldSetId());if(sets.size()!=1||!Objects.equals(sets.get(0).get("itemId"),input.itemId()))throw invalid("具体套不属于所选主档");if(!hasPhysicalFacts(sets.get(0)))throw invalid("该套仍属拟制或缺少开工／实物事实，请先在模具详情补录依据");}
             var after=new LinkedHashMap<String,Object>();after.put("phoneCodeItemId",phone.get("codeItemId"));after.put("phoneModelId",input.phoneModelId());after.put("productLineId",input.productLineId());after.put("projectId",input.projectId());after.put("itemId",input.itemId());after.put("moldSetId",input.moldSetId());
-            if(after.equals(associationLinks(row)))return service.detail(id);
-            var proof=new LinkedHashMap<String,Object>();proof.put("associationOnly",true);proof.put("reason",input.reason().trim());proof.put("actorId",actor.userId());proof.put("actorName",actor.displayName());proof.put("associatedAt",OffsetDateTime.now().toString());proof.put("before",associationLinks(row));proof.put("after",after);
-            var resolution=row.get("executionResolution") instanceof JsonNode value&&value.isObject()?(com.fasterxml.jackson.databind.node.ObjectNode)value.deepCopy():(com.fasterxml.jackson.databind.node.ObjectNode)repo.node("{}");resolution.set("historicalAssociation",repo.node(repo.json(proof)));
-            if(input.itemId()!=null&&input.projectId()!=null)repo.jdbc().update("insert into plm_collaboration_item_project(item_id,project_id,linked_by) values(?,?,?) on conflict(project_id) do nothing",input.itemId(),input.projectId(),actor.username());
-            repo.jdbc().update("update plm_mold_application set phone_model_id=?,phone_code_item_id=?,product_line_id=?,project_id=?,item_id=?,mold_set_id=?,execution_resolution_json=?::jsonb,version_no=version_no+1,updated_at=now(),updated_by=? where application_id=?",input.phoneModelId(),phone.get("codeItemId"),input.productLineId(),input.projectId(),input.itemId(),input.moldSetId(),repo.json(resolution),actor.username(),id);
-            service.audit("MOLD_APPLICATION_HISTORY_ASSOCIATE",id,proof,request,actor);return service.detail(id);
+            return saveAssociation(id,row,after,input.reason(),request);
         });
+    }
+    private Map<String,Object> saveAssociation(long id,Map<String,Object> row,Map<String,Object> after,String reason,HttpServletRequest request){
+            var actor=access.actor();
+            if(after.equals(associationLinks(row)))return service.detail(id);
+            var proof=new LinkedHashMap<String,Object>();proof.put("associationOnly",true);proof.put("reason",reason.trim());proof.put("actorId",actor.userId());proof.put("actorName",actor.displayName());proof.put("associatedAt",OffsetDateTime.now().toString());proof.put("before",associationLinks(row));proof.put("after",after);
+            var resolution=row.get("executionResolution") instanceof JsonNode value&&value.isObject()?(com.fasterxml.jackson.databind.node.ObjectNode)value.deepCopy():(com.fasterxml.jackson.databind.node.ObjectNode)repo.node("{}");resolution.set("historicalAssociation",repo.node(repo.json(proof)));
+            if(after.get("itemId")!=null&&after.get("projectId")!=null)repo.jdbc().update("insert into plm_collaboration_item_project(item_id,project_id,linked_by) values(?,?,?) on conflict(project_id) do nothing",after.get("itemId"),after.get("projectId"),actor.username());
+            repo.jdbc().update("update plm_mold_application set phone_model_id=?,phone_code_item_id=?,product_line_id=?,project_id=?,item_id=?,mold_set_id=?,execution_resolution_json=?::jsonb,version_no=version_no+1,updated_at=now(),updated_by=? where application_id=?",after.get("phoneModelId"),after.get("phoneCodeItemId"),after.get("productLineId"),after.get("projectId"),after.get("itemId"),after.get("moldSetId"),repo.json(resolution),actor.username(),id);
+            service.audit("MOLD_APPLICATION_HISTORY_ASSOCIATE",id,proof,request,actor);return service.detail(id);
     }
     private static Map<String,Object> associationLinks(Map<String,Object> row){var value=new LinkedHashMap<String,Object>();for(String key:List.of("phoneModelId","phoneCodeItemId","productLineId","projectId","itemId","moldSetId"))value.put(key,row.get(key));return value;}
     private Map<String,Object> eligible(long id,boolean lock){var row=service.require(id,lock);service.requireModelExecution(row);if(row.get("projectId")!=null)return row;

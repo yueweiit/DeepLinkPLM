@@ -76,6 +76,7 @@ public class MoldApplicationService implements ApplicationRunner {
     public boolean enabled(){return props.isEnabled();}
     public boolean supportsProcess(String code){return props.supports(code);}
     private String storedProcess(Map<String,Object> row){return Objects.toString(row.get("processCode"),props.getProcessCode());}
+    boolean usesResearchProcess(Map<String,Object> row){return props.getResearchProcessCode().equals(storedProcess(row));}
     private boolean trustedResearch(Map<String,Object> row){return "research".equals(submissionPolicy(row,json.createObjectNode()).mode());}
     private String effectiveProcess(Map<String,Object> row){return "draft".equals(row.get("status"))&&trustedResearch(row)?props.getResearchProcessCode():storedProcess(row);}
     private String processName(String code){return repo.schema(code).path("name").asText(code.equals(props.getResearchProcessCode())?"LEMOS-新产品开模 Fabricación de moldes":"LEMOS-开模申请 Fabricación de moldes");}

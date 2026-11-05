@@ -897,6 +897,16 @@ public class ProductDevelopmentService {
         Product p=product(id,true);access.requirePermission("documents:write");
         if(workflow.repeated(id,input.requestId()))return detail(id);
         var state=workflow.load(id);workflow.check(state,input.version());var data=new LinkedHashMap<>(input.data());String action=input.action();
+        if("rename".equals(action)){
+            requireDevelopmentEditable(id);String name=text(data.get("productName")).trim();
+            DevelopmentRules.require(!name.isBlank()&&name.length()<=255,"请填写255字以内的产品名称");
+            DevelopmentRules.filled(data.get("reason"),"名称更正原因");
+            if(name.equals(p.getProductName()))return detail(id);
+            var change=Map.of("before",p.getProductName(),"after",name,"reason",text(data.get("reason")));
+            jdbc.update("update plm_product set product_name=?,updated_at=now(),updated_by=? where product_id=?",name,access.actor().username(),id);
+            if(!state.containsKey("requirement")&&state.get("profileDraft") instanceof Map<?,?>){var draft=new LinkedHashMap<>(DevelopmentWorkflowStore.map(state.get("profileDraft")));draft.put("productName",name);state.put("profileDraft",draft);}
+            workflow.save(id,state);event(id,action,change,input.requestId());audit(id,"PRODUCT_RESEARCH_RENAME",change);return detail(id);
+        }
         if("supplier_feedback".equals(action)){
             requireDevelopmentEditable(id);DevelopmentRules.require(isLaunch(p),"供应商反馈请从新品研发办理");int stage=engineeringStage(p,state);
             DevelopmentRules.require(number(data.get("stage"))==stage,"研发阶段已变化，请重新载入后记录供应商反馈");

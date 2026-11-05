@@ -7,6 +7,7 @@ import com.yuewei.plm.common.security.*;
 import com.yuewei.plm.common.util.*;
 import com.yuewei.plm.module.pilot.PilotAccessService;
 import com.yuewei.plm.module.operationlog.service.OperationLogService;
+import com.yuewei.plm.module.project.development.DevelopmentModels.WorkflowInput;
 import com.yuewei.plm.module.integration.dingtalk.config.DingTalkIntegrationProperties;
 import com.yuewei.plm.repository.*;
 import com.yuewei.plm.repository.entity.Product;
@@ -509,7 +510,7 @@ class MoldApplicationLocalIntegrationTest {
         CurrentUserContext.set(new CurrentUser(uid,name,"项目读者",false));var realScope=workbench(access);var query=new com.yuewei.plm.module.project.ProjectWorkbenchService.Query();var visible=realScope.page(query);assertThat(visible).containsEntry("totalElements",1L).doesNotContainKey("unlinkedApplications");assertThat(realScope.overview(project)).containsEntry("applicationCount",null).containsEntry("moldSetCount",null);assertThatThrownBy(()->realScope.overview(50)).hasMessageContaining("授权");
         doThrow(new BusinessException(40103,"未获授权")).when(restricted).requireProduct(50L);assertThatThrownBy(()->workbench(restricted).overview(50)).hasMessageContaining("未获授权");
     }
-    @Test void newPlmExecutionCannotUseHistoricalAssociationToBypassItsStrictWorkflow(){var row=draft();var convert=converter();assertThatThrownBy(()->convert.associationPreview(id(row),new MoldApplicationConversion.AssociationPreview(phoneModel,50L))).hasMessageContaining("PLM新执行");assertThatThrownBy(()->convert.associateHistory(id(row),new MoldApplicationConversion.Association(version(row),phoneModel,50,1,1,1,"不能绕过流程",false),null)).hasMessageContaining("PLM新执行");assertThat(repo.row(id(row),false)).containsEntry("status","draft").containsEntry("projectId",null);verifyNoInteractions(client,files);}
+    @Test void newPlmExecutionCannotUseHistoricalAssociationToBypassItsStrictWorkflow(){var row=draft();var convert=converter();assertThatThrownBy(()->convert.associationPreview(id(row),new MoldApplicationConversion.AssociationPreview(phoneModel,50L))).hasMessageContaining("PLM新执行");assertThatThrownBy(()->convert.associateHistory(id(row),new MoldApplicationConversion.Association(version(row),phoneModel,50,1L,1L,1L,"不能绕过流程",false),null)).hasMessageContaining("PLM新执行");assertThat(repo.row(id(row),false)).containsEntry("status","draft").containsEntry("projectId",null);verifyNoInteractions(client,files);}
 
     MoldHistoryReconciliationService reconciler(){var convert=converter();return new MoldHistoryReconciliationService(repo,service,convert,codes.references(),access,(ProductRepository)org.springframework.test.util.ReflectionTestUtils.getField(convert,"products"),new ProductCodeGenerator(jdbc),mock(WorkflowTemplateService.class),tx);}
     @Test void historicalAssociationCanSaveIdentityAndProjectBeforeArchiveOrSet(){
@@ -595,6 +596,51 @@ class MoldApplicationLocalIntegrationTest {
         var row=jdbc.queryForMap("select * from plm_attachment where attachment_id=?",selected);var a=new com.yuewei.plm.module.attachment.entity.Attachment();a.setAttachmentId(selected);a.setOwnerObjectType((String)row.get("owner_object_type"));a.setOwnerObjectId(((Number)row.get("owner_object_id")).longValue());a.setOriginalFileName((String)row.get("original_file_name"));a.setFileCategory((String)row.get("file_category"));a.setFileExt((String)row.get("file_ext"));a.setChecksum((String)row.get("checksum"));a.setVersionNo((String)row.get("version_no"));a.setStatus((String)row.get("status"));a.setDeletedFlag(((Number)row.get("deleted_flag")).intValue());return a;
     }
     MoldApplicationService.ResearchDraft researchInput(String request){return new MoldApplicationService.ResearchDraft(researchProject,phoneModel,request,((Number)researchStore.load(researchProject).get("version")).longValue());}
+    @Test void importedResearchApprovalsLinkToOneProjectWithoutChoosingTheFirstPhoneOrCreatingManufacturingFacts()throws Exception {
+        researchFixture(false);var convert=converter();var before=physicalAndEntityCounts();var applications=new ArrayList<Long>();
+        for(String model:List.of("IPhone 17PROmax/18PROmax","IPhone 17PRO/18PRO")){
+            var row=uncodedHistory(null,null);long application=id(row);applications.add(application);
+            jdbc.update("update plm_mold_application set process_code=?,model=?,tipo=null,form_data=?::jsonb,source_snapshot_json=?::jsonb where application_id=?",props.getResearchProcessCode(),model,repo.json(Map.of("productName","韧甲","model",model)),repo.json(Map.of("originalTitle","测试工程师提交的LEMOS-新产品开模 Fabricación de moldes")),application);
+            var original=repo.row(application,false);var preview=convert.associationPreview(application,new MoldApplicationConversion.AssociationPreview(null,researchProject));
+            assertThat((Map<String,Object>)preview.get("researchProject")).containsEntry("projectId",researchProject);assertThat((List<?>)preview.get("projects")).isEmpty();
+            var linked=convert.associateHistory(application,new MoldApplicationConversion.Association(version(original),null,researchProject,researchProject,null,null,"用户确认：这两份原审批均属于韧甲新品项目，仅补项目关联",false),null);
+            assertThat(linked).containsEntry("productLineId",researchProject).containsEntry("projectId",researchProject).containsEntry("phoneModelId",null).containsEntry("phoneCodeItemId",null).containsEntry("itemId",null).containsEntry("moldSetId",null).containsEntry("approvalGranted",false).containsEntry("remoteStatus","RUNNING");
+            for(String field:List.of("model","form","sourceSnapshot","generatedCodes","sourceSystem","instanceId"))assertThat(linked.get(field)).as(field).isEqualTo(original.get(field));
+            assertThat(((JsonNode)linked.get("sourceSnapshot")).has("research")).isFalse();
+            assertThat(((JsonNode)linked.get("executionResolution")).path("historicalAssociation").path("after").path("projectId").asLong()).isEqualTo(researchProject);
+        }
+        assertThat(service.researchApplications(researchProject)).extracting(r->r.get("applicationId")).containsExactlyInAnyOrderElementsOf(applications);
+        assertThat(service.researchSummaries(List.of(researchProject)).get(researchProject)).containsEntry("activeCount",2).containsEntry("totalCount",2);
+        assertThat(physicalAndEntityCounts()).isEqualTo(before);verifyNoInteractions(client,files);
+    }
+    @Test void researchAssociationKeepsTheRealFlowScopeAndVersionRules()throws Exception {
+        researchFixture(false);var convert=converter();var row=uncodedHistory(null,null);long application=id(row);
+        assertThatThrownBy(()->convert.associationPreview(application,new MoldApplicationConversion.AssociationPreview(null,researchProject))).hasMessageContaining("新品项目须关联LEMOS-新产品开模");
+        jdbc.update("update plm_mold_application set process_code=? where application_id=?",props.getResearchProcessCode(),application);
+        assertThatThrownBy(()->convert.associateHistory(application,new MoldApplicationConversion.Association(version(row)+1,null,researchProject,researchProject,null,null,"明确核对",false),null)).hasMessageContaining("已更新");
+        assertThatThrownBy(()->convert.associateHistory(application,new MoldApplicationConversion.Association(version(row),phoneModel,researchProject,researchProject,null,null,"明确核对",false),null)).hasMessageContaining("不改写原申请的手机范围");
+        assertThatThrownBy(()->convert.associateHistory(application,new MoldApplicationConversion.Association(version(row),null,researchProject,50L,null,null,"明确核对",false),null)).hasMessageContaining("仅关联新品项目");
+        assertThatThrownBy(()->convert.associateHistory(application,new MoldApplicationConversion.Association(version(row),null,50L,null,null,null,"缺少标准手机的普通型号关联",false),null)).hasMessageContaining("请选择标准手机");
+        assertThat(repo.row(application,false)).containsEntry("projectId",null).containsEntry("phoneModelId",null);verifyNoInteractions(client,files);
+    }
+    @Test void researchRenameChangesOnlyCurrentDisplayNameAndKeepsCodeConfirmedBasisAndRequestReplay()throws Exception {
+        researchFixture(true);var before=jdbc.queryForMap("select product_code,current_step_no from plm_product where product_id=?",researchProject);var state=researchStore.load(researchProject);var requirement=repo.node(repo.json(state.get("requirement")));var plan=repo.node(repo.json(state.get("plan")));long version=((Number)state.get("version")).longValue();var counts=physicalAndEntityCounts();
+        var input=new WorkflowInput("rename",version,"it-rename-"+UUID.randomUUID(),Map.of("productName","韧甲","reason","用户确认去掉名称中的手机壳后缀"));
+        var renamed=researchDevelopment.workflowAction(researchProject,input);assertThat(renamed).containsEntry("productName","韧甲").containsEntry("currentStepNo",2);
+        assertThat(jdbc.queryForMap("select product_code,current_step_no from plm_product where product_id=?",researchProject)).isEqualTo(before);
+        var after=researchStore.load(researchProject);assertThat(repo.node(repo.json(after.get("requirement")))).isEqualTo(requirement);assertThat(repo.node(repo.json(after.get("plan")))).isEqualTo(plan);assertThat(physicalAndEntityCounts()).isEqualTo(counts);
+        var replay=researchDevelopment.workflowAction(researchProject,input);assertThat(replay).containsEntry("productName","韧甲");assertThat(jdbc.queryForObject("select count(*) from plm_product_development_event where product_id=? and kind='rename'",Long.class,researchProject)).isEqualTo(1L);
+        var logs=(OperationLogService)org.springframework.test.util.ReflectionTestUtils.getField(researchDevelopment,"logs");verify(logs).logRequired(argThat(command->"PRODUCT_RESEARCH_RENAME".equals(command.getAction())),any(CurrentUser.class));verifyNoInteractions(client,files);
+    }
+    @Test void researchRenameStillRequiresValidNameReasonVersionAndEditableProject()throws Exception {
+        researchFixture(false);long version=((Number)researchStore.load(researchProject).get("version")).longValue();
+        assertThatThrownBy(()->researchDevelopment.workflowAction(researchProject,new WorkflowInput("rename",version,null,Map.of("productName"," ","reason","更正")))).hasMessageContaining("产品名称");
+        assertThatThrownBy(()->researchDevelopment.workflowAction(researchProject,new WorkflowInput("rename",version,null,Map.of("productName","韧甲")))).hasMessageContaining("名称更正原因");
+        assertThatThrownBy(()->researchDevelopment.workflowAction(researchProject,new WorkflowInput("rename",version+1,null,Map.of("productName","韧甲","reason","更正")))).hasMessageContaining("更新");
+        var input=new WorkflowInput("rename",version,null,Map.of("productName","韧甲","reason","更正"));
+        jdbc.update("update plm_product set lock_status='frozen' where product_id=?",researchProject);
+        assertThatThrownBy(()->researchDevelopment.workflowAction(researchProject,input)).hasMessageContaining("只读");assertThat(jdbc.queryForObject("select product_name from plm_product where product_id=?",String.class,researchProject)).isEqualTo("IT LEMOS 新品");
+    }
     @Test void confirmedResearchPreparesTheExistingDraftAndAdoptsExactFileWithoutGeneratingExecution()throws Exception {
         researchFixture(true);long count=jdbc.queryForObject("select count(*) from plm_mold_application",Long.class),sets=jdbc.queryForObject("select count(*) from plm_collaboration_mold_set",Long.class);
         var created=service.startFromResearch(researchInput("it-research-once-12345678"),null);long application=id(created);

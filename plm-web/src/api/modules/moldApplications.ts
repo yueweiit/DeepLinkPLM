@@ -69,13 +69,14 @@ export interface MoldSummary { counts:{status:string;remoteStatus:string|null;co
 export interface MoldQuery { projectId?:number;unlinked?:boolean;page:number;size:number;keyword?:string;tipo?:string;status?:string;originator?:string;from?:string;until?:string }
 export interface MoldHistoricalPreview {
   application:MoldApplication;selectedProductLineId:number|null;standardPhone:CompatibleHistoricalPhone|null
+  researchProject?:{projectId:number;productName:string}|null
   productLines:{productId:number;productName:string}[]
   projects:{projectId:number;productName:string;model:string|null;phoneModelId:number|null;phoneModelCode:string|null;linkedItemId?:number|null;blockedReason:string|null}[]
   items:{itemId:number;moldName:string;compatibleModels:string|null;engravedCode:string|null}[]
   sets:{moldSetId:number;itemId:number;setNo:number;setName:string;pcCode:string|null;tpuCode:string|null;blockedReason:string|null}[]
 }
 export interface CompatibleHistoricalPhone {phoneModelId:number;brandName:string;modelName:string;phoneModelCode:string|null}
-export interface MoldHistoricalInput {version:number;phoneModelId:number;productLineId:number;projectId:number|null;itemId:number|null;moldSetId:number|null;reason:string;confirmPhoneCorrection:boolean}
+export interface MoldHistoricalInput {version:number;phoneModelId:number|null;productLineId:number;projectId:number|null;itemId:number|null;moldSetId:number|null;reason:string;confirmPhoneCorrection:boolean}
 export const root='/mold-applications'
 export async function getMoldApplicationConfig():Promise<{enabled:boolean}> { return unwrapResponse(await request.get(`${root}/config`)) }
 export async function getMoldOptions(context?:{projectId?:number;applicationId?:number}):Promise<MoldOptions> { return unwrapResponse(await request.get(`${root}/options`,{params:context})) }

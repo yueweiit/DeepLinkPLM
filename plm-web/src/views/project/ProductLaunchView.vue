@@ -208,9 +208,20 @@ function chooseMoldSupplier(code:string){
 function openSystemLogs(){void router.push({path:'/system/operation-log',query:{projectId:String(id.value)}});}
 function projectCommand(command:string){
   if(command==='logs')openSystemLogs();
+  else if(command==='rename')void renameProject();
   else if(command==='materials')void showMaterials();
   else if(command==='delete')void deleteProjectDraft();
   else if(command==='promotion'||command==='presale')void openWorkspace(command);
+}
+async function renameProject(){
+  if(!detail.value||blocked.value||busy.value)return;
+  if(dirty.value){ElMessage.warning(uiText('请先保存当前输入，再修改产品名称'));return}
+  const project=id.value,token=user.token;
+  try{
+    const result=await ElMessageBox.prompt(uiText('只更正当前产品名称；产品编号、已确认资料和原审批名称保持不变。'),uiText('修改产品名称'),{inputValue:detail.value.productName,inputValidator:value=>!!value?.trim()&&value.trim().length<=255||uiText('请填写255字以内的产品名称'),confirmButtonText:uiText('保存名称'),cancelButtonText:uiText('取消')});
+    if(project!==id.value||token!==user.token)return;
+    await action(async()=>{await command('rename',{productName:result.value.trim(),reason:'更正产品显示名称'});hydrate();ElMessage.success(uiText('产品名称已更新，历史资料保留'))});
+  }catch(cause){if(cause!=='cancel'&&cause!=='close')ElMessage.error(requestError(cause))}
 }
 function stepComplete(stepNo:number){
   return !!timeline.value?.nodes.find(node=>node.stepNo===stepNo)?.confirmed
@@ -658,6 +669,7 @@ function hydrate() {
     expectedDeliveryDate: detail.value.expectedDeliveryDate,
     ...workflow.value.profileDraft,
   });
+  if(actualStage.value!==1)profile.productName=detail.value.productName;
   clearAssign(plan, {
     phoneModelIds: profile.phoneModelIds || [],
     launchDate: "",
@@ -789,10 +801,11 @@ async function focusSupplierFeedback(){
     if(tab.value==='reviews'&&reviewPanel.value&&!(await reviewPanel.value.leave()))return;
     tab.value='work';await nextTick();
     if(!current())return;
-    const element=pageElement.value?.querySelector<HTMLElement>('[aria-label="供应商反馈"]'),container=element?.closest<HTMLElement>('.development-workspace');
+    const element=pageElement.value?.querySelector<HTMLElement>('[aria-label="供应商反馈"]'),container=pageElement.value;
     if(!element||!container)return;
     element.setAttribute('tabindex','-1');
-    container.scrollTop=Math.max(0,container.scrollTop+element.getBoundingClientRect().top-container.getBoundingClientRect().top);
+    const navigation=container.querySelector<HTMLElement>('.research-step-nav');
+    container.scrollTop=Math.max(0,container.scrollTop+element.getBoundingClientRect().top-container.getBoundingClientRect().top-(navigation?.getBoundingClientRect().height||0)-8);
     element.focus({preventScroll:true});
     handledSupplierFeedback=supplierFeedbackContext.value;
   }finally{focusingSupplierFeedback=false;}
@@ -1348,7 +1361,7 @@ function resultLabel(value: string) {
 </script>
 
 <template>
-  <section ref="pageElement" class="launch-page" :class="{ 'cost-page-layout': workspace==='cost' }" v-loading="loading">
+  <section ref="pageElement" class="launch-page" :class="{ 'page-scroll-layout': !!id&&!!detail&&(!workspace||workspace==='cost') }" v-loading="loading">
     <el-alert
       v-if="error"
       :title="error"
@@ -1430,6 +1443,7 @@ function resultLabel(value: string) {
             <el-button :aria-label='uiText("项目操作")'>{{ uiText("项目操作") }}<el-icon class="project-menu-arrow"><ArrowDown/></el-icon></el-button>
             <template #dropdown><el-dropdown-menu class="research-project-menu">
               <el-dropdown-item command="logs">{{ uiText("系统日志") }}</el-dropdown-item>
+              <el-dropdown-item v-if="!blocked&&(detail.status!=='released'||workflow.revision)" command="rename">{{uiText('修改产品名称')}}</el-dropdown-item>
               <el-dropdown-item v-if="!workspace" command="materials">{{ uiText("定位资料（") }}{{currentMaterials.filter(m=>m.type==='file').length}}）</el-dropdown-item>
               <el-dropdown-item command="promotion">{{ uiText("推广") }}</el-dropdown-item>
               <el-dropdown-item command="presale">{{ uiText("预售") }}</el-dropdown-item>
@@ -2505,7 +2519,7 @@ h3,.work-heading{font-size:14px;font-weight:700;line-height:1.5;margin:0 0 12px}
 .save-bar .el-button--primary{font-weight:600}
 .readonly-notice{background:var(--el-fill-color-light);padding:8px 12px;line-height:1.6;border-radius:4px;flex:none}
 .list-scroll{flex:1;min-height:0;overflow:auto;overflow-x:hidden;background:var(--el-bg-color);border:1px solid var(--el-border-color-lighter);border-radius:6px}
-.launch-page.cost-page-layout{overflow-y:auto;overflow-x:hidden}.cost-page-layout>.heading,.cost-page-layout>.toolbar,.cost-page-layout>.business-relations{flex:none}.list-scroll.cost-page-scroll{flex:none;overflow:visible;background:transparent;border:0;border-radius:0}
+.launch-page.page-scroll-layout{overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;scroll-padding-top:90px}.page-scroll-layout>.heading,.page-scroll-layout>.toolbar,.page-scroll-layout>.business-relations,.page-scroll-layout>.research-mold-entry,.page-scroll-layout>.readonly-notice,.page-scroll-layout>.stage-context,.page-scroll-layout>.development-workspace{flex:none}.page-scroll-layout>.research-step-nav{position:sticky;top:0;z-index:5}.page-scroll-layout>.development-workspace{overflow:visible;scrollbar-gutter:auto}.list-scroll.cost-page-scroll{flex:none;overflow:visible;background:transparent;border:0;border-radius:0}
 .project-row,.business-row,.mold-row{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--el-border-color-lighter);overflow-wrap:anywhere;min-height:44px}
 .approval-line,.phone-line{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 8px;min-width:0;overflow-wrap:anywhere}.approval-line{margin-top:5px}.approval-reason{color:var(--el-color-danger)}.application-choices{display:flex;flex-direction:column;align-items:flex-start;max-height:min(440px,60vh);overflow-y:auto;overflow-x:hidden}.application-choices .el-button{height:auto;white-space:normal;text-align:left;max-width:100%}
 .project-row>div:first-child>strong{font-size:14px;font-weight:700}
@@ -2534,7 +2548,7 @@ h3,.work-heading{font-size:14px;font-weight:700;line-height:1.5;margin:0 0 12px}
 .launch-issues{background:var(--el-color-warning-light-9);padding:10px 12px;margin:12px 0}
 input[type="file"],.el-select{max-width:100%}
 @container(max-width:850px){
- .research-step-nav{grid-template-columns:repeat(4,minmax(0,1fr));row-gap:10px}
+ .research-step-nav{grid-template-columns:repeat(4,minmax(0,1fr));row-gap:10px}.launch-page.page-scroll-layout{scroll-padding-top:150px}
  .research-step-nav button:nth-child(4):before{right:50%}.research-step-nav button:nth-child(5):before{left:50%}
  .mold-row,.business-row,.project-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
  .mold-row>.row-actions,.business-row>.row-actions,.business-row>.el-button,.project-row>.row-actions{grid-column:1/-1;justify-self:start}
