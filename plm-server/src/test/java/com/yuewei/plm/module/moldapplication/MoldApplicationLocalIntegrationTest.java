@@ -798,6 +798,37 @@ class MoldApplicationLocalIntegrationTest {
     com.fasterxml.jackson.databind.node.ObjectNode engineeringScope(String handling,String hole,List<Long> phones){
         return json.valueToTree(Map.of("handling",handling,"specifications",List.of(Map.of("key","main","holeType",hole,"structureDescription","","phoneModelIds",phones))));
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"single17","single18","both","mixedUnassigned"})
+    void researchScopePersistsTheCanonicalPreviewAndSendsItToTheFakeDingTalkModelosField(String scenario)throws Exception {
+        researchFixture(false);var actual=currentResearchSchema();repo.saveSchema(props.getResearchProcessCode(),actual);when(client.schema(anyString())).thenReturn(actual);
+        var state=researchStore.load(researchProject);for(String key:List.of("plan","planDraft"))state.put(key,Map.of("phoneModelIds",List.of(),"needsMold",true));researchStore.save(researchProject,state);
+        var references=new com.yuewei.plm.module.moldreference.PhoneModelReferenceService(jdbc,json,new com.yuewei.plm.module.moldreference.PhoneModelReferenceRepository(jdbc),access,mock(OperationLogService.class));
+        var brand=references.createBrand(new com.yuewei.plm.module.moldreference.PhoneModelReferenceTypes.CreateBrand("APPLE",List.of("IP","Apple"),List.of(new com.yuewei.plm.module.moldreference.PhoneModelReferenceTypes.Prefix("IP","iPhone"))),null);
+        long brandId=((Number)brand.get("brandId")).longValue(),code17=jdbc.queryForObject("select code_item_id from plm_code_item where code_type='phone_model' and code_value='1145' and deleted_flag=0",Long.class),code18=jdbc.queryForObject("select code_item_id from plm_code_item where code_type='phone_model' and code_value='1218' and deleted_flag=0",Long.class);
+        var first=references.createPhone(new com.yuewei.plm.module.moldreference.PhoneModelReferenceTypes.CreatePhone(brandId,"Apple iPhone 17 Pro Max",null,code17),null);
+        var second=references.createPhone(new com.yuewei.plm.module.moldreference.PhoneModelReferenceTypes.CreatePhone(brandId,"iPhone 18 Pro Max",null,scenario.equals("mixedUnassigned")?null:code18),null);
+        long firstId=((Number)first.get("phoneModelId")).longValue(),secondId=((Number)second.get("phoneModelId")).longValue();
+        var ids=switch(scenario){case "single17"->List.of(firstId);case "single18"->List.of(secondId);default->List.of(firstId,secondId);};
+        String expected=switch(scenario){case "single17"->"IP 17 PRO MAX";case "single18"->"IP 18 PRO MAX";default->"IP 17 PRO MAX/18 PRO MAX";};
+        var preview=references.applicationOptions(ids);assertThat(preview).containsEntry("modelos",expected);
+        var before=physicalAndEntityCounts();var scopePlan=engineeringScope("pending","large",ids);
+        var input=new MoldApplicationService.Draft(json.valueToTree(Map.of("productName","IT LEMOS 新品","model","untrusted frontend display","expectedDeliveryDate","2026-12-01")),researchProject,null,null,null,"new",null,null,null,null,null,false,scopePlan);
+        var created=service.startFromResearch(new MoldApplicationService.ResearchDraft(researchProject,null,"it-canonical-"+UUID.randomUUID(),((Number)researchStore.load(researchProject).get("version")).longValue(),input),null);
+        var loaded=service.detail(id(created));assertThat(((JsonNode)loaded.get("form")).path("model").asText()).isEqualTo(expected);
+        var changed=((com.fasterxml.jackson.databind.node.ObjectNode)loaded.get("form")).deepCopy().put("model","must not replace member-derived name");
+        service.save(id(loaded),new MoldApplicationService.Draft(changed,researchProject,null,version(loaded),null,"new",null,null,null,null,null,false,scopePlan),null);
+        var reopened=service.detail(id(loaded));assertThat(reopened).containsEntry("model",expected).containsEntry("phoneModelId",null).containsEntry("phoneCodeItemId",null).containsEntry("generatedCodes",null);
+        assertThat(((JsonNode)reopened.get("form")).path("model").asText()).isEqualTo(expected);assertThat(MoldEngineeringPlan.phones(MoldEngineeringPlan.from(reopened))).containsExactlyElementsOf(ids);assertThat(MoldEngineeringPlan.from(reopened).hasNonNull("codePhoneModelId")).isFalse();
+        if(scenario.equals("mixedUnassigned"))assertThat(references.phone(secondId)).containsEntry("codeItemId",null).containsEntry("codeLinkStatus","unassigned");
+        byte[] png=Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6BuMAAAAASUVORK5CYII=");
+        var ready=service.upload(id(reopened),"key_photo",new MockMultipartFile("file","scope.png","image/png",png),null);allowWrite();
+        when(client.submit(anyMap())).thenReturn("it-canonical-fake");when(client.instance("it-canonical-fake")).thenThrow(new MoldDingTalkClient.RemoteFailure(false,"isolated fake connector"));
+        service.submit(id(ready),new MoldApplicationService.Submit(version(ready),null,true),null);
+        var sent=org.mockito.ArgumentCaptor.forClass(Map.class);verify(client).submit(sent.capture());var fields=(List<Map<String,String>>)sent.getValue().get("formComponentValues");
+        assertThat(fields).anySatisfy(field->assertThat(field).containsEntry("id",MoldApplicationForms.COMPONENTS.get("model")).containsEntry("value",expected));
+        assertThat(physicalAndEntityCounts()).isEqualTo(before);assertThat(references.phone(firstId)).containsEntry("phoneModelCode","1145");assertThat(references.phone(secondId).get("phoneModelCode")).isEqualTo(scenario.equals("mixedUnassigned")?null:"1218");
+    }
     MoldApplicationService.Draft scopedDraft(JsonNode plan,String request){
         return new MoldApplicationService.Draft(json.valueToTree(Map.of("tipo",tipo,"expectedDeliveryDate","2026-12-01")),researchProject,null,null,null,"new",null,null,null,null,request,false,plan);
     }

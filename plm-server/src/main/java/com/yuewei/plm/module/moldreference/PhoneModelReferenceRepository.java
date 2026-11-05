@@ -130,7 +130,7 @@ public class PhoneModelReferenceRepository {
                 var aliases=(List<String>)row.get("brandAliases");
                 var prefixes=((List<Map<String,String>>)row.remove("brandPrefixes")).stream().map(p->new PhoneDisplayNames.Prefix(p.get("prefix"),p.get("replacement"))).toList();
                 row.put("displayName",PhoneDisplayNames.fullName(model,brand,aliases,prefixes));
-                row.put("factoryName",PhoneDisplayNames.factoryName(Objects.toString(row.get("originalCodeName"),model),brand,aliases,prefixes));
+                row.put("factoryName",PhoneDisplayNames.factoryName(model,brand,aliases,prefixes));
             }
             return row;
         },args);

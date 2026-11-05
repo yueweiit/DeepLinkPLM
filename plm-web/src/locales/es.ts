@@ -2,6 +2,17 @@
 import ui from './es-ui.json'
 import dynamic from './es-dynamic.json'
 export default {
+  '新增手机型号': 'Agregar modelo de teléfono',
+  '型号名称': 'Nombre del modelo',
+  '重试品牌': 'Reintentar marcas',
+  '例如 iPhone 18 Pro Max': 'Por ejemplo, iPhone 18 Pro Max',
+  '仅新建手机资料，编码待分配；不会新建模具、SKU或库存。': 'Solo crea la ficha del teléfono, sin código asignado. No crea moldes, SKU ni inventario.',
+  '找不到型号？新增型号': '¿No encuentra el modelo? Agregar',
+  '本次开模规格': 'Especificaciones de esta solicitud',
+  '选一款表示本次适用一款；选多款表示这几款本次共模。未建档的型号可直接新增。': 'Un teléfono indica un modelo; varios indican un molde compartido en esta solicitud. Puede agregar modelos que aún no tengan ficha.',
+  '这里只申请本次开模；沿用已有模具在工程关联流程办理。': 'Esta pantalla solicita la fabricación del molde. La reutilización se tramita por la vinculación de ingeniería.',
+  '正在按已选手机填写型号，请稍候': 'Completando los modelos seleccionados; espere.',
+  '型号保存失败，请重试': 'No se pudo guardar el modelo. Reintente.',
   '返回新品项目': 'Volver a proyectos nuevos',
   '开模审批 · {value0}条': 'Aprobaciones de moldes · {value0}',
   '修改产品名称': 'Cambiar nombre del producto',
@@ -718,4 +729,7 @@ export default {
   '结构说明最多1000字':'La descripción estructural admite hasta 1000 caracteres.',
   '规格{number}：结构说明最多1000字':'Especificación {number}: la descripción estructural admite hasta 1000 caracteres.',
   '第{number}套':'Juego {number}',
+  '当前进度':'Avance actual',
+  '开模审批':'Aprobaciones de moldes',
+  '暂无开模审批':'Sin aprobaciones de moldes',
 } as Record<string, string>

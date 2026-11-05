@@ -58,7 +58,7 @@ defineExpose({open,cancel,refresh})
         </button>
       </template>
       <section v-if="opened" :id="`${panelId}-content`" ref="panel" class="phone-model-panel" :style="{height:`${panelHeight}px`}" @keydown.esc.stop.prevent="cancel()" @keydown="trapFocus">
-        <header class="panel-search"><el-input ref="searchInput" v-model="search" size="small" maxlength="128" clearable :prefix-icon="Search" :placeholder='uiText("搜索品牌、系列、型号或别名，如 17PM、Samsung S26")' :aria-label='uiText("搜索手机品牌及型号")'/><div v-if="$slots.tools" class="panel-tools"><slot name="tools"/></div></header>
+        <header class="panel-search"><el-input ref="searchInput" v-model="search" size="small" maxlength="128" clearable :prefix-icon="Search" :placeholder='uiText("搜索品牌、系列、型号或别名，如 17PM、Samsung S26")' :aria-label='uiText("搜索手机品牌及型号")'/><div v-if="$slots.tools" class="panel-tools"><slot name="tools"/></div><slot name="create" :brand-id="brandId" :search="search" :include="picker.includeCreated"/></header>
         <div v-if="externalChanged" class="panel-error" role="alert">{{ uiText("外部选择已变化，请取消后重新打开，避免覆盖新内容。") }}</div>
         <div v-if="brandError||memberError" class="panel-error" role="alert"><span>{{brandError||memberError}}</span><el-button size="small" link @click="brandError?loadBrands():loadMembers(true)">{{ uiText("重试资料") }}</el-button></div>
         <div class="selection-body">

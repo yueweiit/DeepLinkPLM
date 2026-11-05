@@ -13,6 +13,7 @@ export async function savePhoneBrand(id:number,patch:ReferencePatch):Promise<{st
 export async function createPhoneModel(input:{brandId:number;modelName:string;aliases?:string[];codeItemId?:number|null}):Promise<CompatiblePhone> {return unwrapResponse(await request.post(`${root}/phone-models`,input))}
 export async function savePhoneModel(id:number,patch:ReferencePatch):Promise<{status:string;row?:CompatiblePhone;conflicts?:unknown[]}> {return unwrapResponse(await request.patch(`${root}/phone-models/${id}`,patch))}
 export async function getPhoneModelOptions(ids:number[]):Promise<CompatiblePhone[]> {return unwrapResponse(await request.get(`${root}/phone-models/options`,{params:{ids:ids.join(',')}}))}
+export async function getPhoneApplicationOptions(ids:number[]):Promise<{phones:CompatiblePhone[];modelos:string}> {return unwrapResponse(await request.get(`${root}/phone-models/options`,{params:{ids:ids.join(','),applicationScope:true}}))}
 export interface PhoneCompatibleMold {itemId:number;moldSetId:number;phoneModelId:number;modelName:string;codeItemId:number;phoneModelCode:string;moldName:string|null;styleName:string;engravedCode:string|null;physicalCode:string;setNo:number;parts:{partType:string;code:string}[];compatibilityDigest:string;pcConfirmed:boolean;tpuConfirmed:boolean;evidence:string}
 export async function getPhoneCompatibleMolds(id:number,productLineId:number):Promise<PhoneCompatibleMold[]> {return unwrapResponse(await request.get(`${root}/phone-models/${id}/molds`,{params:{productLineId}}))}
 

@@ -88,6 +88,7 @@ export function usePhoneModelSelection(props:PhoneModelMultiSelectProps,disabled
     draft.value=props.multiple===false?[id]:[...draft.value,id];selectionError.value=''
   }
   function clear(){if(!disabled.value&&!bulkLoading.value)draft.value=[]}
+  function includeCreated(phone:CompatiblePhone){merge([phone]);if(!selectedSet.value.has(phone.phoneModelId))toggle(phone.phoneModelId)}
   function groupSelected(key:string) {
     const values=groupScopes.value.get(key) || selectableScope.value?.filter(p=>phoneSeries(p).key===key)
     return !!values?.length&&values.every(p=>selectedSet.value.has(p.phoneModelId))
@@ -148,5 +149,5 @@ export function usePhoneModelSelection(props:PhoneModelMultiSelectProps,disabled
   watch(disabled,value=>{if(value)cancel()})
   watch(()=>user.token,()=>{cancel();memberEpoch++;brandEpoch++;phones.value=new Map();brands.value=[];rows.value=[];error.value='';memberError.value='';brandError.value='';membersLoading.value=false;brandsLoading.value=false;if(user.token)void loadMembers()},{immediate:true})
   onBeforeUnmount(()=>{cancel();memberEpoch++;brandEpoch++})
-  return {opened,draft,phones,allBrands,brandCounts,brandId,search,page,total,rows,groups,loading,membersLoading,brandsLoading,bulkLoading,error,memberError,brandError,selectionError,externalChanged,selectedSet,allSelected,someSelected,canBulk,canConfirm,scoped,open,cancel,confirm,toggle,clear,setBrand,loadPage,loadMembers,loadBrands,bulkSelect,groupSelected,refresh,PAGE_SIZE}
+  return {opened,draft,phones,allBrands,brandCounts,brandId,search,page,total,rows,groups,loading,membersLoading,brandsLoading,bulkLoading,error,memberError,brandError,selectionError,externalChanged,selectedSet,allSelected,someSelected,canBulk,canConfirm,scoped,open,cancel,confirm,toggle,clear,setBrand,loadPage,loadMembers,loadBrands,bulkSelect,groupSelected,refresh,includeCreated,PAGE_SIZE}
 }

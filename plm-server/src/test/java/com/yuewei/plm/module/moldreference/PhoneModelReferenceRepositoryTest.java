@@ -123,6 +123,36 @@ class PhoneModelReferenceRepositoryTest {
         values.put("modelName","HR 600 LITE 5G");values.put("originalCodeName","HR 600 LITE 5G");
         values.put("codeItemId",1322L);values.put("phoneModelCode","1298");values.put("codeDeletedFlag",0);
         values.put("codeStatus","enabled");values.put("groupProductionStatus","unknown");
+        assertThat(projectedPhone(values)).containsEntry("modelName","HR 600 LITE 5G")
+            .containsEntry("displayName","Honor 600 Lite 5G").containsEntry("factoryName","HR 600 Lite 5G")
+            .containsEntry("originalCodeName","HR 600 LITE 5G").containsEntry("phoneModelCode","1298")
+            .containsEntry("codeItemId",1322L).containsEntry("phoneModelId",1333L).doesNotContainKey("brandPrefixes");
+        verify(jdbc,never()).update(anyString(),any(Object[].class));
+    }
+
+    @Test void aSingleMemberDoesNotInheritOtherPhonesFromItsOriginalCombinedCodeName() throws Exception {
+        var values=new LinkedHashMap<String,Object>();
+        values.put("id",17L);values.put("phoneModelId",17L);values.put("brandName","APPLE");
+        values.put("brandAliases",new String[]{"IP","Apple"});values.put("brandPrefixes","[{\"prefix\":\"IP\",\"replacement\":\"iPhone\"}]");
+        values.put("modelName","Apple iPhone 17 Pro Max");values.put("originalCodeName","IP 17 PRO MAX/18 PRO MAX");
+        values.put("codeItemId",1145L);values.put("phoneModelCode","1145");values.put("codeDeletedFlag",0);
+        values.put("codeStatus","enabled");values.put("groupProductionStatus","unknown");
+        assertThat(projectedPhone(values)).containsEntry("modelName","Apple iPhone 17 Pro Max")
+            .containsEntry("displayName","Apple iPhone 17 Pro Max").containsEntry("factoryName","IP 17 Pro Max")
+            .containsEntry("originalCodeName","IP 17 PRO MAX/18 PRO MAX").containsEntry("phoneModelCode","1145")
+            .containsEntry("codeItemId",1145L).containsEntry("phoneModelId",17L);
+        values.put("id",18L);values.put("phoneModelId",18L);values.put("modelName","Apple iPhone 18 Pro Max");
+        values.put("originalCodeName","IP 18 PRO MAX");values.put("codeItemId",1218L);values.put("phoneModelCode","1218");
+        assertThat(projectedPhone(values)).containsEntry("factoryName","IP 18 Pro Max")
+            .containsEntry("phoneModelCode","1218").containsEntry("originalCodeName","IP 18 PRO MAX");
+        values.put("codeItemId",null);values.put("phoneModelCode",null);values.put("originalCodeName",null);
+        values.put("codeStatus",null);values.put("codeDeletedFlag",null);
+        assertThat(projectedPhone(values)).containsEntry("factoryName","IP 18 Pro Max")
+            .containsEntry("codeLinkStatus","unassigned").containsEntry("codeItemId",null).containsEntry("phoneModelCode",null);
+        verify(jdbc,never()).update(anyString(),any(Object[].class));
+    }
+
+    Map<String,Object> projectedPhone(Map<String,Object> values) throws Exception {
         var rs=mock(java.sql.ResultSet.class);var metadata=mock(java.sql.ResultSetMetaData.class);
         when(rs.getMetaData()).thenReturn(metadata);when(metadata.getColumnCount()).thenReturn(values.size());
         int column=0;for(var entry:values.entrySet()) {
@@ -134,11 +164,7 @@ class PhoneModelReferenceRepositoryTest {
         when(jdbc.query(anyString(),any(RowMapper.class),any(Object[].class)))
             .thenAnswer(call->List.of(((RowMapper<?>)call.getArgument(1)).mapRow(rs,0)));
         sourcePresent(false);
-        assertThat(repository.phone(1333L,false)).containsEntry("modelName","HR 600 LITE 5G")
-            .containsEntry("displayName","HONOR 600 LITE 5G").containsEntry("factoryName","HR 600 LITE 5G")
-            .containsEntry("originalCodeName","HR 600 LITE 5G").containsEntry("phoneModelCode","1298")
-            .containsEntry("codeItemId",1322L).containsEntry("phoneModelId",1333L).doesNotContainKey("brandPrefixes");
-        verify(jdbc,never()).update(anyString(),any(Object[].class));
+        return repository.phone(((Number)values.get("phoneModelId")).longValue(),false);
     }
 
 }

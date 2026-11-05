@@ -35,7 +35,13 @@ public class PhoneModelReferenceService {
     public PageVO<Map<String,Object>> phones(Query query) { access.requirePhoneSelectionRead();validateQuery(query);var page=repository.phones(query);selectionFields(page.getContent());return page; }
     public Map<String,Object> brand(long id) { read();return require(repository.brand(id,false),"品牌"); }
     public Map<String,Object> phone(long id) { read();return require(repository.phone(id,false),"手机型号"); }
-    public List<Map<String,Object>> options(List<Long> ids) { access.requirePhoneSelectionRead();var rows=members(ids,true);var selected=ids.stream().distinct().map(rows::get).toList();selectionFields(selected);return selected; }
+    public List<Map<String,Object>> options(List<Long> ids) { var selected=selectionRows(ids);selectionFields(selected);return selected; }
+    public Map<String,Object> applicationOptions(List<Long> ids) {
+        var selected=selectionRows(ids.stream().sorted().toList());String model=PhoneDisplayNames.applicationModel(selected);selectionFields(selected);return Map.of("phones",selected,"modelos",model);
+    }
+    private List<Map<String,Object>> selectionRows(List<Long> ids) {
+        access.requirePhoneSelectionRead();var rows=members(ids,true);return ids.stream().distinct().map(rows::get).toList();
+    }
     public List<Map<String,Object>> compatibleMolds(long phoneModelId,long productLineId) {
         read();phone(phoneModelId);access.requireProduct(productLineId);return compatibilityOptions(productLineId,null,phoneModelId);
     }

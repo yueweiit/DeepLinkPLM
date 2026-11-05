@@ -6,6 +6,9 @@ export function recognizedHoleType(value:string){return (Object.keys(holeTypeVal
 export function mappedHoleTypeValue(type:keyof typeof holeTypeValues,options:string[]){return options.find(value=>recognizedHoleType(value)===type)||holeTypeNames[type]}
 export function emptyEngineeringSpecification(key=crypto.randomUUID()):EngineeringSpecification{return {key,holeType:'',structureDescription:'',phoneModelIds:[]}}
 export function copyEngineeringPlan(plan:EngineeringPlan):EngineeringPlan{return {...plan,specifications:plan.specifications.map(row=>({...row,phoneModelIds:[...row.phoneModelIds]}))}}
+export function applicationScopePlan(plan:EngineeringPlan):EngineeringPlan{
+ return {handling:'pending',specifications:plan.specifications.map(({key,holeType,structureDescription,phoneModelIds})=>({key,holeType,structureDescription,phoneModelIds:[...phoneModelIds]}))}
+}
 export function initialEngineeringPlan(row?:Partial<Omit<MoldApplication,'applicationId'>>&{applicationId:number|null}):EngineeringPlan{
  if(row?.engineeringPlan)return copyEngineeringPlan(row.engineeringPlan)
  const original=row?.form?.holeType||'',holeType=recognizedHoleType(original)

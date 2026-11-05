@@ -9,6 +9,17 @@ import org.junit.jupiter.params.provider.MethodSource;
 import static org.assertj.core.api.Assertions.*;
 
 class PhoneDisplayNamesTest {
+    @Test void applicationModelCombinesMemberFactoryNamesWithoutChangingTheirCodesOrRawNames() {
+        var first=Map.<String,Object>of("brandId",1L,"factoryName","IP 17 Pro Max","modelName","Apple iPhone 17 Pro Max","phoneModelCode","1145");
+        var second=Map.<String,Object>of("brandId",1L,"factoryName","IP 18 pro max","modelName","Apple iPhone 18 Pro Max","phoneModelCode","1218");
+        assertThat(PhoneDisplayNames.applicationModel(List.of(first))).isEqualTo("IP 17 PRO MAX");
+        assertThat(PhoneDisplayNames.applicationModel(List.of(second))).isEqualTo("IP 18 PRO MAX");
+        assertThat(PhoneDisplayNames.applicationModel(List.of(first,second))).isEqualTo("IP 17 PRO MAX/18 PRO MAX");
+        assertThat(PhoneDisplayNames.applicationModel(List.of(first,Map.of("brandId",2L,"factoryName","SM S26 Ultra")))).isEqualTo("IP 17 PRO MAX/SM S26 ULTRA");
+        assertThat(PhoneDisplayNames.applicationModel(List.of())).isEmpty();
+        assertThat(first).containsEntry("phoneModelCode","1145").containsEntry("modelName","Apple iPhone 17 Pro Max");
+        assertThat(second).containsEntry("phoneModelCode","1218").containsEntry("modelName","Apple iPhone 18 Pro Max");
+    }
     static Stream<Arguments> names() {
         return Stream.of(
             Arguments.of("HR 600 LITE 5G","HONOR",List.of("HR","Honor"),List.of(),"Honor 600 Lite 5G","HR 600 Lite 5G"),

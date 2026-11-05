@@ -50,6 +50,19 @@ public final class PhoneDisplayNames {
         return shortNames.isEmpty()?name:join(shortNames.get(0),rest);
     }
 
+    public static String applicationModel(List<Map<String,Object>> members) {
+        var names=members.stream().map(member->member.get("factoryName").toString().strip().replaceAll("\\s+"," ").toUpperCase(Locale.ROOT)).toList();
+        if(names.isEmpty())return "";
+        String prefix=names.get(0).split(" ",2)[0];
+        var combined=new ArrayList<String>();
+        for(int index=0;index<names.size();index++) {
+            String name=names.get(index);
+            boolean sharedPrefix=index>0&&prefix.matches("[A-Z]{2,4}")&&Objects.equals(members.get(index).get("brandId"),members.get(0).get("brandId"))&&name.startsWith(prefix+" ");
+            combined.add(sharedPrefix?name.substring(prefix.length()+1):name);
+        }
+        return String.join("/",combined);
+    }
+
     private static String fullBrand(String brand,List<String> aliases) {
         if(!shortCode(brand))return displaySpelling(brand);
         var full=aliases.stream().filter(a->a.matches("[A-Za-z]{4,}")).distinct().toList();

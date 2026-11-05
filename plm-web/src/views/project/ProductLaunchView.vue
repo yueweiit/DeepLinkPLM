@@ -1152,13 +1152,8 @@ async function linkMold() {
 }
 async function unlinkMold(moldId:number,applicationId?:number){await action(async()=>{const link=((workflow.value.moldLinks as Form[])||[]).find(l=>moldId?l.moldSetId===moldId:l.applicationId===applicationId);if(!link)throw Error('未找到本项目的关联');const response=await ElMessageBox.prompt(uiText('填写取消关联原因，原申请、模具及实际记录继续保留。'),uiText('取消本项目关联'),{inputValidator:v=>!!v?.trim()||uiText('请填写原因')});await command('mold_unlink',{moldSetId:link.moldSetId||0,applicationId:link.applicationId||0,reason:response.value});});}
 function researchPhones(row:ProductResearchRow){return row.phoneModels?.map(phone=>phoneMemberName(phone)).join('、')||row.model||uiText('机型待定');}
-function applicationHighlights(row:ProductResearchRow){
-  const summary=row.moldApplicationSummary;if(!summary)return [];
-  const current=summary.activeApplications?.[0]||summary.applications[0],refused=summary.applications.find(application=>application.businessStatus==='rejected');
-  const selected=current?[current]:[];if(refused&&refused.applicationId!==current?.applicationId)selected.push(refused);return selected;
-}
 function applicationStatus(application:Form){return moldBusinessStatusNames[(application.businessStatus||application.status) as keyof typeof moldBusinessStatusNames]||'查看审批状态';}
-function applicationPhoneLabel(application:Form){const phone=phones.value.find(row=>row.phoneModelId===application.phoneModelId);return phone?phoneMemberName(phone):application.standardPhone?.modelName||application.phoneModelName||application.model||(application.phoneModelId?'标准手机资料待读取':'标准手机待补充');}
+function applicationPhoneLabel(application:Form){const model=application.model||application.form?.model;if(model)return model;const phone=phones.value.find(row=>row.phoneModelId===application.phoneModelId);return phone?phoneMemberName(phone):application.standardPhone?.modelName||application.phoneModelName||(application.phoneModelId?'标准手机资料待读取':'标准手机待补充');}
 async function showApplicationProgress(applicationId:number,projectId=id.value,initial?:MoldApplication){await moldApplicationDetails.value?.open(applicationId,{projectId:projectId||undefined,initial});}
 async function openOtherPhone(projectId=id.value){
   if(!projectId||busy.value||otherPhoneOpening.value)return;
@@ -1399,18 +1394,19 @@ function resultLabel(value: string) {
           ></el-radio-group
         >
       </div>
-      <div class="list-scroll">
+      <div class="list-scroll project-list">
         <el-empty
           v-if="!rows.length"
           :description="uiText('暂无新品项目')"
         />
+        <div v-if="rows.length" class="project-list-heading" aria-hidden="true"><span>{{uiText('新品项目')}}</span><span>{{uiText('当前进度')}}</span><span>{{uiText('开模审批')}}</span><span>{{uiText('操作')}}</span></div>
         <article v-for="row in rows" :key="row.productId" class="project-row">
-          <div><strong>{{row.productName}}</strong><small>{{row.productCode}}</small><div class="phone-line"><span class="muted">{{uiText('本次开发型号')}}：</span><span>{{researchPhones(row)}}</span></div></div>
-          <div><strong>{{row.currentStage}}{{row.workflowComplete?uiText(' · 已完成'):''}}</strong><small v-if="row.nextAction">{{uiText('当前待办')}}：{{row.nextAction}}</small><small>{{row.ownerName||uiText('负责人待分配')}} · {{row.expectedDeliveryDate||uiText('计划时间待定')}}</small>
+          <div class="project-identity"><strong>{{row.productName}}</strong><small>{{row.productCode}}</small><div class="phone-line"><span class="muted">{{uiText('本次开发型号')}}：</span><span>{{researchPhones(row)}}</span></div></div>
+          <div class="project-stage"><strong>{{row.currentStage}}{{row.workflowComplete?uiText(' · 已完成'):''}}</strong><small v-if="row.nextAction">{{uiText('当前待办')}}：{{row.nextAction}}</small><small>{{row.ownerName||uiText('负责人待分配')}} · {{row.expectedDeliveryDate||uiText('计划时间待定')}}</small>
             <div class="supplier-line"><span v-if="row.supplierNames?.length">{{row.supplierNames.join('、')}}</span><el-button class="supplier-feedback-summary" link :type="row.supplierFeedbackSummary?.nextSupplierPending&&!row.supplierFeedbackSummary?.restricted?'warning':undefined" :disabled="row.supplierFeedbackSummary?.restricted" :aria-label="uiText('查看{value0}的供应商反馈原因与附件',{value0:row.productName})" @click="routeTo(row.currentStepNo||1,row.productId,'supplier-feedback')">{{uiText(supplierFeedbackLabel(row.supplierFeedbackSummary))}}</el-button></div>
-            <div v-for="application in applicationHighlights(row)" :key="application.applicationId" class="approval-line"><span>{{applicationPhoneLabel(application)}} · {{applicationStatus(application)}}</span><span v-if="application.businessStatus==='rejected'||application.refusal" class="approval-reason">{{application.refusal?.reason||uiText('审批意见未提供')}}</span><el-button link type="primary" @click="showApplicationProgress(application.applicationId,row.productId)">{{uiText(application.terminal?'查看原审批':'查看审批进度')}}</el-button></div>
           </div>
-          <div class="row-actions"><el-button type="primary" link @click="routeTo(row.currentStepNo||1,row.productId)">{{uiText('查看／办理')}}</el-button><el-popover v-if="row.moldApplicationSummary?.totalCount" trigger="click" :width="340" :popper-style="{maxWidth:'calc(100vw - 24px)'}"><template #reference><el-button link>{{uiText('审批记录（{value0}）',{value0:row.moldApplicationSummary.totalCount})}}</el-button></template><div class="application-choices"><el-button v-for="application in row.moldApplicationSummary.applications" :key="application.applicationId" text @click="showApplicationProgress(application.applicationId,row.productId)">{{applicationPhoneLabel(application)}} · {{applicationStatus(application)}}</el-button></div></el-popover><el-button v-if="row.moldApplicationSummary?.canCreate" link type="primary" :disabled="otherPhoneOpening" @click="openOtherPhone(row.productId)">{{uiText(row.moldApplicationSummary.totalCount?'办理其他模具需求':'发起LEMOS开模申请')}}</el-button><el-button v-if="row.currentStepNo===1&&row.status==='draft'&&user.hasPermission('documents:write')" link type="danger" @click="deleteProjectDraft(row)">{{uiText('删除草稿')}}</el-button></div>
+          <section class="project-approvals" :aria-label="uiText('开模审批')"><span v-if="!row.moldApplicationSummary?.applications.length" class="muted">{{uiText('暂无开模审批')}}</span><div v-for="application in row.moldApplicationSummary?.applications" :key="application.applicationId" class="approval-line"><div class="research-application-identity"><strong>{{applicationPhoneLabel(application)}}</strong><small class="research-application-number">{{application.approvalNo||uiText('申请 #{value0}',{value0:application.applicationId})}}</small></div><el-tag class="research-approval-status" size="small" :type="application.businessStatus==='rejected'?'danger':application.approvalGranted?'success':'info'">{{uiText(applicationStatus(application))}}</el-tag><el-button class="research-approval-open" link type="primary" @click="showApplicationProgress(application.applicationId,row.productId)">{{uiText(application.terminal?'查看原审批':'查看审批进度')}}</el-button><span v-if="application.businessStatus==='rejected'||application.refusal" class="approval-reason">{{application.refusal?.reason||uiText('审批意见未提供')}}</span></div></section>
+          <div class="row-actions project-list-actions"><el-button type="primary" link @click="routeTo(row.currentStepNo||1,row.productId)">{{uiText('查看／办理')}}</el-button><el-button v-if="row.moldApplicationSummary?.canCreate" link type="primary" :disabled="otherPhoneOpening" @click="openOtherPhone(row.productId)">{{uiText(row.moldApplicationSummary.totalCount?'办理其他模具需求':'发起LEMOS开模申请')}}</el-button><el-button v-if="row.currentStepNo===1&&row.status==='draft'&&user.hasPermission('documents:write')" link type="danger" @click="deleteProjectDraft(row)">{{uiText('删除草稿')}}</el-button></div>
         </article>
       </div>
       <el-pagination
@@ -2525,6 +2521,11 @@ h3,.work-heading{font-size:14px;font-weight:700;line-height:1.5;margin:0 0 12px}
 .list-scroll{flex:1;min-height:0;overflow:auto;overflow-x:hidden;background:var(--el-bg-color);border:1px solid var(--el-border-color-lighter);border-radius:6px}
 .launch-page.page-scroll-layout{overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;scroll-padding-top:90px}.page-scroll-layout>.heading,.page-scroll-layout>.toolbar,.page-scroll-layout>.business-relations,.page-scroll-layout>.research-mold-entry,.page-scroll-layout>.readonly-notice,.page-scroll-layout>.stage-context,.page-scroll-layout>.development-workspace{flex:none}.page-scroll-layout>.research-step-nav{position:sticky;top:0;z-index:5}.page-scroll-layout>.development-workspace{overflow:visible;scrollbar-gutter:auto}.list-scroll.cost-page-scroll{flex:none;overflow:visible;background:transparent;border:0;border-radius:0}
 .project-row,.business-row,.mold-row{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--el-border-color-lighter);overflow-wrap:anywhere;min-height:44px}
+.project-list-heading,.project-list .project-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.9fr) minmax(0,1.7fr) 128px;gap:12px;align-items:start;padding:10px 12px}
+.project-list-heading{position:sticky;top:0;z-index:1;background:var(--el-fill-color-light);color:var(--el-text-color-secondary);font-weight:600;border-bottom:1px solid var(--el-border-color-lighter)}
+.project-list-actions{flex-direction:column;align-items:flex-start;gap:6px}.project-list-actions .el-button{margin-left:0;white-space:normal;text-align:left;height:auto;min-height:24px}
+.project-approvals{min-width:0;display:grid;gap:8px}.project-approvals .approval-line{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:3px 8px;margin:0;padding:0 0 8px;border-bottom:1px solid var(--el-border-color-lighter)}.project-approvals .approval-line:last-child{padding-bottom:0;border:0}
+.project-approvals .approval-reason{grid-column:1/-1}.project-approvals .research-application-identity>strong{font-size:12px;line-height:18px}.project-approvals .research-application-number{font-size:11px;line-height:16px;margin:0}.project-approvals .research-approval-open{justify-self:start;margin-left:0}
 .approval-line,.phone-line{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 8px;min-width:0;overflow-wrap:anywhere}.approval-line{margin-top:5px}.approval-reason{color:var(--el-color-danger)}.application-choices{display:flex;flex-direction:column;align-items:flex-start;max-height:min(440px,60vh);overflow-y:auto;overflow-x:hidden}.application-choices .el-button{height:auto;white-space:normal;text-align:left;max-width:100%}
 .project-row>div:first-child>strong{font-size:14px;font-weight:700}
 .project-row small,.mold-row small{display:block;margin-top:3px}
@@ -2552,13 +2553,15 @@ h3,.work-heading{font-size:14px;font-weight:700;line-height:1.5;margin:0 0 12px}
 .launch-issues{background:var(--el-color-warning-light-9);padding:10px 12px;margin:12px 0}
 input[type="file"],.el-select{max-width:100%}
 @container(max-width:850px){
+ .project-list-heading{display:none}.project-list .project-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 120px;gap:8px 12px}.project-list .project-list-actions{grid-column:3;grid-row:1;justify-self:start}.project-approvals{grid-column:1/-1;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));padding-top:6px;border-top:1px solid var(--el-border-color-lighter)}.project-approvals .approval-line{grid-template-columns:auto minmax(0,1fr);align-content:start;border:0;padding:0}.project-approvals .research-application-identity{grid-column:1/-1}
  .research-step-nav{grid-template-columns:repeat(4,minmax(0,1fr));row-gap:10px}.launch-page.page-scroll-layout{scroll-padding-top:150px}
  .research-application-row{grid-template-columns:auto minmax(0,1fr);justify-content:stretch;gap:5px 10px;padding:6px 0}.research-application-identity{grid-column:1/-1;display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 8px}.research-application-number{max-width:100%}.research-approval-status,.research-approval-open{justify-self:start}
  .research-step-nav button:nth-child(4):before{right:50%}.research-step-nav button:nth-child(5):before{left:50%}
  .mold-row,.business-row,.project-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
- .mold-row>.row-actions,.business-row>.row-actions,.business-row>.el-button,.project-row>.row-actions{grid-column:1/-1;justify-self:start}
+ .mold-row>.row-actions,.business-row>.row-actions,.business-row>.el-button{grid-column:1/-1;justify-self:start}
 }
 @container(max-width:520px){
+ .project-list .project-row{grid-template-columns:minmax(0,1fr)}.project-list .project-list-actions{grid-column:1;grid-row:auto;flex-direction:row}.project-approvals{grid-template-columns:minmax(0,1fr)}
  .heading{min-width:0;flex-basis:100%}.workspace-links{margin-left:0}
  .toolbar>.el-input,.toolbar>.el-select{min-width:0;width:100%}
  .project-header>.el-button{padding-left:0}

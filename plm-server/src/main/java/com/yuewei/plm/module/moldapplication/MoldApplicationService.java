@@ -536,7 +536,7 @@ public class MoldApplicationService implements ApplicationRunner {
                 if(supplied!=null&&((supplied.productLineId()!=null&&!Objects.equals(supplied.productLineId(),input.projectId()))||!Objects.equals(supplied.phoneModelId(),input.phoneModelId())))throw invalid("新品来源产品或手机选择不一致，请刷新核对");
                 var form=researchForm(context);if(supplied!=null)form.putAll(clean(supplied.form()));
                 Long code=supplied==null?null:supplied.phoneCodeItemId();
-                row=save(null,new Draft(json.valueToTree(form),input.projectId(),code,null,input.phoneModelId(),supplied==null?"new":supplied.executionIntent(),supplied==null?null:supplied.targetItemId(),supplied==null?null:supplied.targetMoldSetId(),supplied==null?null:supplied.targetProjectId(),supplied==null?null:supplied.executionReason(),input.requestId(),supplied!=null&&Boolean.TRUE.equals(supplied.newApplication()),engineeringPlan),request,engineeringPlan);
+                row=save(null,new Draft(json.valueToTree(form),input.projectId(),code,null,input.phoneModelId(),supplied==null?"new":supplied.executionIntent(),supplied==null?null:supplied.targetItemId(),supplied==null?null:supplied.targetMoldSetId(),supplied==null?null:supplied.targetProjectId(),supplied==null?null:supplied.executionReason(),input.requestId(),supplied!=null&&Boolean.TRUE.equals(supplied.newApplication()),engineeringPlan),request,engineeringPlan,true);
                 existing=Boolean.TRUE.equals(row.get("alreadyExists"));
             }
             if(row.get("applicationId")==null)return row;
@@ -573,9 +573,9 @@ public class MoldApplicationService implements ApplicationRunner {
         return lines.isEmpty()?"":"供应商分工"+(Boolean.TRUE.equals(source.get("supplierPlanConfirmed"))?"（已确认方案）":"（已保存，待工程确认）")+"："+String.join("；",lines);
     }
     public Map<String,Object> save(Long id,Draft draft,HttpServletRequest request){
-        return save(id,draft,request,MoldEngineeringPlan.normalize(json,draft.engineeringPlan()));
+        return save(id,draft,request,MoldEngineeringPlan.normalize(json,draft.engineeringPlan()),false);
     }
-    private Map<String,Object> save(Long id,Draft draft,HttpServletRequest request,JsonNode engineeringPlan){
+    private Map<String,Object> save(Long id,Draft draft,HttpServletRequest request,JsonNode engineeringPlan,boolean researchSource){
         createPermission();var actor=access.actor();return tx().execute(status->{
             var form=clean(draft.form());Map<String,Object> before=null;
             if(id!=null)before=require(id,false);
@@ -590,12 +590,14 @@ public class MoldApplicationService implements ApplicationRunner {
                 var research=source.path("research");
                 if(!Objects.equals(draft.productLineId(),research.path("projectId").asLong()))throw invalid("新品来源的产品已固定，不能将草稿改为其他产品；手机缺项可在本申请中补齐");
             }
-            if(before==null||!Objects.equals(before.get("productLineId"),draft.productLineId())||!Objects.equals(text(before.get("tipo")),text(form.get("tipo"))))codes.requireOnSaleProduct(draft.productLineId(),before!=null&&trustedResearch(before)?null:text(form.get("tipo")));
+            boolean research=researchSource||before!=null&&trustedResearch(before);
+            if(before==null||!Objects.equals(before.get("productLineId"),draft.productLineId())||!Objects.equals(text(before.get("tipo")),text(form.get("tipo"))))codes.requireOnSaleProduct(draft.productLineId(),research?null:text(form.get("tipo")));
             Long phoneId=draft.phoneModelId(),codeId=draft.phoneCodeItemId();
             if(phoneId!=null){var phone=codes.references().phone(phoneId);if(!"enabled".equals(phone.get("status")))throw invalid("标准手机已停用");form.put("model",phone.get("modelName"));Long actual=phone.get("codeItemId")==null?null:((Number)phone.get("codeItemId")).longValue();if(codeId!=null&&!Objects.equals(actual,codeId))throw invalid("手机身份与编码不一致");codeId=actual;}
             if(MoldEngineeringPlan.present(engineeringPlan)) {
                 var members=MoldEngineeringPlan.phones(engineeringPlan);if(!members.isEmpty()) {
-                    var phones=codes.references().requireEnabledModels(members);form.put("model",members.stream().map(member->Objects.toString(phones.get(member).get("modelName"),"")).collect(java.util.stream.Collectors.joining(" / ")));
+                    var phones=codes.references().requireEnabledModels(members);
+                    form.put("model",research?com.yuewei.plm.module.moldreference.PhoneDisplayNames.applicationModel(members.stream().map(phones::get).toList()):members.stream().map(member->Objects.toString(phones.get(member).get("modelName"),"")).collect(java.util.stream.Collectors.joining(" / ")));
                 }
                 if(phoneId!=null&&!members.contains(phoneId))throw invalid("编码基准手机不在本次适用范围内");
                 var holes=new LinkedHashSet<String>();for(JsonNode spec:engineeringPlan.path("specifications")){String label=holeLabel(spec.path("holeType").asText());if(!label.isBlank())holes.add(label);}if(holes.size()==1)form.put("holeType",holes.iterator().next());
