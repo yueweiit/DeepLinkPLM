@@ -33,7 +33,7 @@ describe('interface languages',()=>{
    const application={applicationId:88,status:'submitted',version:3,model:'Samsung Galaxy A17 5G / A26 5G',canMaintainResearchCoding:true,
     researchCoding:{status:'pending',missingFields:['materialCodes','operationCode'],generatedMoldCodes:['MHA100030','MHA200030'],productCodePrefix:'NHA',operationOptions:[{code:'4020',name:'工序原名'}]}} as MoldApplication
    await view.setProps({applications:[application]})
-   expect(view.text()).toContain('Elegir otro modelo')
+   expect(view.text()).toContain('Tramitar otra necesidad de moldes')
    expect(view.text()).toContain('Pendiente: material del molde')
    expect(view.text()).toContain('Pendiente: proceso del producto')
    expect(view.text()).toContain('El trámite continúa automáticamente al guardar.')

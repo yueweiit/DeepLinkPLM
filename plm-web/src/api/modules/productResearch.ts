@@ -370,7 +370,7 @@ export type WorkflowAction =
   | "start_revision";
 export const researchAction = async (
   id: number,
-  action: WorkflowAction|'unit_cost_group_save'|'unit_cost_group_delete'|'unit_cost_group_status',
+  action: WorkflowAction|'unit_cost_group_save'|'unit_cost_group_delete'|'unit_cost_group_status'|'unit_cost_assign_scope',
   version: number,
   data: object,
   requestId:string = crypto.randomUUID(),

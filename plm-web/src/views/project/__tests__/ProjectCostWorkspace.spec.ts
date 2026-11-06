@@ -64,3 +64,16 @@ it('filters the existing ledger by selected group and preserves unsaved input un
   expect(wrapper.findComponent(Unit).props('detail')!.workflow.unitCostDraft.title).toBe('组B');expect(api.saveFinanceRows).not.toHaveBeenCalled()
   wrapper.getComponent(ProjectCostScopeBar).vm.$emit('choose','shared');await flushPromises();expect(wrapper.findComponent(Unit).exists()).toBe(false);expect(wrapper.text()).not.toContain('单件生产成本')
 })
+it('offers the draft attribution entry beside Edit and keeps it as a single on-page form',async()=>{
+ const d={...detail(),workflow:{version:1,unitCostDraft:{title:'原单件核算',currency:'CNY',totals:{base:6.4}},costScopes:[{id:'group-a',name:'Pro',phoneModelIds:[1]}]}}as unknown as ProductResearchDetail;await start(undefined,d)
+ await button('设置归属').trigger('click');await flushPromises();expect(wrapper.get('[aria-label="设置成本归属"]').text()).toContain('原单件核算');expect(button('编辑').attributes('disabled')).toBeDefined();expect(wrapper.find('[role="dialog"]').exists()).toBe(false);expect(api.saveFinanceRows).not.toHaveBeenCalled();expect(save).not.toHaveBeenCalled()
+})
+it('sets an existing budget attribution using its original field value without creating or changing any amount',async()=>{
+ await start(undefined,{...detail(),workflow:{version:1,costScopes:[{id:'group-a',name:'Pro',phoneModelIds:[1]}]}});await edit();await openBudget();const control=wrapper.findAllComponents({name:'ElSelect'}).find(c=>c.props('ariaLabel')==='费用成本归属')!;await control.setValue('group-a');await button('保存来源资料').trigger('click');await flushPromises();expect(api.saveFinanceRows).toHaveBeenCalledWith('budget',[expect.objectContaining({id:7,changes:[{field:'costScopeKey',before:null,after:'group-a'}]})]);expect(api.createFinanceRow).not.toHaveBeenCalled();expect(save).not.toHaveBeenCalled()
+})
+it('continues showing one project batch source while viewing or editing an independent group',async()=>{
+ const outlay={currency:'CNY',rows:[{name:'合成整批材料',unitPrice:2,quantity:100,purchaseAmount:200,transportAmount:20,combinedAmount:220}],knownTotal:220};await start(undefined,{...detail(),workflow:{version:1,projectSourceOutlay:outlay,costScopes:[{id:'group-a',name:'Pro',phoneModelIds:[1]}]}});wrapper.getComponent(ProjectCostScopeBar).vm.$emit('choose','group-a');await flushPromises();expect(wrapper.findAll('.outlay-table')).toHaveLength(1);expect(wrapper.get('.outlay-table').text()).toContain('220.00');await edit();expect(wrapper.find('input[aria-label="合成整批材料 采购单价"]').exists()).toBe(false);expect(api.createFinanceRow).not.toHaveBeenCalled()
+})
+it('keeps the current project batch in the summary when the viewed C version has a historical batch source',async()=>{
+ sourceReference={selected:'8',sourceOutlay:{currency:'CNY',knownTotal:999,rows:[{name:'历史批次',combinedAmount:999}]}};await start(undefined,{...detail(),workflow:{version:1,projectSourceOutlay:{currency:'CNY',knownTotal:220,rows:[{name:'当前项目批次',combinedAmount:220}]}}});expect(wrapper.text()).toContain('当前项目批次');expect(wrapper.text()).not.toContain('历史批次');expect(wrapper.text()).not.toContain('999');expect(wrapper.findAll('.outlay-table')).toHaveLength(1)
+})

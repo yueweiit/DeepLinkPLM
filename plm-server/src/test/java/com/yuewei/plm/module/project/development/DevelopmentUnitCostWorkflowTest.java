@@ -150,4 +150,56 @@ class DevelopmentUnitCostWorkflowTest {
         assertThat((BigDecimal)rows.get(0).get("unitPrice")).isEqualByComparingTo("0");assertThat(rows.get(1).get("unitPrice")).isNull();
         assertThat(DevelopmentWorkflowStore.map(result.get("totals")).get("base")).isNull();
     }
+    private final String pro="11111111-1111-4111-8111-111111111111",max="22222222-2222-4222-8222-222222222222";
+    private Map<String,Object> attributionState(){
+        var calc=new UnitCostSheetCalculator(new BomCostCalculator());
+        var draft=calc.calculate(new LinkedHashMap<>(Map.of("title","合成单件核算","currency","CNY","taxBasis","source","useProjectInvestment",true,"references",List.of(Map.of("type","file","id",70)),"sourceOutlay",Map.of("sourceHash","synthetic-hash","sourceVersion","V1","sourceReference",Map.of("type","file","id",70),"currency","CNY","rows",List.of(Map.of("name","合成整批材料","unitPrice",2,"quantity",200,"transportAmount",50))),"rows",List.of(Map.of("id","material","category","material","mode","unit","unitPrice",2),Map.of("id","process","category","process","mode","unit","unitPrice",1),Map.of("id","mold","category","tooling","mode","divide","unitPrice",900,"allocationQty",300),Map.of("id","transport","category","tool_transport","mode","divide","unitPrice",90,"allocationQty",300),Map.of("id","dev","category","development","mode","unit","unitPrice",new BigDecimal("0.1"))))));
+        draft.put("status","draft");var state=new LinkedHashMap<String,Object>();state.put("unitCostDraft",draft);state.put("unitCostVersions",List.of(Map.of("id",8,"title","原采用C8","status","confirmed","sourceOutlay",draft.get("sourceOutlay"))));
+        state.put("costScopes",List.of(new LinkedHashMap<>(Map.of("id",pro,"name","Pro","phoneModelIds",List.of(1))),new LinkedHashMap<>(Map.of("id",max,"name","Pro Max","phoneModelIds",List.of(2)))));return state;
+    }
+    private DevelopmentUnitCostWorkflow attributionWorkflow(com.yuewei.plm.module.development.DevelopmentFinanceService finance){
+        var access=mock(PilotAccessService.class);var actor=mock(com.yuewei.plm.common.security.CurrentUser.class);when(access.actor()).thenReturn(actor);when(actor.displayName()).thenReturn("归属测试工程师");
+        return new DevelopmentUnitCostWorkflow(access,new UnitCostSheetCalculator(new BomCostCalculator()),mock(ProductBomWorkflowService.class),mock(JdbcTemplate.class),new DevelopmentWorkflowStore(mock(JdbcTemplate.class),new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules()),finance);
+    }
+    @Test void assigningASavedDraftMovesItWithoutCopyingVersionsLedgerPricesOrBatchSource(){
+        var state=attributionState();var original=DevelopmentWorkflowStore.map(state.get("unitCostDraft"));var versions=state.get("unitCostVersions");var outlay=original.get("sourceOutlay");var finance=mock(com.yuewei.plm.module.development.DevelopmentFinanceService.class);var workflow=attributionWorkflow(finance);
+        var command=new LinkedHashMap<String,Object>(Map.of("costScopeId","","targetCostScopeId",pro));workflow.action(20L,state,"unit_cost_assign_scope",command,mock(ProductDevelopmentService.class));
+        var moved=DevelopmentWorkflowStore.map(DevelopmentCostScopes.find(state,pro,false).get("unitCostDraft"));
+        assertThat(state).doesNotContainKey("unitCostDraft").containsEntry("projectSourceOutlay",outlay).containsEntry("unitCostVersions",versions);
+        assertThat(moved).containsEntry("costScopeId",pro).containsEntry("useProjectInvestment",false).containsEntry("totals",original.get("totals")).containsEntry("rows",original.get("rows")).containsEntry("references",original.get("references")).doesNotContainKeys("sourceOutlay","id","bomCostSnapshotId","confirmedAt");
+        assertThat(command).containsEntry("fromScopeName","待归属").containsEntry("toScopeName","Pro");verifyNoInteractions(finance);
+        assertThat(DevelopmentCostScopes.find(state,max,false)).doesNotContainKey("unitCostDraft");assertThat(DevelopmentCostScopes.nextVersionId(state)).isEqualTo(9);
+        assertThat(DevelopmentWorkflowStore.map(FinancialSnapshotRedaction.withoutMoney(state))).doesNotContainKeys("projectSourceOutlay","unitCostVersions","costScopes");
+    }
+    @Test void movingBackAndSavingReopenedDraftKeepsInvestmentPricesAndOneCurrentProjectSource(){
+        var state=attributionState();var finance=mock(com.yuewei.plm.module.development.DevelopmentFinanceService.class);var workflow=attributionWorkflow(finance);var service=mock(ProductDevelopmentService.class);
+        when(service.snapshotReferences(anyLong(),anyList())).thenReturn(List.of(Map.of("type","file","id",70,"versionNo","V1","name","合成原件.xlsx","checksum","synthetic-hash")));
+        var store=new DevelopmentWorkflowStore(mock(JdbcTemplate.class),new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules());
+        workflow.action(20L,state,"unit_cost_assign_scope",new LinkedHashMap<>(Map.of("costScopeId","","targetCostScopeId",pro)),service);
+        state=DevelopmentWorkflowStore.map(store.read(store.encode(state)));var data=new LinkedHashMap<>(DevelopmentWorkflowStore.map(DevelopmentCostScopes.find(state,pro,false).get("unitCostDraft")));
+        workflow.action(20L,state,"unit_cost_save",data,service);assertThat((BigDecimal)DevelopmentWorkflowStore.map(DevelopmentWorkflowStore.map(DevelopmentCostScopes.find(state,pro,false).get("unitCostDraft")).get("totals")).get("base")).isEqualByComparingTo("6.4");
+        workflow.action(20L,state,"unit_cost_assign_scope",new LinkedHashMap<>(Map.of("costScopeId",pro,"targetCostScopeId","")),service);
+        var draft=new LinkedHashMap<>(DevelopmentWorkflowStore.map(state.get("unitCostDraft")));draft.put("sourceOutlay",state.get("projectSourceOutlay"));
+        workflow.action(20L,state,"unit_cost_save",draft,service);assertThat(DevelopmentWorkflowStore.map(state.get("unitCostDraft"))).doesNotContainKey("sourceOutlay");
+        assertThat((BigDecimal)DevelopmentWorkflowStore.map(DevelopmentWorkflowStore.map(state.get("unitCostDraft")).get("totals")).get("base")).isEqualByComparingTo("6.4");
+        assertThat(DevelopmentCostScopes.find(state,pro,false)).doesNotContainKey("unitCostDraft");assertThat(new BigDecimal(DevelopmentWorkflowStore.map(state.get("projectSourceOutlay")).get("knownTotal").toString())).isEqualByComparingTo("450");
+        verifyNoInteractions(finance);
+    }
+    @Test void assigningRejectsOccupiedInactiveForeignOrUnchosenTargetsWithoutMutatingTheSource(){
+        var workflow=attributionWorkflow(mock(com.yuewei.plm.module.development.DevelopmentFinanceService.class));var state=attributionState();var draft=state.get("unitCostDraft");var service=mock(ProductDevelopmentService.class);var target=DevelopmentCostScopes.find(state,pro,false);
+        target.put("unitCostDraft",Map.of("title","目标原草稿"));assertThatThrownBy(()->workflow.action(20L,state,"unit_cost_assign_scope",new LinkedHashMap<>(Map.of("costScopeId","","targetCostScopeId",pro)),service)).hasMessageContaining("目标已有");target.remove("unitCostDraft");
+        target.put("inactive",true);assertThatThrownBy(()->workflow.action(20L,state,"unit_cost_assign_scope",new LinkedHashMap<>(Map.of("costScopeId","","targetCostScopeId",pro)),service)).hasMessageContaining("停用");
+        assertThatThrownBy(()->workflow.action(20L,state,"unit_cost_assign_scope",new LinkedHashMap<>(Map.of("costScopeId","","targetCostScopeId",UUID.randomUUID().toString())),service)).hasMessageContaining("不属于本项目");
+        assertThatThrownBy(()->workflow.action(20L,state,"unit_cost_assign_scope",new LinkedHashMap<>(Map.of("costScopeId","")),service)).hasMessageContaining("请选择");
+        assertThat(state.get("unitCostDraft")).isSameAs(draft);assertThat(state).doesNotContainKey("projectSourceOutlay");
+    }
+    @Test void assignmentNeverReplacesAnExistingProjectSourceOrMovesAConfirmedVersion(){
+        var state=attributionState();var draft=DevelopmentWorkflowStore.map(state.get("unitCostDraft"));var workflow=attributionWorkflow(mock(com.yuewei.plm.module.development.DevelopmentFinanceService.class));var service=mock(ProductDevelopmentService.class);
+        var existing=new LinkedHashMap<>(DevelopmentWorkflowStore.map(draft.get("sourceOutlay")));existing.put("knownTotal",777);state.put("projectSourceOutlay",existing);
+        workflow.action(20L,state,"unit_cost_assign_scope",new LinkedHashMap<>(Map.of("costScopeId","","targetCostScopeId",pro)),service);assertThat(state.get("projectSourceOutlay")).isSameAs(existing);
+        var other=attributionState();other.put("projectSourceOutlay",Map.of("sourceHash","other-file","sourceReference",Map.of("id",71),"sourceVersion","V2"));
+        assertThatThrownBy(()->workflow.action(20L,other,"unit_cost_assign_scope",new LinkedHashMap<>(Map.of("costScopeId","","targetCostScopeId",pro)),service)).hasMessageContaining("另一份");assertThat(other).containsKey("unitCostDraft");
+        var confirmed=attributionState();DevelopmentWorkflowStore.map(confirmed.get("unitCostDraft")).put("confirmedAt","2026-11-01");
+        assertThatThrownBy(()->workflow.action(20L,confirmed,"unit_cost_assign_scope",new LinkedHashMap<>(Map.of("costScopeId","","targetCostScopeId",pro)),service)).hasMessageContaining("已确认成本版本");
+    }
 }

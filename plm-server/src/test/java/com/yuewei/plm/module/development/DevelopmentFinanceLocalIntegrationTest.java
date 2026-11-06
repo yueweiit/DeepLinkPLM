@@ -10,6 +10,9 @@ import com.yuewei.plm.module.pilot.PilotAccessService;
 import com.yuewei.plm.module.project.dto.ProjectCostItemCreateDTO;
 import com.yuewei.plm.module.project.dto.ProjectCostItemUpdateDTO;
 import com.yuewei.plm.module.project.service.impl.ProjectCostServiceImpl;
+import com.yuewei.plm.module.project.development.*;
+import com.yuewei.plm.module.bom.service.BomCostCalculator;
+import com.yuewei.plm.module.bom.service.ProductBomWorkflowService;
 import com.yuewei.plm.module.bom.service.BomLedgerService;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -24,7 +27,7 @@ import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.DefaultTransactionDefinition;
 import static com.yuewei.plm.module.development.DevelopmentTypes.*;
 import static org.assertj.core.api.Assertions.*;
-import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.*;
 
 /** Opt-in local snapshot only. Schema, all accounts and all business fixtures roll back. */
 @EnabledIfEnvironmentVariable(named="PLM_COLLAB_TEST_DB_URL",matches="jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/plm_data_management\\?currentSchema=plm")
@@ -46,6 +49,47 @@ class DevelopmentFinanceLocalIntegrationTest {
     long budget(String kind,String currency){return ((Number)service.createBudget(new CreateBudget(kind,"Finance "+UUID.randomUUID(),product,kind.equals("mold")?item:null,null,null,currency),null).get("budgetId")).longValue();}
     long expense(String currency){return ((Number)service.createExpense(new CreateExpense("Test cost",product,item,null,null,currency),null).get("expenseId")).longValue();}
     Result patch(String entity,long id,Map<String,Object> values,String reason){var row=service.detail(entity,id);List<Change> changes=values.entrySet().stream().map(e->new Change(e.getKey(),json.valueToTree(row.get(e.getKey())),json.valueToTree(e.getValue()))).toList();return service.save(entity,new Batch(List.of(new Patch(id,changes,reason))),null).get(0);}
+    @Test void changingExistingUnlinkedCostsKeepsAmountsAndVersionsAndProtectsReferencedBudgetChains()throws Exception{
+        String pro=UUID.randomUUID().toString();jdbc.update("insert into plm_product_development_state(product_id,data) values(?,?::jsonb) on conflict(product_id) do update set data=excluded.data",product,json.writeValueAsString(Map.of("costScopes",List.of(Map.of("id",pro,"name","Pro")))));
+        long b=budget("platform","CNY");patch("budget",b,Map.of("budgetAmount",100),"合成原金额");var before=service.detail("budget",b);assertThat(patch("budget",b,Map.of("costScopeKey",pro),"用户选择Pro归属").status()).isEqualTo("saved");var moved=service.detail("budget",b);assertThat(moved).containsEntry("costScopeKey",pro).containsEntry("budgetAmount",before.get("budgetAmount")).containsEntry("versionNo",3);assertThat(service.history("budget",b,1,50).getContent()).anySatisfy(h->assertThat(h).containsEntry("fieldName","costScopeKey").containsEntry("actorName",admin.username()));
+        long e=expense("CNY");patch("expense",e,Map.of("requestedAmount",11),"合成申报原值");var oldExpense=service.detail("expense",e);assertThat(patch("expense",e,Map.of("costScopeKey",pro),"用户选择Pro").status()).isEqualTo("saved");assertThat(service.detail("expense",e)).containsEntry("requestedAmount",oldExpense.get("requestedAmount")).containsEntry("actualAmount",null).containsEntry("actualStatus","draft").containsEntry("costScopeKey",pro);
+        long linked=((Number)service.createExpense(new CreateExpense("合成已关联费用",product,null,null,b,"CNY",product,null,pro),null).get("expenseId")).longValue();var current=service.detail("budget",b);var clear=new LinkedHashMap<String,Object>();clear.put("costScopeKey",null);var rejected=patch("budget",b,clear,"尝试单独移出已引用预算");assertThat(rejected.status()).isEqualTo("invalid");assertThat(rejected.message()).contains("关联");assertThat(service.detail("budget",b)).containsEntry("costScopeKey",pro).containsEntry("versionNo",current.get("versionNo"));assertThat(service.detail("expense",linked)).containsEntry("costScopeKey",pro);
+    }
+    @Test void confirmedActualCostsKeepOriginalAttributionAndHistoryWhenAnAssignmentIsRejected()throws Exception{
+        String pro=UUID.randomUUID().toString();jdbc.update("insert into plm_product_development_state(product_id,data) values(?,?::jsonb) on conflict(product_id) do update set data=excluded.data",product,json.writeValueAsString(Map.of("costScopes",List.of(Map.of("id",pro,"name","Pro")))));
+        long e=expense("CNY");assertThat(patch("expense",e,Map.of("actualAmount",30,"actualDate","2026-11-05","actualBasis","合成实际依据","actualStatus","confirmed"),"合成确认").status()).isEqualTo("saved");var before=service.detail("expense",e);long history=service.history("expense",e,1,50).getTotalElements();assertThat(patch("expense",e,Map.of("costScopeKey",pro),"不能搬动已确认实际").status()).isEqualTo("invalid");assertThat(service.detail("expense",e)).containsEntry("costScopeKey",null).containsEntry("actualAmount",before.get("actualAmount")).containsEntry("actualDate",before.get("actualDate"));assertThat(service.history("expense",e,1,50).getTotalElements()).isEqualTo(history);
+    }
+    private ProductDevelopmentService costActions(boolean rejectAudit){
+        var store=new DevelopmentWorkflowStore(jdbc,json);var audit=mock(com.yuewei.plm.module.operationlog.repository.OperationLogRepository.class);
+        when(audit.insert(any(com.yuewei.plm.module.operationlog.entity.OperationLog.class))).thenAnswer(call->{
+            if(rejectAudit)throw new IllegalStateException("合成审计故障");var log=(com.yuewei.plm.module.operationlog.entity.OperationLog)call.getArgument(0);long id=jdbc.queryForObject("insert into plm_operation_log(request_id,operator_user_id,operator_user_name,action,business_type,business_id,detail_json,created_by,updated_by) values(?,?,?,?,?,?,?,?,?) returning log_id",Long.class,log.getRequestId(),log.getOperatorUserId(),log.getOperatorUserName(),log.getAction(),log.getBusinessType(),log.getBusinessId(),log.getDetailJson(),log.getCreatedBy(),log.getUpdatedBy());log.setLogId(id);return 1;
+        });
+        var logs=new com.yuewei.plm.module.operationlog.service.impl.OperationLogServiceImpl(audit);var products=mock(com.yuewei.plm.repository.ProductRepository.class);var p=new com.yuewei.plm.repository.entity.Product();p.setProductId(product);p.setProductType("product_line");p.setDevelopmentMode("launch_v1");p.setStatus("developing");p.setLockStatus("unlocked");p.setDeletedFlag(0);when(products.selectById(product)).thenReturn(p);
+        var costs=new DevelopmentUnitCostWorkflow(access,new UnitCostSheetCalculator(new BomCostCalculator()),mock(ProductBomWorkflowService.class),jdbc,store,service);
+        var actions=spy(new ProductDevelopmentService(jdbc,json,access,products,mock(com.yuewei.plm.module.attachment.repository.AttachmentRepository.class),logs,store,mock(com.yuewei.plm.module.inventory.service.InventorySupplierService.class),mock(LaunchDevelopmentWorkflow.class),mock(LaunchReviewWorkflow.class),costs));doAnswer(call->Map.of("workflow",store.load(product))).when(actions).detail(product);return actions;
+    }
+    private Map<String,Object> costAction(ProductDevelopmentService actions,String request,long version,String from,String to){
+        var command=new org.springframework.transaction.support.TransactionTemplate(tx);command.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_NESTED);
+        return command.execute(status->actions.workflowAction(product,new DevelopmentModels.WorkflowInput("unit_cost_assign_scope",version,request,Map.of("costScopeId",from,"targetCostScopeId",to))));
+    }
+    private String seedAttribution(){
+        var store=new DevelopmentWorkflowStore(jdbc,json);String pro=UUID.randomUUID().toString();var state=new LinkedHashMap<String,Object>();state.put("version",store.load(product).get("version"));state.put("costScopes",List.of(Map.of("id",pro,"name","Pro","phoneModelIds",List.of())));state.put("unitCostVersions",List.of(Map.of("id",8,"title","历史采用C8","references",List.of())));state.put("unitCostDraft",new UnitCostSheetCalculator(new BomCostCalculator()).calculate(new LinkedHashMap<>(Map.of("title","合成待归属草稿","currency","CNY","taxBasis","source","useProjectInvestment",true,"rows",List.of(Map.of("id","m","category","material","mode","unit","unitPrice",3))))));store.save(product,state);return pro;
+    }
+    @Test void realWorkflowAssignmentChecksVersionReplaysOnceAndWritesAuditWithoutPhysicalOrFinanceChanges(){
+        String pro=seedAttribution();var store=new DevelopmentWorkflowStore(jdbc,json);long version=DevelopmentWorkflowStore.number(store.load(product).get("version"));var actions=costActions(false);long snapshots=jdbc.queryForObject("select count(*) from plm_product_bom_cost_snapshot",Long.class);long events=jdbc.queryForObject("select count(*) from plm_product_development_event where product_id=?",Long.class,product);
+        costAction(actions,"cost-attribution-real-replay",version,"",pro);var after=store.load(product);assertThat(after).doesNotContainKey("unitCostDraft");assertThat(DevelopmentCostScopes.find(after,pro,false)).containsKey("unitCostDraft");assertThat(after.get("unitCostVersions")).isEqualTo(List.of(Map.of("id",8,"title","历史采用C8","references",List.of())));
+        costAction(actions,"cost-attribution-real-replay",version,"",pro);assertThat(store.load(product)).isEqualTo(after);assertThat(jdbc.queryForObject("select count(*) from plm_product_development_event where product_id=?",Long.class,product)).isEqualTo(events+1);assertThat(jdbc.queryForObject("select count(*) from plm_operation_log where business_id=? and action='PRODUCT_RESEARCH_UNIT_COST_ASSIGN_SCOPE'",Long.class,Long.toString(product))).isEqualTo(1);
+        assertThatThrownBy(()->costAction(actions,"cost-attribution-stale",version,pro,"")).hasMessageContaining("已被其他操作更新");assertThat(store.load(product)).isEqualTo(after);assertThat(jdbc.queryForObject("select count(*) from plm_product_bom_cost_snapshot",Long.class)).isEqualTo(snapshots);assertThat(jdbc.queryForObject("select count(*) from plm_project_cost_item where product_id=? or product_line_id=?",Long.class,product,product)).isZero();
+    }
+    @Test void anAuditFailureRollsBackTheRealStateVersionEventAndDraftMove(){
+        String pro=seedAttribution();var store=new DevelopmentWorkflowStore(jdbc,json);var before=store.load(product);long events=jdbc.queryForObject("select count(*) from plm_product_development_event where product_id=?",Long.class,product);var actions=costActions(true);
+        assertThatThrownBy(()->costAction(actions,"cost-attribution-audit-fail",DevelopmentWorkflowStore.number(before.get("version")),"",pro)).hasMessageContaining("审计故障");assertThat(store.load(product)).isEqualTo(before);assertThat(jdbc.queryForObject("select count(*) from plm_product_development_event where product_id=?",Long.class,product)).isEqualTo(events);
+    }
+    @Test void assignmentRequiresRealFinanceAuthorityEvenWhenTheClientClaimsAdministrator(){
+        String pro=seedAttribution();var store=new DevelopmentWorkflowStore(jdbc,json);var before=store.load(product);var actions=costActions(false);long id=jdbc.queryForObject("select max(user_id)+100 from sys_user",Long.class);
+        jdbc.update("insert into sys_user(user_id,user_code,user_name,login_name,username,display_name,status,all_permissions) values(?,?,?,?,?,?,'active',false)",id,"cost-owner-it-"+id,"归属只读测试","cost-owner-it-"+id,"cost-owner-it-"+id,"归属只读测试");jdbc.update("insert into plm_pilot_account(user_id,role_code,permissions,all_objects,created_by,updated_by) values(?,'domestic','[\"project:view\",\"documents:write\",\"finance:read\"]'::jsonb,true,'test','test')",id);CurrentUserContext.set(new CurrentUser(id,"forged","forged",true));
+        assertThatThrownBy(()->costAction(actions,"cost-attribution-denied",DevelopmentWorkflowStore.number(before.get("version")),"",pro)).hasMessageContaining("finance:write");assertThat(store.load(product)).isEqualTo(before);assertThat(jdbc.queryForObject("select count(*) from plm_product_development_event where product_id=? and request_id='cost-attribution-denied'",Long.class,product)).isZero();
+    }
     @Test void independentCostScopesFilterWholeLedgersAndKeepSharedAndLegacyNullDistinct() throws Exception {
         String a=UUID.randomUUID().toString(),b=UUID.randomUUID().toString();
         String state=json.writeValueAsString(Map.of("costScopes",List.of(Map.of("id",a,"name","Pro"),Map.of("id",b,"name","Pro Max"))));

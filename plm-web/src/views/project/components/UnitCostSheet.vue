@@ -42,10 +42,11 @@ const taxLabel = computed(() => sheet.taxBasis === 'source' ? uiText('税额待�
 const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value))
 let hydrating = false, timer: ReturnType<typeof setTimeout> | undefined, generation = 0
 function invalidatePreview() { clearTimeout(timer); generation++; calculating.value = false }
-function assign(value: UnitCostSheet) {
+function assign(value: UnitCostSheet, owner=props.detail) {
   invalidatePreview(); hydrating = true
   Object.keys(sheet).forEach(k => delete (sheet as any)[k]); Object.assign(sheet, empty(), copy(value))
-  if(props.embedded&&selected.value==='draft')sheet.useProjectInvestment=true
+  if(!props.costScopeId&&selected.value==='draft'&&owner.workflow.projectSourceOutlay){sheet.sourceOutlay=copy(owner.workflow.projectSourceOutlay as NonNullable<UnitCostSheet['sourceOutlay']>);const reference=sheet.sourceOutlay.sourceReference;if(reference&&!sheet.references.some(r=>r.type===reference.type&&r.id===reference.id))sheet.references.push(reference)}
+  if(props.embedded&&selected.value==='draft'&&sheet.useProjectInvestment!==false)sheet.useProjectInvestment=true
   sheet.costScopeId=props.costScopeId||''
   calculated.value = copy(value); dirty.value = false; checkedIds.value = []; expandedIds.value = []; undoEdit.value = null; syncBatchField(); hydrating = false
 }
@@ -144,7 +145,7 @@ async function run(fn: () => Promise<void>) {
 async function save(confirm = false,quiet=false) { return await run(async () => {
   if (confirm) await ElMessageBox.confirm(uiText('确认本次核算采用的BOM路线或供方报价，以及税率和汇率依据？确认后通过新版本修订。'), uiText('确认单件成本'))
   const d = await researchAction(props.detail.productId, confirm ? 'unit_cost_confirm' : 'unit_cost_save', props.detail.workflow.version, {...copy(sheet),costScopeId:props.costScopeId||''}); emit('updated', d); dirty.value = false
-  if (confirm) { const list = (scopeWorkflow(d).unitCostVersions || []) as UnitCostSheet[]; const last = list[list.length - 1]; selected.value = String(last.id); assign(last) } else assign(scopeWorkflow(d).unitCostDraft as UnitCostSheet)
+  if (confirm) { const list = (scopeWorkflow(d).unitCostVersions || []) as UnitCostSheet[]; const last = list[list.length - 1]; selected.value = String(last.id); assign(last,d) } else assign(scopeWorkflow(d).unitCostDraft as UnitCostSheet,d)
   if(!quiet)ElMessage.success(confirm ? uiText('成本版本已确认并保存采用依据') : uiText('成本草稿已保存'))
 }) }
 async function choose(value: string) { if (busy.value) return; if (dirty.value) { try { await ElMessageBox.confirm(uiText('当前核算有未保存修改，切换后放弃这些修改？'), uiText('未保存草稿')) } catch { return } } selected.value = value; assign(value === 'draft' ? ((props.detail.workflow.unitCostDraft as UnitCostSheet) || empty()) : versions.value.find(v => String(v.id) === value)!); if (value === 'draft' && !sheet.totals) void calculate() }
@@ -156,7 +157,7 @@ function bomChanged() { sheet.routeId = null; sheet.references = sheet.reference
 async function importBom() { await run(async () => { if (!sheet.bomId || !sheet.routeId) throw Error(uiText('请先选择具体BOM及工艺路线')); if (dirty.value || props.detail.workflow.unitCostDraft) await ElMessageBox.confirm(uiText('从选定BOM读取物料、数量和已有价格；保留补充列名称，原明细及补充值将重建，未明确费用继续留空。'), uiText('从BOM带入')); const d = await researchAction(props.detail.productId, 'unit_cost_from_bom', props.detail.workflow.version, { bomId: sheet.bomId, routeId: sheet.routeId, replaceDraft: true,costScopeId:props.costScopeId||'' }); emit('updated', d); selected.value = 'draft'; assign(scopeWorkflow(d).unitCostDraft as UnitCostSheet) }) }
 async function leave() { if (busy.value) return false; if (dirty.value) { try { await ElMessageBox.confirm(uiText('单件成本尚未保存，离开页面？'), uiText('未保存输入')) } catch { return false } } return true }
 onBeforeRouteLeave(()=>props.embedded?true:leave()); onBeforeRouteUpdate(()=>props.embedded?true:leave())
-const overview = computed(() => ({ currency: sheet.currency, manufacturing: totals.value.manufacturing, base: totals.value.base, dirty: dirty.value, calculating: calculating.value, taxLabel: taxLabel.value, title: sheet.title, selected: selected.value, sourceInvestmentRows:sheet.rows.filter(row=>row.investmentFallback), sourceOutlay:sheet.sourceOutlay }))
+const overview = computed(() => ({ currency: sheet.currency, manufacturing: sheet.rows.some(row=>['material','process','packaging'].includes(row.category))?totals.value.manufacturing:null, base: sheet.rows.some(row=>!row.investmentCategories)?totals.value.base:null, dirty: dirty.value, calculating: calculating.value, taxLabel: taxLabel.value, title: sheet.title, selected: selected.value, sourceInvestmentRows:sheet.rows.filter(row=>row.investmentFallback), sourceOutlay:sheet.sourceOutlay }))
 function editOutlay(index:number,field:'unitPrice'|'quantity'|'transportAmount',value:string){if(!writable.value||props.costScopeId||!sheet.sourceOutlay?.rows[index])return;sheet.sourceOutlay.rows[index][field]=value===''?null:Number(value)}
 function editInvestmentEstimate(id:string,value:string){const row=sheet.rows.find(row=>row.id===id&&row.investmentFallback);if(row)editCell(row,'unitPrice',value)}
 async function importOutlay(file:File){
@@ -166,9 +167,9 @@ async function importOutlay(file:File){
  try{const source=await readSourceOutlay(await file.arrayBuffer(),file.name,sheet.currency);const attachment=props.detail.materials.find(m=>m.type==='file'&&m.checksum===source.sourceHash);if(!attachment)throw Error(uiText('项目资料中未找到同一版本原文件，请先在项目附件中上传该文件'));source.sourceReference={type:'file',id:attachment.id};source.sourceVersion=String(attachment.versionNo||'');source.sourceFileName=attachment.name;sheet.sourceOutlay=source;if(!sheet.references.some(r=>r.type==='file'&&r.id===attachment.id))sheet.references.push(source.sourceReference);await calculate()}
  catch(e){error.value=e instanceof Error?e.message:String(e)}finally{calculating.value=false}
 }
-function beginEdit(){if(!canWrite.value||busy.value)return;if(selected.value!=='draft'){const value=copy(sheet);delete value.id;delete value.status;delete value.bomCostSnapshotId;selected.value='draft';assign(value)}sheet.useProjectInvestment=true;void calculate()}
+function beginEdit(){if(!canWrite.value||busy.value)return;if(selected.value!=='draft'){const value=copy(sheet);delete value.id;delete value.status;delete value.bomCostSnapshotId;selected.value='draft';assign(value)}if(sheet.useProjectInvestment!==false)sheet.useProjectInvestment=true;void calculate()}
 function cancelEdit(){const draft=props.detail.workflow.unitCostDraft as UnitCostSheet|undefined;const confirmed=[...versions.value].reverse().find(v=>!v.voidReason);selected.value=draft?'draft':confirmed?String(confirmed.id):'draft';assign(draft||confirmed||empty());if(sheet.useProjectInvestment)void calculate()}
-async function saveProjectCosts(){sheet.useProjectInvestment=true;return save(false,true)}
+async function saveProjectCosts(syncInvestment=false){if(syncInvestment||sheet.useProjectInvestment!==false)sheet.useProjectInvestment=true;return save(false,true)}
 defineExpose({ canLeave: leave, save, saveProjectCosts, beginEdit, cancelEdit, importOutlay, editOutlay, editInvestmentEstimate, overview, editable, busy, dirty })
 </script>
 
@@ -188,6 +189,7 @@ defineExpose({ canLeave: leave, save, saveProjectCosts, beginEdit, cancelEdit, i
     <div v-if="!embedded" class="cost-overview" aria-live="polite"><span>{{ uiText('材料＋加工小计') }} <strong>{{ money(totals.manufacturing) }}</strong></span><span>{{ uiText('单件总成本（成品运输前）') }} <strong>{{ money(totals.base) }}</strong></span><span>{{ uiText('含海运合计') }} <strong>{{ money(totals.freight_sea) }}</strong></span><span>{{ uiText('含空运合计') }} <strong>{{ money(totals.freight_air) }}</strong></span><span>{{ uiText('待补 ') }}{{ calculated ? missing.length : '—' }}{{ uiText(' 项') }}</span><span class="overview-basis">{{ sheet.currency || uiText('币种待确认') }} · {{ taxLabel }} <small v-if="calculating">{{ uiText('正在计算…') }}</small><small v-else-if="dirty">{{ uiText('有未保存修改') }}</small></span></div>
     <details class="sheet-basis"><summary>{{ uiText('核算依据、税率与汇率') }} <span>{{ sheet.basisType === 'supplier_quote' ? uiText('采购成品供方报价') : uiText('BOM与工艺路线') }}<template v-if="sheet.displayCurrency"> · {{ sheet.displayCurrency }}</template></span></summary>
       <el-form :disabled="!writable" class="sheet-settings" label-position="top" @submit.prevent>
+        <el-form-item v-if="embedded" :label="uiText('联动投入费用')"><el-checkbox v-model="sheet.useProjectInvestment" :aria-label="uiText('联动投入费用')">{{uiText('采用上方费用计算摊销')}}</el-checkbox></el-form-item>
         <el-form-item :label="uiText('核算税额口径')"><el-select v-model="sheet.taxBasis" :aria-label="uiText('核算税额口径')"><el-option :label="uiText('税额待核对')" value="source"/><el-option :label="uiText('统一未税成本')" value="net"/><el-option :label="uiText('统一含税成本')" value="gross"/></el-select></el-form-item>
         <el-form-item :label="uiText('换算币种')"><el-select v-model="sheet.displayCurrency" :aria-label="uiText('换算币种')"><el-option value="" :label="uiText('不换算')"/><el-option v-for="c in ['MXN','USD','CNY','EUR']" :key="c" :value="c" :label="uiText('换算为 {value0}', { value0: c })"/></el-select></el-form-item>
         <template v-if="sheet.displayCurrency"><el-form-item :label="`1 ${sheet.currency || uiText('原币')} = ${sheet.displayCurrency}`"><el-input-number v-model="sheet.exchangeRate" :controls="false" :min="0" :aria-label="uiText('换算汇率')" :placeholder="uiText('汇率待补')"/></el-form-item><el-form-item :label="uiText('汇率依据日期')"><el-date-picker v-model="sheet.exchangeRateDate" value-format="YYYY-MM-DD" :placeholder="uiText('汇率依据日期')" :aria-label="uiText('汇率依据日期')"/></el-form-item></template>

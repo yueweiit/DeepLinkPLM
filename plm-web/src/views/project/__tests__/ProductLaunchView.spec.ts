@@ -22,6 +22,9 @@ import Product3dMaterials from "../components/Product3dMaterials.vue";
 import ResearchMoldCoding from "../components/ResearchMoldCoding.vue";
 import SupplierFeedbackPanel from "../components/SupplierFeedbackPanel.vue";
 import EngineeringBasisPanel from "../components/EngineeringBasisPanel.vue";
+import ProjectCostWorkspace from "../components/ProjectCostWorkspace.vue";
+import * as financeApi from '@/api/modules/development';
+import * as researchApi from '@/api/modules/productResearch';
 import MoldApplicationFile from '@/views/mold-applications/components/MoldApplicationFile.vue';
 import MoldApplicationDetailDrawer from '@/views/mold-applications/components/MoldApplicationDetailDrawer.vue';
 import PhoneModelMultiSelect from '@/components/PhoneModelMultiSelect/index.vue';
@@ -268,6 +271,7 @@ afterEach(() => {wrapper?.unmount();authorizedBlobs.clear();vi.restoreAllMocks()
 vi.mock("@/api/modules/development", () => ({
   getFinanceRows: vi.fn().mockResolvedValue({ content: [], totalElements: 0 }),
   getFinanceSummary: vi.fn().mockResolvedValue({ currencyGroups: [] }),
+  saveFinanceRows: vi.fn(),
 }));
 const researchContext=()=>({applicationId:null,status:'draft',phoneModelId:null,productLineId:42,form:{model:null as string|null,remark:'改善握持和按键手感'},files:[],sourceSnapshot:{research:{projectId:42,productName:'轻量防摔壳',workflowVersion:2,phoneModelId:null,phoneModelIds:[],references:[],suppliers:[]}}});
 const current = (step=1):any => ({
@@ -983,4 +987,31 @@ it('adopts only the chosen specification and BOM when another group serves the s
  const d=current(7),large='11111111-1111-4111-8111-111111111111',precise='22222222-2222-4222-8222-222222222222';d.workflow.costScopes=[{id:large,name:'大孔',phoneModelIds:[1]},{id:precise,name:'精孔',phoneModelIds:[1]}];
  d.materials.push({type:'bom',id:31,name:'大孔BOM',versionNo:'B1',status:'released'},{type:'bom',id:32,name:'精孔BOM',versionNo:'B1',status:'released'});d.workflow.releaseDraft={phoneModelIds:[1],references:[{type:'bom',id:31}],unitCostKeys:[large+':1']};d.unitCostOptions=[{id:1,title:'大孔成本',bomId:31,costScopeId:large,costScopeName:'大孔',key:large+':1'},{id:2,title:'精孔成本',bomId:32,costScopeId:precise,costScopeName:'精孔',key:precise+':2'}];await launch(d);
  const select=wrapper.get('[data-readiness-target="release-cost"]').getComponent(ElSelect);expect(select.props('modelValue')).toEqual([large+':1']);await select.get('.el-select__wrapper').trigger('click');await flushPromises();expect(select.findAllComponents(ElOption).map(option=>option.props('value'))).toEqual([large+':1']);expect(researchAction).not.toHaveBeenCalled();
+})
+
+it('keeps the actual cost route and selected group when the attribution action returns updated project data',async()=>{
+ const pro='11111111-1111-4111-8111-111111111111',d=record();const draft={title:'归属验收核算',currency:'CNY',taxBasis:'source' as const,useProjectInvestment:false,references:[],rows:[{id:'m',name:'材料',category:'material',mode:'unit' as const,unitPrice:3},{id:'t',name:'摊销',category:'tooling',mode:'unit' as const,unitPrice:3.4}],totals:{manufacturing:3,base:6.4}};d.workflow={...d.workflow,version:1,unitCostDraft:draft,costScopes:[{id:pro,name:'Pro',phoneModelIds:[1]}]};vi.mocked(getProductResearchDetail).mockResolvedValue(d)
+ const router=await start('/product-research-costs?step=initiation&productId=42');await button('设置归属').trigger('click');await flushPromises();const target=wrapper.findAllComponents(ElSelect).find(c=>c.props('ariaLabel')==='归属到开发规格')!;await target.setValue(pro);vi.mocked(researchAction).mockResolvedValueOnce({...d,workflow:{...d.workflow,version:2,unitCostDraft:undefined,costScopes:[{id:pro,name:'Pro',phoneModelIds:[1],unitCostDraft:{...draft,costScopeId:pro}}]}})
+ await button('保存归属').trigger('click');await flushPromises();expect(router.currentRoute.value.path).toBe('/product-research-costs');expect(router.currentRoute.value.query.productId).toBe('42');expect(wrapper.getComponent(ProjectCostWorkspace).findComponent({name:'ProjectCostScopeBar'}).props('selected')).toBe(pro);expect(wrapper.get('input[aria-label="核算名称"]').element).toHaveProperty('value','归属验收核算');expect(wrapper.find('[aria-label="设置成本归属"]').exists()).toBe(false)
+})
+
+it.each([['top Save','ordinary draft'],['source Save then top Save','ordinary draft'],['top Save','pending correction'],['source Save then top Save','pending correction']])('keeps moved draft prices and an untouched %s / %s after attribution-only budget changes',async(entrance,actualKind)=>{
+ const pro='11111111-1111-4111-8111-111111111111',max='22222222-2222-4222-8222-222222222222',d=record();
+ const draft={title:'原价格归属验收',currency:'CNY',taxBasis:'source' as const,useProjectInvestment:true,references:[{type:'file',id:11}],rows:[{id:'m',name:'材料',category:'material',mode:'unit' as const,unitPrice:3,unitCost:3},{id:'t',name:'摊销',category:'tooling',mode:'unit' as const,unitPrice:3.4,unitCost:3.4}],totals:{manufacturing:3,base:6.4}};
+ d.workflow={...d.workflow,version:1,unitCostDraft:draft,costScopes:[{id:pro,name:'Pro',phoneModelIds:[1]},{id:max,name:'Pro Max',phoneModelIds:[2]}]};
+ const moved={...draft,useProjectInvestment:false,costScopeId:pro};let current={...d,workflow:{...d.workflow,version:2,unitCostDraft:undefined,costScopes:[{id:pro,name:'Pro',phoneModelIds:[1],unitCostDraft:moved},{id:max,name:'Pro Max',phoneModelIds:[2]}]}};let budgetMoved=false;
+ const row={entity:'budget' as const,id:7,category:'other',currency:'CNY',amount:100,name:'原预算B7',calculationMode:'manual',costScopeKey:pro};
+ const summary=(changed:boolean)=>({rows:changed?[]:[row],references:[],currencyGroups:[{currency:'CNY',knownTotal:changed?1011700:1011800,missingCount:changed?1:0,complete:!changed,categories:[{category:'mold',knownTotal:1000000,missingCount:0,count:1},{category:'transport',knownTotal:10000,missingCount:0,count:1},{category:'customs',knownTotal:1000,missingCount:0,count:1},{category:'design',knownTotal:500,missingCount:0,count:1},{category:'sample',knownTotal:200,missingCount:0,count:1},{category:'other',knownTotal:changed?null:100,missingCount:changed?1:0,count:changed?0:1}]}]});
+ const untouchedActual={entity:'expense',id:91,category:'other',currency:'CNY',name:'未改动的实际草稿',sourceSystem:'manual',actualStatus:'draft',actualAmount:actualKind==='pending correction'?5000:77,actualDate:'2026-11-06',actualBasis:'原有凭据',amount:null,...(actualKind==='pending correction'?{actualCorrectionOfId:90,aggregateExcluded:true}:{})};
+ const actuals=actualKind==='pending correction'?{rows:[{...untouchedActual,id:90,actualCorrectionOfId:undefined,aggregateExcluded:false,actualStatus:'confirmed',actualAmount:4000,amount:4000},untouchedActual],references:[],currencyGroups:[{currency:'CNY',knownTotal:4000,missingCount:0,categories:[{category:'other',knownTotal:4000,missingCount:0,count:1}]}]}:{rows:[untouchedActual],references:[],currencyGroups:[]};
+ vi.spyOn(financeApi,'getFinanceSummary').mockImplementation(async(entity,q)=>({investment:q?.costScopeKey!==pro?{rows:[],references:[],currencyGroups:[]}:entity==='budget'?summary(budgetMoved):actuals,currencyGroups:[],rule:''})as any);
+ vi.spyOn(financeApi,'getFinanceRows').mockResolvedValue({content:[{budgetId:7,budgetName:'原预算B7',currencyCode:'CNY',calculationMode:'manual',costCategory:'other',budgetAmount:100,costScopeKey:pro,versionNo:2}],totalElements:1}as any);
+ vi.spyOn(financeApi,'saveFinanceRows').mockImplementation(async(entity)=>{if(entity==='budget')budgetMoved=true;return[{status:'saved'}]as any});
+ vi.spyOn(researchApi,'previewUnitCost').mockImplementation(async(_id,input)=>({...input,totals:{manufacturing:3,base:6.4},missing:[],warnings:[]})as any);
+ vi.mocked(getProductResearchDetail).mockResolvedValue(d);vi.mocked(researchAction).mockImplementation(async(_id,action,_version,input)=>{if(action==='unit_cost_assign_scope')return current;expect(action).toBe('unit_cost_save');current={...current,workflow:{...current.workflow,version:3,costScopes:[{id:pro,name:'Pro',phoneModelIds:[1],unitCostDraft:{...input,totals:{manufacturing:3,base:6.4}}as any},{id:max,name:'Pro Max',phoneModelIds:[2]}]}};return current});
+ const router=await start('/product-research-costs?step=initiation&productId=42');await button('设置归属').trigger('click');await flushPromises();await wrapper.findAllComponents(ElSelect).find(c=>c.props('ariaLabel')==='归属到开发规格')!.setValue(pro);await button('保存归属').trigger('click');await flushPromises();
+ await button('查看明细').trigger('click');await flushPromises();const source=wrapper.findAll('.source-row').find(r=>r.text().includes('B7'))!;await source.findAll('button').find(b=>b.text()==='设置归属')!.trigger('click');await flushPromises();await wrapper.findAllComponents(ElSelect).find(c=>c.props('ariaLabel')==='费用成本归属')!.setValue(max);
+ if(entrance==='source Save then top Save'){await button('保存来源资料').trigger('click');await flushPromises()}
+ await wrapper.get('.cost-edit-bar').findAll('button').find(b=>b.text()==='保存')!.trigger('click');await flushPromises();
+ expect(financeApi.saveFinanceRows).toHaveBeenCalledOnce();expect(financeApi.saveFinanceRows).toHaveBeenCalledWith('budget',[expect.objectContaining({id:7,changes:[{field:'costScopeKey',before:pro,after:max}]})]);expect(researchAction).toHaveBeenCalledTimes(2);expect(vi.mocked(researchAction).mock.lastCall![3]).toMatchObject({costScopeId:pro,useProjectInvestment:false,rows:moved.rows,references:moved.references});expect(router.currentRoute.value.path).toBe('/product-research-costs');expect(wrapper.get('[aria-label="成本总览"]').text()).toContain('6.40');expect(button('编辑')).toBeDefined();if(actualKind==='pending correction')expect(wrapper.get('[aria-label="成本总览"]').text()).toContain('4,000.00')
 })

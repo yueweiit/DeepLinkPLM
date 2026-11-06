@@ -22,7 +22,7 @@ public final class FinancialSnapshotRedaction {
             }
             var clean = new LinkedHashMap<String, Object>();
             map.forEach((key, child) -> {
-                if ("quoteEventId".equals(key) || !key.toString().toLowerCase(Locale.ROOT).matches(".*(cost|price|amount|total|quote|deposit).*")) clean.put(key.toString(), withoutMoney(child));
+                if (!Set.of("projectSourceOutlay","sourceOutlay").contains(key)&&("quoteEventId".equals(key) || !key.toString().toLowerCase(Locale.ROOT).matches(".*(cost|price|amount|total|quote|deposit).*"))) clean.put(key.toString(), withoutMoney(child));
             });
             return clean;
         }

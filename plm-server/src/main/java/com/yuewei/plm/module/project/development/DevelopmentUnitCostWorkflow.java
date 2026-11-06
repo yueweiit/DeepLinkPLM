@@ -22,10 +22,11 @@ public class DevelopmentUnitCostWorkflow {
     private final DevelopmentWorkflowStore store;
     private final DevelopmentFinanceService finance;
 
-    public boolean handles(String action) {return Set.of("unit_cost_save","unit_cost_confirm","unit_cost_delete","unit_cost_void","unit_cost_from_bom","unit_cost_group_save","unit_cost_group_delete","unit_cost_group_status").contains(action);}
+    public boolean handles(String action) {return Set.of("unit_cost_save","unit_cost_confirm","unit_cost_delete","unit_cost_void","unit_cost_from_bom","unit_cost_group_save","unit_cost_group_delete","unit_cost_group_status","unit_cost_assign_scope").contains(action);}
     public Map<String,Object> preview(long id,Map<String,Object> input) {access.requirePermission("finance:read");String key=text(input.get("costScopeId"));if(!key.isBlank())DevelopmentCostScopes.find(store.load(id),key,false);return calculator.calculate(projectInvestment(id,clean(input)));}
     public void action(long id,Map<String,Object> state,String action,Map<String,Object> data,ProductDevelopmentService service) {
         access.requireFinanceWrite();
+        if("unit_cost_assign_scope".equals(action)){assignScope(state,data);return;}
         if(action.startsWith("unit_cost_group_")){groupAction(id,state,action,data,service);return;}
         String scopeId=text(data.get("costScopeId"));var projectState=state;state=DevelopmentCostScopes.costState(projectState,scopeId,true);
         if(!scopeId.isBlank()){data.put("costScopeName",state.get("name"));data.put("costScopePhoneModelIds",state.get("phoneModelIds"));}
@@ -66,6 +67,7 @@ public class DevelopmentUnitCostWorkflow {
             require(scopeId.isBlank(),"前期整批投入保留在项目原估算，不复制为组内成本");var source=map(sheet.get("sourceOutlay"));var reference=map(source.get("sourceReference"));
             var file=references.stream().filter(r->"file".equals(r.get("type"))&&number(r.get("id"))==number(reference.get("id"))).findFirst().orElseThrow(()->invalid("请采用前期投入原文件的项目附件版本"));
             require(text(file.get("checksum")).equals(text(source.get("sourceHash")))&&!text(source.get("sourceHash")).isBlank(),"前期投入原文件校验值与采用的附件版本不一致");source.put("sourceVersion",file.get("versionNo"));source.put("sourceFileName",file.get("name"));
+            if(projectState.containsKey("projectSourceOutlay")){sameProjectSource(map(projectState.get("projectSourceOutlay")),source);projectState.put("projectSourceOutlay",source);sheet.remove("sourceOutlay");}
         }
         var previous=map(state.get("unitCostDraft"));
         if(number(previous.get("bomId"))>0&&number(previous.get("bomId"))==number(sheet.get("bomId")))service.sameTechnical(LaunchReviewWorkflow.records(previous.get("references")).stream().filter(r->"bom".equals(r.get("type"))).toList(),references.stream().filter(r->"bom".equals(r.get("type"))).toList());
@@ -94,6 +96,31 @@ public class DevelopmentUnitCostWorkflow {
             if(!quoteBasis){var snapshot=scopeId.isBlank()?boms.recordReviewedUnitCost(id,bom,route,text(sheet.get("currency")),result,store.encode(sheet)):boms.recordReviewedUnitCost(id,bom,route,text(sheet.get("currency")),result,store.encode(sheet),scopeId);sheet.put("bomCostSnapshotId",snapshot.getProductBomCostSnapshotId());}
             versions.add(sheet);state.put("unitCostVersions",versions);state.remove("unitCostDraft");data.put("savedVersionId",revision);
         } else {sheet.put("status","draft");state.put("unitCostDraft",sheet);}
+    }
+    private void assignScope(Map<String,Object> state,Map<String,Object> data){
+        String from=text(data.get("costScopeId")),to=text(data.get("targetCostScopeId"));
+        require(data.containsKey("targetCostScopeId")&&!from.equals(to),"请选择不同的目标开发规格");
+        var source=DevelopmentCostScopes.costState(state,from,true);var target=DevelopmentCostScopes.costState(state,to,true);
+        var draft=map(source.get("unitCostDraft"));require(!draft.isEmpty(),"当前范围没有可归属的单件成本草稿");
+        require(!"confirmed".equals(draft.get("status"))&&!draft.containsKey("confirmedAt")&&!draft.containsKey("bomCostSnapshotId"),"已确认成本版本保留原归属，请使用未确认草稿");
+        require(!target.containsKey("unitCostDraft"),"目标已有成本草稿，请先查看目标草稿；本次不会覆盖");
+        var input=clean(draft);var outlay=map(input.remove("sourceOutlay"));
+        if(!outlay.isEmpty()){
+            require(from.isBlank(),"整批采购来源应保留在项目中，请先核对来源");
+            if(state.containsKey("projectSourceOutlay"))sameProjectSource(map(state.get("projectSourceOutlay")),outlay);
+        }
+        input.put("costScopeId",to);input.remove("costScopeName");input.remove("costScopePhoneModelIds");
+        if(!to.isBlank()){input.put("costScopeName",target.get("name"));input.put("costScopePhoneModelIds",target.get("phoneModelIds"));}
+        // Attribution preserves the saved prices. Linking another group's ledger is a separate explicit edit.
+        input.put("useProjectInvestment",false);var moved=calculator.calculate(input);
+        moved.put("status","draft");moved.put("updatedBy",access.actor().displayName());moved.put("updatedAt",java.time.LocalDateTime.now().toString());
+        if(!outlay.isEmpty()&&!state.containsKey("projectSourceOutlay"))state.put("projectSourceOutlay",outlay);
+        source.remove("unitCostDraft");target.put("unitCostDraft",moved);
+        data.put("fromScopeName",from.isBlank()?"待归属":source.get("name"));data.put("toScopeName",to.isBlank()?"待归属":target.get("name"));
+        data.put("draftTitle",moved.get("title"));data.put("currency",moved.get("currency"));data.put("totals",moved.get("totals"));
+    }
+    private void sameProjectSource(Map<String,Object> current,Map<String,Object> next){
+        require(text(current.get("sourceHash")).equals(text(next.get("sourceHash")))&&number(map(current.get("sourceReference")).get("id"))==number(map(next.get("sourceReference")).get("id"))&&text(current.get("sourceVersion")).equals(text(next.get("sourceVersion"))),"项目已有另一份前期投入来源，请先核对原来源；设置归属不会覆盖项目来源");
     }
     private void groupAction(long id,Map<String,Object> state,String action,Map<String,Object> data,ProductDevelopmentService service){
         var scopes=DevelopmentCostScopes.scopes(state);String key=text(data.get("costScopeId"));var current=key.isBlank()?new LinkedHashMap<String,Object>():DevelopmentCostScopes.find(state,key,false);

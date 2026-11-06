@@ -21,7 +21,7 @@ const simpleDraft = (): Sheet => ({ title: '测试核算', currency: 'CNY', taxB
 async function start(permissions = ['finance:read', 'finance:write'], draft = sourceDraft(), workflow: Record<string, unknown> = {},embedded=false,costScopeId='') {
   const pinia = createPinia(); setActivePinia(pinia); useUserStore().permissions = permissions
   const detail = ref({ productId: 42, status: 'developing', canWrite: true, workflow: { version: 3, unitCostDraft: clone(draft), ...workflow }, materials: [], bomRoutes: [], events: [] } as unknown as ProductResearchDetail)
-  vi.mocked(previewUnitCost).mockResolvedValue(clone(draft))
+  vi.mocked(previewUnitCost).mockImplementation(async(_id,input)=>({...clone(draft),...(input.sourceOutlay?{sourceOutlay:clone(input.sourceOutlay)}:{})}))
   vi.mocked(researchAction).mockImplementation(async (_id, action, _version, input) => {
     const next = clone(detail.value)
     if (action === 'unit_cost_confirm') { next.workflow.unitCostVersions = [{ ...clone(input as Sheet), id: 1, status: 'confirmed' }]; delete next.workflow.unitCostDraft }
@@ -374,4 +374,18 @@ it('saves and reopens the selected cost group without reading a sibling or the p
   expect(wrapper.get('[aria-label="核算名称"]').element).toHaveProperty('value','Pro已保存')
   expect((cell(0,'unitPrice').element as HTMLInputElement).value).toBe('5')
   expect(wrapper.text()).not.toContain('Pro Max')
+})
+it('keeps moved draft prices through group Edit, Save and reopening until the user explicitly links investment',async()=>{
+ const pro='11111111-1111-4111-8111-111111111111';const draft={...simpleDraft(),useProjectInvestment:false,totals:{manufacturing:3,base:6.4}};draft.rows[0].unitPrice=3
+ const {component,editing}=await start(undefined,draft,{},true,pro);expect(previewUnitCost).not.toHaveBeenCalled();editing.value=true;await flushPromises();component.vm.beginEdit();await flushPromises();expect(vi.mocked(previewUnitCost).mock.calls.at(-1)?.[1].useProjectInvestment).toBe(false)
+ vi.mocked(researchAction).mockResolvedValueOnce({productId:42,workflow:{version:4,costScopes:[{id:pro,name:'Pro',phoneModelIds:[1],unitCostDraft:draft}]}}as any);await component.vm.saveProjectCosts();await flushPromises();expect(researchAction).toHaveBeenLastCalledWith(42,'unit_cost_save',3,expect.objectContaining({costScopeId:pro,useProjectInvestment:false,rows:expect.arrayContaining([expect.objectContaining({unitPrice:3})])}));expect((component.vm as any).overview.base).toBe(6.4)
+ const calls=vi.mocked(previewUnitCost).mock.calls.length;wrapper.unmount();await start(undefined,draft,{},true,pro);expect(vi.mocked(previewUnitCost).mock.calls.length).toBe(calls)
+})
+it('edits the single project source through the old draft save while a confirmed version retains its original source',async()=>{
+ const source={currency:'CNY',sourceHash:'current',sourceReference:{type:'file' as const,id:70},rows:[{name:'整批材料',unitPrice:2,quantity:100,transportAmount:20}]};const old={...simpleDraft(),id:8,status:'confirmed',sourceOutlay:{...source,sourceHash:'historical',sourceReference:{type:'file' as const,id:60}}};const draft=simpleDraft();const {component,editing,detail}=await start(undefined,draft,{projectSourceOutlay:source,unitCostVersions:[old]},true);expect((component.vm as any).overview.sourceOutlay.sourceHash).toBe('current');editing.value=true;await flushPromises()
+ vi.mocked(researchAction).mockImplementationOnce(async()=>{const next=clone(detail.value);next.workflow.unitCostDraft=draft;return next});await component.vm.saveProjectCosts();await flushPromises();expect(researchAction).toHaveBeenLastCalledWith(42,'unit_cost_save',3,expect.objectContaining({sourceOutlay:expect.objectContaining({sourceHash:'current'}),references:expect.arrayContaining([{type:'file',id:70}])}));expect((component.vm as any).overview.sourceOutlay.sourceHash).toBe('current')
+ const version=wrapper.findAllComponents(ElSelect).find(c=>c.props('ariaLabel')==='核算版本')!;version.vm.$emit('change','8');await flushPromises();expect((component.vm as any).overview.sourceOutlay.sourceHash).toBe('historical');expect(old.sourceOutlay.sourceHash).toBe('historical')
+})
+it('does not label the remaining project source as a zero-price unit cost after the draft has moved away',async()=>{
+ const draft={...simpleDraft(),rows:[],useProjectInvestment:false,totals:{manufacturing:0,base:0}};const {component}=await start(undefined,draft,{projectSourceOutlay:{currency:'CNY',rows:[{name:'整批来源',unitPrice:2,quantity:100,transportAmount:20}]}},true);expect((component.vm as any).overview).toMatchObject({manufacturing:null,base:null});expect((component.vm as any).overview.sourceOutlay.rows).toHaveLength(1)
 })

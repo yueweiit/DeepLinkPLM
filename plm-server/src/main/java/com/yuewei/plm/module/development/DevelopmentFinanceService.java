@@ -191,6 +191,7 @@ public class DevelopmentFinanceService {
         if(!changed)return new Result(patch.id(),"saved","没有新修改",List.of(),current);
         if(entity.equals("budget")&&(patch.reason()==null||patch.reason().isBlank()))throw invalid("预算修改须填写原因，保留独立版本");
         if(entity.equals("budget")) {
+            if(seen.contains("costScopeKey")&&!same(current.get("costScopeKey"),next.get("costScopeKey"))&&Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from plm_project_cost_item where budget_id=? and deleted_flag=0 and cost_scope_key is distinct from ?)",Boolean.class,patch.id(),next.get("costScopeKey"))))throw invalid("预算已关联不同归属的费用，不能单独修改归属，请在原台账核对关联费用");
             if(next.get("calculationMode").equals("mold_formula")&&seen.contains("budgetAmount")&&next.get("budgetAmount")!=null)throw invalid("公式测算与手工上限不能混用；先清空手工金额或切换手工模式");
         } else {
             if(seen.contains("approvedAmount")||seen.contains("approvalStatus")||seen.contains("state")||current.get("sourceSystem").equals("erp")) access.requireFinanceConfirm();
