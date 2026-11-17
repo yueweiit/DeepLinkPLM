@@ -9,10 +9,12 @@ final class SampleIdentityKeys {
  record Evidence(String key,String domain,Map<String,Object> basis,boolean exact){}
  static Evidence from(Map<String,Object> sample){
   String type=text(sample.get("sourceType"));var source=map(sample.get("sourceSnapshot"));var basis=new LinkedHashMap<String,Object>();
-  for(String f:List.of("sourceType","supplierCode","catalogStyleId","phoneModelId","colorId","catalogConfigurationKey","catalogSpecKey","specId","productId","modelProductId","projectId","sampleKind","sampleVersion"))if(sample.containsKey(f))basis.put(f,sample.get(f));
+  for(String f:List.of("sourceType","supplierCode","catalogStyleId","phoneModelId","phoneModelApplicability","colorId","catalogConfigurationKey","catalogSpecKey","specId","productId","modelProductId","projectId","sampleKind","sampleVersion"))if(sample.containsKey(f))basis.put(f,sample.get(f));
+  boolean noPhone=PartnerCatalogSampleRules.phoneNotApplicable(sample);
   if(Boolean.TRUE.equals(sample.get("pending")))return new Evidence("",Set.of("partner","catalog").contains(type)?"partner":Set.of("model","device","trial").contains(type)?"model":"unclassified",basis,false);
   long style=number(sample.get("catalogStyleId")),phone=number(sample.get("phoneModelId")),color=number(sample.get("colorId"));String config=text(sample.get("catalogConfigurationKey"));
   String material=text(source.get("material")),configuration=text(source.get("configuration"));if(!material.isEmpty())basis.put("technicalMaterial",material);if(!configuration.isEmpty())basis.put("technicalConfiguration",configuration);if(!material.isEmpty()&&!configuration.isEmpty())basis.put("technicalSignature",PartnerQualityRules.digest(new com.fasterxml.jackson.databind.ObjectMapper(),Map.of("material",material,"configuration",configuration)));
+  if(style>0&&noPhone&&color>0&&!config.isEmpty())return new Evidence("catalog:"+style+":"+PartnerCatalogSampleRules.PHONE_NOT_APPLICABLE+":"+color+":"+config,"partner",basis,true);
   if(style>0&&phone>0&&color>0&&!config.isEmpty())return new Evidence("catalog:"+style+":"+phone+":"+color+":"+config,"partner",basis,true);
   if(type.equals("partner")&&number(sample.get("specId"))>0&&!text(sample.get("supplierCode")).isEmpty())return new Evidence("partner:"+sample.get("specId")+":"+sample.get("supplierCode")+":"+text(sample.get("catalogConfigurationKey")),"partner",basis,true);
   if(type.equals("model")&&number(sample.get("modelProductId"))>0&&phone>0&&!text(sample.get("sampleVersion")).isEmpty())return new Evidence("model:"+sample.get("modelProductId")+":"+phone+":"+text(sample.get("sampleVersion")),"model",basis,true);
@@ -25,6 +27,7 @@ final class SampleIdentityKeys {
  }
  private static String label(String field){return switch(field){case "catalogStyleId"->"目录款式";case "phoneModelId"->"手机型号";case "colorId"->"颜色";case "catalogConfigurationKey"->"技术配置";case "sampleVersion"->"样品版本";case "specId"->"实物规格";case "supplierCode"->"供应商";case "technicalMaterial"->"材料";case "technicalConfiguration"->"结构配置";case "technicalSignature"->"技术依据";default->"实物来源";};}
  static void compatible(Map<String,Object> before,Map<String,Object> after){
+  boolean noPhoneBefore=PartnerCatalogSampleRules.phoneNotApplicable(before),noPhoneAfter=PartnerCatalogSampleRules.phoneNotApplicable(after);if(noPhoneBefore||noPhoneAfter)require(noPhoneBefore==noPhoneAfter,"无需手机型号与已关联手机型号或未核实型号的样品不能合并主码");
   String sourceBefore=text(before.get("sourceType")),sourceAfter=text(after.get("sourceType"));if(!sourceBefore.isEmpty()&&!sourceAfter.isEmpty()&&(sourceBefore.equals("device")||sourceAfter.equals("device")))require(sourceBefore.equals(sourceAfter),"真机／模型机与产品样品不是同一种实物，不能合并主码");
   for(String field:List.of("catalogStyleId","phoneModelId","colorId","modelProductId","projectId","sampleKind","catalogConfigurationKey","sampleVersion","specId","supplierCode","technicalMaterial","technicalConfiguration","technicalSignature")){
    if(field.equals("projectId")&&number(before.get("modelProductId"))>0&&number(before.get("modelProductId"))==number(after.get("modelProductId")))continue;
