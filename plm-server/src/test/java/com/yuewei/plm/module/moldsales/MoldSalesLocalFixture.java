@@ -53,6 +53,8 @@ abstract class MoldSalesLocalFixture {
           create table plm_mold_code_source(source_code_id bigint primary key,mold_code text,source_disabled boolean default false);
           """);
         migrate("V20261016_1600__mold_sales_costs.sql");migrate("V20261016_1810__mold_sales_reconciliation.sql");migrate("V20261026_1300__mold_group_actual_cost.sql");migrate("V20261027_1800__mold_sales_archive.sql");migrate("V20261028_1830__sales_history_classification.sql");
+        migrate("V20261120_2230__mold_sales_archive_report_buckets.sql");
+        migrate("V20261120_2300__mold_sales_archive_review_buckets.sql");
         jdbc.update("insert into plm_product(product_id,product_specific_code,product_type,product_name,status) values(1,'FA','product_line','骑士','published')");
         jdbc.update("insert into plm_code_item(code_item_id,code_value,code_name,code_type) values(1,'0057','Existing Phone','phone_model')");
         jdbc.update("insert into plm_collaboration_item(item_id,style_name,compatible_models,product_line_id,phone_model_code_item_id) values(101,'骑士','Phone A',1,1),(102,'骑士','Phone B',1,1)");
@@ -71,6 +73,10 @@ abstract class MoldSalesLocalFixture {
     }
     @AfterEach void cleanup(){if(service!=null)service.close();if(admin!=null&&schema!=null&&schema.matches("mold_cost_qa_[a-f0-9]{32}"))admin.execute("drop schema "+schema+" cascade");}
     void migrate(String name)throws Exception{try(var in=getClass().getResourceAsStream("/db/migration/"+name)){jdbc.execute(new String(Objects.requireNonNull(in).readAllBytes(),StandardCharsets.UTF_8));}}
+    void refreshSyntheticArchive(){
+        jdbc.execute("select plm_refresh_mold_sales_archive_report_bucket()");
+        jdbc.execute("select plm_refresh_mold_sales_archive_review_bucket()");
+    }
     String budgetJson(){return "{\"sourceSha256\":\"qa\",\"rows\":[{\"styleCode\":\"FA\",\"moldManufacturing\":\"700\",\"freight\":\"200\",\"customs\":\"80\",\"fuel\":\"20\",\"landedTotal\":\"1000\",\"currency\":\"CNY\",\"referenceSellingPrice\":\"8\",\"referenceUnitProductionCost\":\"3\"}]}";}
     MoldActualCostStore.Amounts amounts(String amount){return new MoldActualCostStore.Amounts(new BigDecimal(amount),new BigDecimal("100"),new BigDecimal("20"),new BigDecimal("5"));}
     MoldActualCostStore.Update request(Map<String,Object> before,MoldActualCostStore.Amounts amounts){return new MoldActualCostStore.Update(((Number)before.get("version")).longValue(),before.get("groupToken").toString(),amounts,"核对合同、运费和实际发生额");}

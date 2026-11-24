@@ -152,7 +152,39 @@ class PhoneModelReferenceRepositoryTest {
         verify(jdbc,never()).update(anyString(),any(Object[].class));
     }
 
+    @Test void codeFallbackLoadsOnlyTheNamesNeededForExactCoverageIdentity() throws Exception {
+        var products=List.<Map<String,Object>>of(
+            Map.of("productId",1L,"phoneModelId",7L,"identitySource","code","model","SM Galaxy A57"),
+            Map.of("productId",2L,"phoneModelId",7L,"identitySource","code","model","SM Galaxy A57 4G"),
+            Map.of("productId",3L,"phoneModelId",7L,"identitySource","code","model","Galaxy A57 Lite"),
+            Map.of("productId",4L,"phoneModelId",7L,"identitySource","code","model","Galaxy A57 / A58"),
+            Map.of("productId",5L,"phoneModelId",9L,"identitySource","member","model","产品原名称"));
+        when(jdbc.queryForList(anyString(),any(Object[].class))).thenReturn(products);
+        var member=resultRow(Map.of("id",7L,"brandId",1L,"modelName","Samsung Galaxy A57 5G","aliases",new String[]{"SM A57 LITE"}));
+        var brand=resultRow(Map.of("id",1L,"brandId",1L,"name","Samsung","aliases",new String[]{"SM"},"prefixes","[{\"prefix\":\"Galaxy\",\"replacement\":\"\"}]"));
+        when(jdbc.query(contains("where m.id in"),any(RowMapper.class),eq(new Object[]{7L})))
+            .thenAnswer(call->List.of(((RowMapper<?>)call.getArgument(1)).mapRow(member,0)));
+        when(jdbc.query(contains("from plm_phone_brand where id in"),any(RowMapper.class),eq(new Object[]{1L})))
+            .thenAnswer(call->List.of(((RowMapper<?>)call.getArgument(1)).mapRow(brand,0)));
+
+        assertThat(PhoneProductEvidence.rows(jdbc,List.of(7L,9L),"p.product_id<>80"))
+            .containsExactly(products.get(0),products.get(2),products.get(4));
+        verify(jdbc).queryForList(contains("and (p.product_id<>80)"),eq(new Object[]{7L,9L}));
+        var queries=ArgumentCaptor.forClass(String.class);
+        verify(jdbc,times(2)).query(queries.capture(),any(RowMapper.class),any(Object[].class));
+        assertThat(queries.getAllValues()).allSatisfy(sql->assertThat(sql).doesNotContain("source_snapshot","jsonb_array_elements"));
+        verify(jdbc,never()).queryForObject(anyString(),eq(Boolean.class));
+    }
+
     Map<String,Object> projectedPhone(Map<String,Object> values) throws Exception {
+        var rs=resultRow(values);
+        when(jdbc.query(anyString(),any(RowMapper.class),any(Object[].class)))
+            .thenAnswer(call->List.of(((RowMapper<?>)call.getArgument(1)).mapRow(rs,0)));
+        sourcePresent(false);
+        return repository.phone(((Number)values.get("phoneModelId")).longValue(),false);
+    }
+
+    private java.sql.ResultSet resultRow(Map<String,Object> values) throws Exception {
         var rs=mock(java.sql.ResultSet.class);var metadata=mock(java.sql.ResultSetMetaData.class);
         when(rs.getMetaData()).thenReturn(metadata);when(metadata.getColumnCount()).thenReturn(values.size());
         int column=0;for(var entry:values.entrySet()) {
@@ -161,10 +193,7 @@ class PhoneModelReferenceRepositoryTest {
                 var array=mock(java.sql.Array.class);when(array.getArray()).thenReturn(aliases);when(rs.getObject(column)).thenReturn(array);
             } else when(rs.getObject(column)).thenReturn(entry.getValue());
         }
-        when(jdbc.query(anyString(),any(RowMapper.class),any(Object[].class)))
-            .thenAnswer(call->List.of(((RowMapper<?>)call.getArgument(1)).mapRow(rs,0)));
-        sourcePresent(false);
-        return repository.phone(((Number)values.get("phoneModelId")).longValue(),false);
+        return rs;
     }
 
 }

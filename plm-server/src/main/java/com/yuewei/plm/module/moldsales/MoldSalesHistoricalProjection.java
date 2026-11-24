@@ -8,7 +8,9 @@ import com.yuewei.plm.module.moldreference.PhoneProductEvidence;
 import com.yuewei.plm.module.pilot.PilotAccessService;
 import java.math.BigDecimal;
 import java.util.*;
+import java.util.regex.Pattern;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** Sales attribution is derived from immutable original rows, never from invented mold records. */
 final class MoldSalesHistoricalProjection {
@@ -39,11 +41,14 @@ final class MoldSalesHistoricalProjection {
         }
     }
     private record Category(String slug,String name,String targetStyle) {}
-    private record Bucket(String style,String phone,String itemCode,String source,String originalProduct,boolean sealed,String originalClassification,JsonNode evidence,String displayPhoneCode,String displayName,String mappingReason,BigDecimal quantity,long lines,List<String> names,java.time.LocalDate firstOrderDate) {}
+    private record Bucket(String style,String phone,String itemCode,String source,String originalProduct,boolean sealed,String originalClassification,JsonNode evidence,String displayPhoneCode,String displayName,String mappingReason,BigDecimal quantity,BigDecimal lifetimeQuantity,long lines,long lifetimeLines,String saleNames,java.time.LocalDate firstOrderDate) {}
     private record Attribution(String classification,String productKey,Long productId,String productName,String targetStyle,String reason) {}
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
     private final String eligible;
+    private final MoldSalesPeriod period;
+    private final boolean reportOnly;
+    private final Map<String,Map<String,Object>> physicalTotals=new HashMap<>();
     private final List<Map<String,Object>> salesGroups=new ArrayList<>(),reviewGroups=new ArrayList<>();
     private final Map<String,List<Bucket>> selections=new LinkedHashMap<>(),extras=new LinkedHashMap<>();
     private final Map<String,Map<String,Object>> reviewByKey=new LinkedHashMap<>();
@@ -59,7 +64,11 @@ final class MoldSalesHistoricalProjection {
         this(jdbc,json,access,existing,profiles,ignored,null);
     }
     MoldSalesHistoricalProjection(JdbcTemplate jdbc,ObjectMapper json,PilotAccessService access,List<Map<String,Object>> existing,Set<String> profiles,Set<String> ignored,SourceScope requested){
-        this.jdbc=jdbc;this.json=json;this.eligible=MoldSalesRules.factEligibleSql(profiles);this.administrator=access.actor().allPermissions();this.ignored=ignored;
+        this(jdbc,json,access,existing,profiles,ignored,requested,MoldSalesPeriod.ALL_TIME,false);
+    }
+
+    MoldSalesHistoricalProjection(JdbcTemplate jdbc,ObjectMapper json,PilotAccessService access,List<Map<String,Object>> existing,Set<String> profiles,Set<String> ignored,SourceScope requested,MoldSalesPeriod period,boolean reportOnly){
+        this.jdbc=jdbc;this.json=json;this.eligible=MoldSalesRules.factEligibleSql(profiles);this.period=period;this.administrator=access.actor().allPermissions();this.ignored=ignored;this.reportOnly=reportOnly;
         for(var group:existing){var aliases=new HashSet<String>();if(group.get("salesAliases") instanceof Collection<?> values)for(var value:values)if(value instanceof JsonNode alias)aliases.add(alias.path("phoneCode").asText());var originalCodes=new HashSet<String>();if(group.get("productionRecords") instanceof Collection<?> records)for(var record:records)if(record instanceof Map<?,?> item)originalCodes.add(text(item.get("phoneCode")));
             for(String code:strings(group.get("phoneCodes"))){String key=group.get("styleCode")+":"+code;physical.put(key,group);if(!aliases.contains(code)||originalCodes.contains(code))physicalIdentity.put(key,group);}
         }
@@ -73,22 +82,147 @@ final class MoldSalesHistoricalProjection {
             if(!physical.isEmpty()){var pairs=new ArrayList<String>();for(String key:new TreeSet<>(physical.keySet())){var parts=key.split(":",2);pairs.add("(?,?)");scopeArgs.add(parts[0]);scopeArgs.add(parts[1]);}scopes.add("(f.style_code,f.phone_code) in ("+String.join(",",pairs)+")");}
             var visibleBaPhones=new TreeSet<String>();for(String key:physicalIdentity.keySet())if(key.startsWith("BA:"))visibleBaPhones.add(key.substring(3));
             if(roots.containsKey("BA")||!visibleBaPhones.isEmpty()){
-                var aliases=CATEGORIES.entrySet().stream().filter(e->"BA".equals(e.getValue().targetStyle())).map(Map.Entry::getKey).sorted().toList();String transparent="(h.source_id is not null and f.style_code='AB' and lower(regexp_replace(btrim("+ORIGINAL_PRODUCT+"),'\\s+',' ','g')) in ("+String.join(",",Collections.nCopies(aliases.size(),"?"))+")";scopeArgs.addAll(aliases);
+                String isSealed=reportOnly?"f.sealed":"h.source_id is not null";
+                var aliases=CATEGORIES.entrySet().stream().filter(e->"BA".equals(e.getValue().targetStyle())).map(Map.Entry::getKey).sorted().toList();String transparent="("+isSealed+" and f.style_code='AB' and lower(regexp_replace(btrim(f.original_product),'\\s+',' ','g')) in ("+String.join(",",Collections.nCopies(aliases.size(),"?"))+")";scopeArgs.addAll(aliases);
                 if(!roots.containsKey("BA")){transparent+=" and f.phone_code in ("+String.join(",",Collections.nCopies(visibleBaPhones.size(),"?"))+")";scopeArgs.addAll(visibleBaPhones);}scopes.add(transparent+")");
             }
         }
-        String scope="("+String.join(" or ",scopes)+")";if(requested!=null)scope+=" and "+requested.sql("f",scopeArgs);
-        String sql="select f.style_code as style,f.phone_code as phone,f.item_code as code,f.source_kind as source,"+ORIGINAL_PRODUCT+" as product,(h.source_id is not null) as sealed,coalesce(g.classification,'') as classification,coalesce(g.evidence,'{}'::jsonb)::text as evidence,coalesce(h.display_phone_code,'') as \"displayPhoneCode\",coalesce(h.display_name,'') as \"displayName\",coalesce(h.mapping_reason,'') as \"mappingReason\",sum(f.quantity) as quantity,min(f.business_date) as \"firstOrderDate\",count(*) as lines,array_to_json(array_agg(distinct coalesce(f.source_data->>'name','')))::text as names from (select * from plm_mold_sales_fact where "+eligible+") f left join plm_mold_sales_history_line h on f.source_kind='eccount' and h.source_id="+sealedSourceId("f")+" left join plm_mold_sales_history_group g on g.batch_id=h.batch_id and g.style_code=h.style_code and g.phone_code=h.phone_code where "+scope+" group by f.style_code,f.phone_code,f.item_code,f.source_kind,"+ORIGINAL_PRODUCT+",h.source_id is not null,g.classification,g.evidence,h.display_phone_code,h.display_name,h.mapping_reason";
-        var rows=scopeArgs.isEmpty()?jdbc.queryForList(sql):jdbc.queryForList(sql,scopeArgs.toArray());
+        String scope="("+String.join(" or ",scopes)+")";
+        var rows=reportOnly?reportBuckets(profiles,scope,scopeArgs):evidenceBuckets(requested,scope,scopeArgs);
         for(var row:rows){
-            var bucket=new Bucket(text(row.get("style")),text(row.get("phone")),text(row.get("code")),text(row.get("source")),text(row.get("product")),Boolean.TRUE.equals(row.get("sealed")),text(row.get("classification")),node(row.get("evidence")),text(row.get("displayPhoneCode")),text(row.get("displayName")),text(row.get("mappingReason")),amount(row.get("quantity")),number(row.get("lines")),texts(node(row.get("names"))),MoldSalesRules.date(row.get("firstOrderDate")));
+            var bucket=new Bucket(text(row.get("style")),text(row.get("phone")),text(row.get("code")),text(row.get("source")),text(row.get("product")),Boolean.TRUE.equals(row.get("sealed")),text(row.get("classification")),reportOnly?null:node(row.get("evidence")),text(row.get("displayPhoneCode")),text(row.get("displayName")),text(row.get("mappingReason")),amount(row.get("quantity")),amount(row.get("lifetimeQuantity")),number(row.get("lines")),number(row.get("lifetimeLines")),text(row.get("names")),MoldSalesRules.date(row.get("firstOrderDate")));
+            if(reportOnly)accumulatePhysical(bucket,row);
             var attribution=resolve(bucket);
             if(administrator&&(bucket.sealed()||attribution.classification().equals("pending")||attribution.classification().equals("historical_reference")))review(bucket,attribution);
             if(attribution.productKey()!=null&&!attribution.classification().equals("purchased"))sale(bucket,attribution);
         }
         salesGroups.addAll(salesByKey.values());reviewGroups.addAll(reviewByKey.values());
-        reviewGroups.sort(Comparator.<Map<String,Object>,BigDecimal>comparing(g->amount(g.get("quantity"))).reversed().thenComparing(g->text(g.get("sourceGroupKey"))));
+        if(!reportOnly){
+            for(var row:reviewGroups){
+                @SuppressWarnings("unchecked") var evidence=(Map<String,Object>)row.get("evidence");
+                evidence.put("originalNamesWithQuantity",String.join(" / ",strings(evidence.get("originalNames"))));
+            }
+            reviewGroups.sort(Comparator.<Map<String,Object>,BigDecimal>comparing(g->amount(g.get("quantity"))).reversed().thenComparing(g->text(g.get("sourceGroupKey"))));
+        }
     }
+
+    private List<Map<String,Object>> reportBuckets(Set<String> profiles,String scope,List<Object> scopeArgs){
+        var arguments=new ArrayList<Object>();
+        String archiveQuantity="a.quantity",archiveLines="a.line_count",archivePeriod="";
+        if(period.dateFrom()!=null&&!period.dateFrom().isBefore(MoldSalesArchiveStore.CUTOFF)){
+            // No pre-CRM dates can match this period, but the lifetime fallback still matters.
+            archiveQuantity="0";
+            archiveLines="0::bigint";
+        }else if(period.bounded()){
+            archiveQuantity="coalesce(period.quantity,0)";
+            archiveLines="coalesce(period.lines,0)";
+            archivePeriod="""
+                left join lateral (
+                  select sum(d.quantity) as quantity,sum(d.lines)::bigint as lines
+                  from unnest(a.order_days,a.day_quantities,a.day_lines) d(day,quantity,lines)
+                  where %s
+                ) period on true
+                """.formatted(period.sql("d.day",arguments));
+        }
+        String livePeriod=period.sql("business_date",arguments);
+        boolean compactPhysical=!physical.isEmpty();
+        String keysJoin="";
+        if(compactPhysical){
+            arguments.add(json.valueToTree(new TreeSet<>(physical.keySet())).toString());
+            keysJoin="left join jsonb_array_elements_text(?::jsonb) matched(group_key) on matched.group_key=(f.style_code||':'||f.phone_code) and f.style_code<>'AB'";
+        }
+        arguments.addAll(scopeArgs);
+        String item=physicalField(compactPhysical,"f.item_code");
+        String product=physicalField(compactPhysical,"f.original_product");
+        String name=physicalField(compactPhysical,"f.sale_name");
+        String sql="""
+            select f.style_code as style,f.phone_code as phone,%s as code,f.source_kind as source,
+              %s as product,f.sealed,f.classification,f.display_name as "displayName",
+              coalesce(sum(f.period_quantity),0) as quantity,sum(f.lifetime_quantity) as "lifetimeQuantity",
+              min(f.first_order_date) as "firstOrderDate",sum(f.period_lines)::bigint as lines,sum(f.lifetime_lines)::bigint as "lifetimeLines",
+              coalesce(sum(f.pending),0) as pending,coalesce(sum(f.partial),0) as partial,
+              array_to_json(array_agg(distinct %s))::text as names
+            from (
+              select a.style_code,a.phone_code,a.item_code,'eccount'::text as source_kind,
+                a.original_product,a.sale_name,a.sealed,a.classification,a.display_name,a.first_order_date,
+                %s as period_quantity,a.quantity as lifetime_quantity,%s as period_lines,a.line_count as lifetime_lines,
+                0::numeric as pending,0::numeric as partial
+              from plm_mold_sales_archive_report_bucket a %s
+              where %s
+              union all
+              select r.style_code,r.phone_code,r.item_code,r.source_kind,r.original_product,r.sale_name,
+                h.source_id is not null,coalesce(g.classification,''),coalesce(h.display_name,''),r.business_date,
+                case when r.in_period then r.quantity else 0 end,r.quantity,r.in_period::int,1,
+                case when r.in_period and r.source_kind='crm' and %s then r.quantity else 0 end,
+                case when r.in_period and r.source_kind='crm' and %s then r.quantity else 0 end
+              from (
+                select style_code,phone_code,item_code,source_kind,business_date,quantity,source_id,order_status,
+                  coalesce(source_data->'raw'->>'product','') as original_product,
+                  coalesce(source_data->>'name','') as sale_name,%s as in_period
+                from plm_mold_sales_fact
+                where (source_kind='crm' or eligibility='unconfirmed_order') and %s
+              ) r
+              left join plm_mold_sales_history_line h on r.source_kind='eccount' and h.source_id=%s
+              left join plm_mold_sales_history_group g on g.batch_id=h.batch_id and g.style_code=h.style_code and g.phone_code=h.phone_code
+            ) f %s
+            where %s
+            group by f.style_code,f.phone_code,%s,f.source_kind,%s,f.sealed,f.classification,f.display_name
+            """.formatted(item,product,name,archiveQuantity,archiveLines,archivePeriod,
+                MoldSalesRules.archiveFinishedSql(profiles,"a.item_code"),MoldSalesRules.pendingDeliverySql(),MoldSalesRules.partialDeliverySql(),
+                livePeriod,eligible,sealedSourceId("r"),keysJoin,scope,item,product);
+        if(TransactionSynchronizationManager.isActualTransactionActive()){
+            jdbc.execute("set local jit=off");
+            jdbc.execute("set local work_mem='32MB'");
+        }
+        return arguments.isEmpty()?jdbc.queryForList(sql):jdbc.queryForList(sql,arguments.toArray());
+    }
+
+    private List<Map<String,Object>> evidenceBuckets(SourceScope requested,String scope,List<Object> scopeArgs){
+        var arguments=new ArrayList<Object>();
+        String inPeriod=period.sql("business_date",arguments);
+        String requestedScope=requested==null?"true":requested.sql("",arguments);
+        arguments.addAll(scopeArgs);
+        // Project names before sorting buckets so the group aggregate need not spool raw order JSON.
+        String sql="""
+            select f.style_code as style,f.phone_code as phone,f.item_code as code,f.source_kind as source,
+              f.original_product as product,(h.source_id is not null) as sealed,coalesce(g.classification,'') as classification,
+              coalesce(h.display_name,'') as "displayName",coalesce(g.evidence,'{}'::jsonb)::text as evidence,
+              coalesce(h.display_phone_code,'') as "displayPhoneCode",coalesce(h.mapping_reason,'') as "mappingReason",
+              coalesce(sum(f.quantity) filter (where f.in_period),0) as quantity,sum(f.quantity) as "lifetimeQuantity",
+              min(f.business_date) as "firstOrderDate",count(*) filter (where f.in_period) as lines,count(*) as "lifetimeLines",
+              array_to_json(array_agg(distinct f.sale_name))::text as names
+            from (
+              select style_code,phone_code,item_code,source_kind,business_date,quantity,source_id,
+                coalesce(source_data->'raw'->>'product','') as original_product,
+                coalesce(source_data->>'name','') as sale_name,%s as in_period
+              from plm_mold_sales_fact where %s and %s %s
+            ) f
+            left join plm_mold_sales_history_line h on f.source_kind='eccount' and h.source_id=%s
+            left join plm_mold_sales_history_group g on g.batch_id=h.batch_id and g.style_code=h.style_code and g.phone_code=h.phone_code
+            where %s
+            group by f.style_code,f.phone_code,f.item_code,f.source_kind,f.original_product,h.source_id is not null,
+              g.classification,g.evidence,h.display_phone_code,h.display_name,h.mapping_reason
+            """.formatted(inPeriod,eligible,requestedScope,administrator?"offset 0":"",sealedSourceId("f"),scope);
+        return arguments.isEmpty()?jdbc.queryForList(sql):jdbc.queryForList(sql,arguments.toArray());
+    }
+
+    private static String physicalField(boolean compact,String field){
+        return compact?"case when matched.group_key is null then "+field+" else '' end":field;
+    }
+
+    private void accumulatePhysical(Bucket b,Map<String,Object> row){
+        String key=row.get("style")+":"+row.get("phone");
+        // Sealed AB orders use original product names for attribution below; physical style/phone totals exclude them.
+        if(!physical.containsKey(key)||(b.source().equals("eccount")&&b.style().equals("AB")&&b.sealed()))return;
+        var total=physicalTotals.computeIfAbsent(key,ignored->new HashMap<>());
+        total.put("firstOrderDate",MoldSalesRules.earlier(MoldSalesRules.date(total.get("firstOrderDate")),b.firstOrderDate()));
+        total.merge("qty",b.quantity(),(a,v)->amount(a).add((BigDecimal)v));
+        total.merge("lifetime",b.lifetimeQuantity(),(a,v)->amount(a).add((BigDecimal)v));
+        total.merge(b.source(),b.quantity(),(a,v)->amount(a).add((BigDecimal)v));
+        for(String field:List.of("pending","partial"))total.merge(field,row.get(field),(a,v)->amount(a).add((BigDecimal)v));
+    }
+
+    Map<String,Object> physicalTotals(String key){return physicalTotals.get(key);}
 
     private void loadCatalogue(){
         var phoneCounts=new HashMap<String,Integer>();for(var r:jdbc.queryForList("select code_value,count(*) n from plm_code_item where code_type='phone_model' and deleted_flag=0 group by code_value"))phoneCounts.put(text(r.get("code_value")),((Number)r.get("n")).intValue());
@@ -137,7 +271,7 @@ final class MoldSalesHistoricalProjection {
         }
         String key="history:"+b.style()+":"+(b.style().equals("AB")?category(b.originalProduct()).slug()+":":"")+b.phone();
         var group=salesByKey.computeIfAbsent(key,k->{var g=new LinkedHashMap<String,Object>();g.put("sourceGroupKey",k);g.put("groupId",null);g.put("itemIds",List.of());g.put("productKey",a.productKey());g.put("productLineId",a.productId());g.put("styleName",a.productName());g.put("productName",a.productName());g.put("styleCode",a.targetStyle()==null?b.style():a.targetStyle());g.put("phoneCodes",new TreeSet<>(Set.of(b.phone())));g.put("modelNames",new LinkedHashSet<String>());g.put("originalProductNames",new LinkedHashSet<String>());g.put("physicalSets",null);g.put("physicalSetsKnown",false);g.put("productionRecords",List.of());g.put("readonly",true);g.put("sourceOnly",true);g.put("salesScopeOnly",true);g.put("canWriteCost",false);g.put("salesQuantity",BigDecimal.ZERO);g.put("sourceBreakdown",new LinkedHashMap<String,Object>(Map.of("eccount",BigDecimal.ZERO,"crm",BigDecimal.ZERO)));g.put("historyReviewRows",0L);g.put("associationReason",a.reason());return g;});
-        mergeNames(group,"modelNames",b.names());if(!b.displayName().isBlank())mergeNames(group,"modelNames",List.of(b.displayName()));if(!b.originalProduct().isBlank())mergeNames(group,"originalProductNames",List.of(b.originalProduct()));
+        mergeNames(group,"modelNames",names(b));if(!b.displayName().isBlank())mergeNames(group,"modelNames",List.of(b.displayName()));if(!b.originalProduct().isBlank())mergeNames(group,"originalProductNames",List.of(b.originalProduct()));
         MoldSalesRules.openingDate(group,null,MoldSalesRules.earlier(MoldSalesRules.date(group.get("openedDate")),b.firstOrderDate()));
         group.put("salesQuantity",amount(group.get("salesQuantity")).add(b.quantity()));addSource(group,b);group.put("historyReviewRows",number(group.get("historyReviewRows"))+b.lines());
         selections.computeIfAbsent(key,k->new ArrayList<>()).add(b);
@@ -147,9 +281,16 @@ final class MoldSalesHistoricalProjection {
 
     private void review(Bucket b,Attribution a){
         String key="review:"+b.style()+":"+b.phone()+":"+a.classification()+":"+(a.productKey()==null?"unresolved":a.productKey().replace(':','-'));
-        var row=reviewByKey.computeIfAbsent(key,k->{var r=new LinkedHashMap<String,Object>();r.put("sourceGroupKey",k);r.put("styleCode",b.style());r.put("phoneCode",b.phone());r.put("productKey",a.productKey());r.put("productLineId",a.productId());r.put("classification",a.classification());r.put("quantity",BigDecimal.ZERO);r.put("lineCount",0L);var e=new LinkedHashMap<String,Object>();e.put("styleName",a.productName().isBlank()?(roots.containsKey(b.style())?text(roots.get(b.style()).get("productName")):b.evidence().path("styleName").asText(b.style())):a.productName());e.put("phoneName",b.evidence().path("phoneName").asText(b.names().isEmpty()?"原编码 "+b.phone():String.join(" / ",b.names())));e.put("sourceMoldCodes",b.evidence().path("sourceMoldCodes"));e.put("originalMoldCodes",b.evidence().path("originalMoldCodes").asText());e.put("missingEvidence",a.reason());e.put("recommendation",a.reason());e.put("originalItemCodes",new TreeSet<String>());e.put("originalProductNames",new TreeSet<String>());e.put("originalNames",new TreeSet<String>());e.put("displayNames",new TreeSet<String>());e.put("displayPhoneCodes",new TreeSet<String>());e.put("originalNamesWithQuantity","");e.put("nameReview",b.evidence().path("nameReview").asText());e.put("nameCandidates",b.evidence().path("nameCandidates").asText());e.put("codeConflict",b.evidence().path("codeConflict").asBoolean());r.put("evidence",e);return r;});
-        row.put("quantity",amount(row.get("quantity")).add(b.quantity()));row.put("lineCount",number(row.get("lineCount"))+b.lines());
-        @SuppressWarnings("unchecked") var evidence=(Map<String,Object>)row.get("evidence");mergeNames(evidence,"originalItemCodes",List.of(b.itemCode()));mergeNames(evidence,"originalProductNames",List.of(b.originalProduct()));mergeNames(evidence,"originalNames",b.names());mergeNames(evidence,"displayNames",List.of(b.displayName()));mergeNames(evidence,"displayPhoneCodes",List.of(b.displayPhoneCode()));evidence.put("originalNamesWithQuantity",String.join(" / ",strings(evidence.get("originalNames"))));
+        var row=reviewByKey.computeIfAbsent(key,k->{
+            var r=new LinkedHashMap<String,Object>();r.put("classification",a.classification());r.put("quantity",BigDecimal.ZERO);r.put("lineCount",0L);
+            if(reportOnly)return r;
+            r.put("sourceGroupKey",k);r.put("styleCode",b.style());r.put("phoneCode",b.phone());r.put("productKey",a.productKey());r.put("productLineId",a.productId());
+            var e=new LinkedHashMap<String,Object>();var names=names(b);e.put("styleName",a.productName().isBlank()?(roots.containsKey(b.style())?text(roots.get(b.style()).get("productName")):b.evidence().path("styleName").asText(b.style())):a.productName());e.put("phoneName",b.evidence().path("phoneName").asText(names.isEmpty()?"原编码 "+b.phone():String.join(" / ",names)));e.put("sourceMoldCodes",b.evidence().path("sourceMoldCodes"));e.put("originalMoldCodes",b.evidence().path("originalMoldCodes").asText());e.put("missingEvidence",a.reason());e.put("recommendation",a.reason());e.put("originalItemCodes",new TreeSet<String>());e.put("originalProductNames",new TreeSet<String>());e.put("originalNames",new TreeSet<String>());e.put("displayNames",new TreeSet<String>());e.put("displayPhoneCodes",new TreeSet<String>());e.put("nameReview",b.evidence().path("nameReview").asText());e.put("nameCandidates",b.evidence().path("nameCandidates").asText());e.put("codeConflict",b.evidence().path("codeConflict").asBoolean());r.put("evidence",e);return r;
+        });
+        // Reconciliation is an independent maintenance queue, not bounded by a report's order dates.
+        row.put("quantity",amount(row.get("quantity")).add(b.lifetimeQuantity()));row.put("lineCount",number(row.get("lineCount"))+b.lifetimeLines());
+        if(reportOnly)return;
+        @SuppressWarnings("unchecked") var evidence=(Map<String,Object>)row.get("evidence");mergeNames(evidence,"originalItemCodes",List.of(b.itemCode()));mergeNames(evidence,"originalProductNames",List.of(b.originalProduct()));mergeNames(evidence,"originalNames",names(b));mergeNames(evidence,"displayNames",List.of(b.displayName()));mergeNames(evidence,"displayPhoneCodes",List.of(b.displayPhoneCode()));
         selections.computeIfAbsent(key,k->new ArrayList<>()).add(b);
     }
 
@@ -162,6 +303,9 @@ final class MoldSalesHistoricalProjection {
     List<Map<String,Object>> pendingRows(){var result=new ArrayList<Map<String,Object>>();for(var original:reviewGroups)if(original.get("classification").equals("pending")){var row=new LinkedHashMap<String,Object>();row.put("styleCode",original.get("styleCode"));row.put("phoneCode",original.get("phoneCode"));row.put("quantity",original.get("quantity"));row.put("lines",original.get("lineCount"));@SuppressWarnings("unchecked") var evidence=(Map<String,Object>)original.get("evidence");row.put("names",json.valueToTree(evidence.get("originalNames")));result.add(row);}return result;}
     java.time.LocalDate attributedFirstOrderDate(String key){return extras.getOrDefault(key,List.of()).stream().map(Bucket::firstOrderDate).filter(Objects::nonNull).min(java.time.LocalDate::compareTo).orElse(null);}
     BigDecimal attributedQuantity(String key){return extras.getOrDefault(key,List.of()).stream().map(Bucket::quantity).reduce(BigDecimal.ZERO,BigDecimal::add);}
+    BigDecimal lifetimeAttributedQuantity(String key){return lifetimeQuantity(extras.getOrDefault(key,List.of()));}
+    BigDecimal lifetimeSalesQuantity(String key){return lifetimeQuantity(selections.getOrDefault(key,List.of()));}
+    private static BigDecimal lifetimeQuantity(List<Bucket> buckets){return buckets.stream().map(Bucket::lifetimeQuantity).reduce(BigDecimal.ZERO,BigDecimal::add);}
     Map<String,BigDecimal> attributedSources(String key){var totals=new LinkedHashMap<String,BigDecimal>(Map.of("eccount",BigDecimal.ZERO,"crm",BigDecimal.ZERO));for(var bucket:extras.getOrDefault(key,List.of()))totals.merge(bucket.source(),bucket.quantity(),BigDecimal::add);return totals;}
     Map<String,Object> metadata(Map<String,Object> initial){var result=new LinkedHashMap<>(initial);result.put("initialSummary",initial.get("summary"));var current=summary();result.put("summary",current);result.put("liveSummary",current);return result;}
 
@@ -172,7 +316,7 @@ final class MoldSalesHistoricalProjection {
     }
     Map<String,Object> reviewDetail(String key,int page,int size){var group=reviewByKey.get(key);require(group!=null,"历史资料不存在或未获授权");var result=orders(key,page,size);result.put("group",group);result.put("sourceLabel","原始销售订单");result.put("mappingScope","sales_attribution_only");return result;}
     Map<String,Object> orders(String key,int page,int size){
-        require(page>0&&size>0&&size<=100,"分页参数无效");var buckets=selections.get(key);require(buckets!=null&&!buckets.isEmpty(),"历史销量组不存在或未获授权");var args=new ArrayList<Object>();String where=selectionSql(buckets,args);var total=jdbc.queryForObject("select count(*) from plm_mold_sales_fact f where "+eligible+" and ("+where+")",Long.class,args.toArray());args.add(size);args.add((long)(page-1)*size);
+        require(page>0&&size>0&&size<=100,"分页参数无效");var buckets=selections.get(key);require(buckets!=null&&!buckets.isEmpty(),"历史销量组不存在或未获授权");var args=new ArrayList<Object>();String where=selectionSql(buckets,args)+" and "+period.sql("f.business_date",args);var total=jdbc.queryForObject("select count(*) from plm_mold_sales_fact f where "+eligible+" and ("+where+")",Long.class,args.toArray());args.add(size);args.add((long)(page-1)*size);
         String fields="f.source_id as \"sourceId\",f.order_id as \"orderId\",f.order_no as \"orderNo\",f.order_status as \"orderStatus\",f.item_code as \"itemCode\",f.phone_code as \"phoneCode\",f.quantity,f.unit,'eligible' as eligibility,coalesce(f.source_data->>'name','') as name,coalesce(f.source_data->>'name','') as \"originalName\","+ORIGINAL_PRODUCT+" as \"originalProductName\",f.source_data->>'spec' as specification,f.business_date::text as \"orderDate\",f.business_date::text as \"businessDate\",f.source_kind as source,f.company,f.source_file as \"sourceFile\",f.source_sheet as \"sourceSheet\",f.source_row as \"sourceRow\",hh.display_phone_code as \"displayPhoneCode\",hh.display_name as \"displayName\",hh.mapping_reason as \"mappingReason\"";
         var rows=jdbc.queryForList("select "+fields+" from (select * from plm_mold_sales_fact where "+eligible+") f left join plm_mold_sales_history_line hh on f.source_kind='eccount' and hh.source_id="+sealedSourceId("f")+" where ("+where+") order by f.business_date desc,f.source_id limit ? offset ?",args.toArray());var result=new LinkedHashMap<String,Object>();result.put("orders",rows);result.put("totalElements",total);result.put("page",page);result.put("size",size);return result;
     }
@@ -191,13 +335,14 @@ final class MoldSalesHistoricalProjection {
         Map.entry("rainbow transparente亮甲透色",new Category("rainbow-transparente","亮甲（透明色）","BA")),Map.entry("rainbow transparente",new Category("rainbow-transparente","亮甲（透明色）","BA")),
         Map.entry("rainbow pintura",new Category("rainbow-pintura","RAINBOW PINTURA",null)),
         Map.entry("rainbow doble亮甲渐变",new Category("rainbow-doble","亮甲渐变（历史品名）",null)),Map.entry("rainbow doble",new Category("rainbow-doble","亮甲渐变（历史品名）",null)));
-    private static Category category(String original){return CATEGORIES.get(original.strip().replaceAll("\\s+"," ").toLowerCase(Locale.ROOT));}
+    private static final Pattern NAME_SPACE=Pattern.compile("\\s+");
+    private static Category category(String original){return CATEGORIES.get(NAME_SPACE.matcher(original.strip()).replaceAll(" ").toLowerCase(Locale.ROOT));}
     private JsonNode node(Object value){try{return json.readTree(value.toString());}catch(Exception e){throw new IllegalStateException(e);}}
-    private static List<String> texts(JsonNode values){var result=new ArrayList<String>();for(var value:values)result.add(value.asText());return result;}
+    private List<String> names(Bucket b){var result=new ArrayList<String>();for(var value:node(b.saleNames()))result.add(value.asText());return result;}
     @SuppressWarnings("unchecked") private static Collection<String> strings(Object value){return value==null?List.of():(Collection<String>)value;}
     @SuppressWarnings("unchecked") private static void mergeNames(Map<String,Object> target,String key,Collection<String> names){for(String name:names)if(!name.isBlank())((Collection<String>)target.get(key)).add(name);}
     private static String text(Object value){return Objects.toString(value,"");}
     private static long number(Object value){return value instanceof Number n?n.longValue():0;}
-    private static BigDecimal amount(Object value){return value==null?BigDecimal.ZERO:new BigDecimal(value.toString());}
+    private static BigDecimal amount(Object value){return value instanceof BigDecimal n?n:value==null?BigDecimal.ZERO:new BigDecimal(value.toString());}
     private static void require(boolean valid,String message){if(!valid)throw new BusinessException(40001,message);}
 }

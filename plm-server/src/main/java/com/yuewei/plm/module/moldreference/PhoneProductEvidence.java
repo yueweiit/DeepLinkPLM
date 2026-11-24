@@ -1,11 +1,14 @@
 package com.yuewei.plm.module.moldreference;
 
 import java.util.*;
+import java.util.regex.Pattern;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Existing product/SKU anchors, without turning a catalogue record into verified mold stock. */
 public final class PhoneProductEvidence {
     private PhoneProductEvidence() {}
+    private static final Pattern HAS_NETWORK=Pattern.compile(".* [45]g$");
+    private static final Pattern NETWORK_SUFFIX=Pattern.compile(" [45]g$");
     public static String historicalSkuSql(String p) {
         return "("+p+".project_kind is null and nullif(btrim("+p+".finished_product_code),'') is not null and ("+p+".product_type='sku' or ("+p+".product_type='model_variant' and nullif(btrim("+p+".color),'') is not null)))";
     }
@@ -63,36 +66,63 @@ public final class PhoneProductEvidence {
               and %s in (%s)
             order by p.product_id
             """.formatted(identity,historicalSkuSql("p"),inherited,memberRelationSql("p","source_phone.phone_model_id"),inherited,skuParentIdentitySql("p","parent"),scope,identity,ids),phones.toArray());
-        var repository=new PhoneModelReferenceRepository(jdbc);var members=repository.members(phones);var brands=new HashMap<Long,Map<String,Object>>();repository.allBrands().forEach(b->brands.put(((Number)b.get("brandId")).longValue(),b));
+        var codePhones=rows.stream().filter(product->"code".equals(product.get("identitySource")))
+            .map(product->((Number)product.get("phoneModelId")).longValue()).distinct().toList();
+        if(codePhones.isEmpty())return List.copyOf(rows);
+        var repository=new PhoneModelReferenceRepository(jdbc);
+        var members=repository.identityMembers(codePhones);
+        var brands=repository.identityBrands(members.values().stream().map(phone->((Number)phone.get("brandId")).longValue()).distinct().toList());
+        var matcher=new FamilyMatcher();
         // One code can describe a combination even before every member has been created.
         // A raw code is therefore insufficient to assign a different product model to the sole current member.
         return rows.stream().filter(product->{
             if(!"code".equals(product.get("identitySource")))return true;
-            var phone=members.get(((Number)product.get("phoneModelId")).longValue());if(phone==null)return false;
+            long id=((Number)product.get("phoneModelId")).longValue();
+            var phone=members.get(id);if(phone==null)return false;
             var brand=brands.get(((Number)phone.get("brandId")).longValue());String model=Objects.toString(product.get("model"),"");
-            return brand!=null&&PhoneIdentityMatcher.isSingleModel(model)&&sameFamily(model,phone,brand);
+            return brand!=null&&PhoneIdentityMatcher.isSingleModel(model)&&matcher.sameFamily(model,id,phone,brand);
         }).toList();
     }
     public static List<Map<String,Object>> matchingPhones(JdbcTemplate jdbc,List<Map<String,Object>> phones,List<Map<String,Object>> brands) {
         var byId=new HashMap<Long,Map<String,Object>>();phones.forEach(p->byId.put(((Number)p.get("phoneModelId")).longValue(),p));
         var byBrand=new HashMap<Long,Map<String,Object>>();brands.forEach(b->byBrand.put(((Number)b.get("brandId")).longValue(),b));
         var aliases=new HashMap<Long,Set<String>>();
+        var matcher=new FamilyMatcher();
         for(var product:rows(jdbc,phones.stream().map(p->((Number)p.get("phoneModelId")).longValue()).toList(),"true")) {
             String model=Objects.toString(product.get("model"),"");
             long id=((Number)product.get("phoneModelId")).longValue();var phone=byId.get(id);var brand=byBrand.get(((Number)phone.get("brandId")).longValue());
-            if(brand!=null&&PhoneIdentityMatcher.isSingleModel(model)&&sameFamily(model,phone,brand))aliases.computeIfAbsent(id,k->new LinkedHashSet<>()).add(model);
+            if(brand!=null&&PhoneIdentityMatcher.isSingleModel(model)&&matcher.sameFamily(model,id,phone,brand))aliases.computeIfAbsent(id,k->new LinkedHashSet<>()).add(model);
         }
         return phones.stream().map(phone->{var row=new LinkedHashMap<>(phone);row.put("matchingAliases",List.copyOf(aliases.getOrDefault(((Number)phone.get("phoneModelId")).longValue(),Set.of())));return (Map<String,Object>)row;}).toList();
     }
-    @SuppressWarnings("unchecked") private static boolean sameFamily(String model,Map<String,Object> phone,Map<String,Object> brand) {
-        String key=PhoneIdentityMatcher.modelKey(model,brand);var names=new ArrayList<String>();names.add(phone.get("modelName").toString());names.addAll((List<String>)phone.getOrDefault("aliases",List.of()));
-        for(String name:names)if(PhoneIdentityMatcher.isSingleModel(name)) {
-            String standard=PhoneIdentityMatcher.modelKey(name,brand);
-            if(key.replace(" ","").equals(standard.replace(" ","")))return true;
-            // A real product anchor may prove an omitted network suffix; explicit 4G vs 5G never agrees.
-            boolean a=key.matches(".* [45]g$"),b=standard.matches(".* [45]g$");
-            if(a!=b&&key.replaceAll(" [45]g$","").replace(" ","").equals(standard.replaceAll(" [45]g$","").replace(" ","")))return true;
+    private record FamilyKey(String compact,String withoutNetwork,boolean hasNetwork) {}
+    private static final class FamilyMatcher {
+        private final Map<Long,Map<String,FamilyKey>> keysByBrand=new HashMap<>();
+        private final Map<Long,List<FamilyKey>> keysByPhone=new HashMap<>();
+
+        @SuppressWarnings("unchecked")
+        boolean sameFamily(String model,long phoneId,Map<String,Object> phone,Map<String,Object> brand) {
+            var brandKeys=keysByBrand.computeIfAbsent(((Number)brand.get("brandId")).longValue(),key->new HashMap<>());
+            var key=key(model,brand,brandKeys);
+            var standards=keysByPhone.computeIfAbsent(phoneId,id->{
+                var names=new ArrayList<String>();
+                names.add(phone.get("modelName").toString());
+                names.addAll((List<String>)phone.getOrDefault("aliases",List.of()));
+                return names.stream().filter(PhoneIdentityMatcher::isSingleModel).map(name->key(name,brand,brandKeys)).toList();
+            });
+            for(var standard:standards){
+                if(key.compact().equals(standard.compact()))return true;
+                // An exact product anchor can establish a missing suffix. Explicit 4G and 5G stay distinct.
+                if(key.hasNetwork()!=standard.hasNetwork()&&key.withoutNetwork().equals(standard.withoutNetwork()))return true;
+            }
+            return false;
         }
-        return false;
+
+        private FamilyKey key(String name,Map<String,Object> brand,Map<String,FamilyKey> brandKeys) {
+            return brandKeys.computeIfAbsent(name,value->{
+                String model=PhoneIdentityMatcher.modelKey(value,brand);
+                return new FamilyKey(model.replace(" ",""),NETWORK_SUFFIX.matcher(model).replaceAll("").replace(" ",""),HAS_NETWORK.matcher(model).matches());
+            });
+        }
     }
 }

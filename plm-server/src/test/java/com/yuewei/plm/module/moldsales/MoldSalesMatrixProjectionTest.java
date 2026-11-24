@@ -68,6 +68,7 @@ class MoldSalesMatrixProjectionTest {
         var g=group(101,1,"code:0057","Phone A / Phone B","300");g.put("phoneModelIds",List.of());g.put("modelKind","shared");
         var cover=Map.of(7L,List.<Map<String,Object>>of(Map.of("productLineId",1L,"productLineName","骑士","state","needs_review","molds",List.of(Map.of("itemId",101L)),"applications",List.of())));
         var result=rows(List.of(g),cover,List.of(phone(7,10,"Phone A")),List.of(product(1,"骑士")),null,null,"","all");assertThat(result).hasSize(1);assertThat(result.get(0)).containsEntry("totalSalesQuantity",new BigDecimal("300"));
+        assertThat(rows(List.of(g),cover,List.of(phone(7,10,"New display label")),List.of(product(1,"骑士")),null,null,"New display label","all")).isEmpty();
     }
     @Test void disconnectedSnapshotPreservesUnknownQuantityInNestedGroupChoices(){
         var g=group(101,1,"phone:7","Phone A","0");g.put("salesQuantity",null);var result=MoldSalesMatrixProjection.rows(List.of(g),Map.of(),List.of(),List.of(product(1,"骑士")),null,null,"","all",false);

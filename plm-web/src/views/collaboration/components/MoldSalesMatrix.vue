@@ -12,8 +12,14 @@ onMounted(()=>{if(typeof ResizeObserver!=='undefined'){observer=new ResizeObserv
 onBeforeUnmount(()=>observer?.disconnect())
 const stacked=computed(()=>width.value>0&&width.value<376+props.products.length*120)
 const columns=computed(()=>`78px minmax(170px,1.6fr) ${props.products.map(()=>'minmax(90px,1fr)').join(' ')} 100px`)
-const qty=(n:number|null|undefined)=>n==null?'—':new Intl.NumberFormat('zh-CN',{maximumFractionDigits:0}).format(n)
-function cell(row:MoldSalesMatrixRow,product:SalesProductOption){return row.cells.find(c=>productKey(c)===productKey(product))}
+const quantityFormat=new Intl.NumberFormat('zh-CN',{maximumFractionDigits:0})
+const qty=(n:number|null|undefined)=>n==null?'—':quantityFormat.format(n)
+const productColumns=computed(()=>props.products.map(product=>({product,key:productKey(product)})))
+const rows=computed(()=>props.data?.content.map(row=>{
+ const byProduct=new Map(row.cells.map(cell=>[productKey(cell),cell]))
+ return {row,modelNames:row.modelNames.join(' / '),cells:productColumns.value.map(column=>({...column,value:byProduct.get(column.key)}))}
+})??[])
+const totals=computed(()=>new Map(props.data?.productTotals.map(total=>[productKey(total),total.salesQuantity])))
 const clickable=(value:MoldSalesMatrixCell|undefined)=>!!value&&((value.sourceGroupKeys?.length||0)>0||value.groupIds.length>0||value.applicationIds.length>0||value.itemIds?.length>0)
 const tone=(state?:string)=>({reusable:'ready',confirmed:'ready',making:'active',planned:'waiting',applying:'waiting',draft:'waiting',paused:'review',terminated:'review'}[state||'']||'neutral')
 const visibleState=(value:MoldSalesMatrixCell|undefined)=>!!value?.stateLabel&&value.stateLabel!=='—'&&!['historical','needs_review'].includes(value.state)
@@ -23,19 +29,19 @@ function open(value:MoldSalesMatrixCell|undefined,row:MoldSalesMatrixRow){if(val
  <div ref="root" class="sales-matrix" :class="{'is-stacked':stacked}" :style="{'--matrix-columns':columns}" role="table" :aria-label='uiText("手机型号产品销量总览")'>
   <div class="matrix-row matrix-head" role="row"><span role="columnheader">{{ uiText("品牌") }}</span><span role="columnheader">{{ uiText("手机型号 / 编码") }}</span><span v-for="p in products" :key="productKey(p)" role="columnheader">{{p.productName}}</span><span role="columnheader">{{ uiText("已选产品合计") }}</span></div>
   <div class="matrix-body">
-   <article v-for="row in data?.content" :key="row.rowKey" class="matrix-row matrix-record" role="row">
+   <article v-for="{row,modelNames,cells} in rows" :key="row.rowKey" class="matrix-row matrix-record" role="row">
     <div class="brand-cell" role="cell"><small class="record-label">{{ uiText("品牌") }}</small><strong>{{row.brandNames.join(' / ')||uiText('未登记品牌')}}</strong></div>
-    <div class="model-cell" role="cell"><small class="record-label">{{ uiText("手机型号") }}</small><strong>{{row.modelNames.join(' / ')||uiText('未登记型号')}}</strong><div class="model-meta"><small v-if="row.phoneCodes.length">{{ uiText("编码 ") }}{{row.phoneCodes.join(' / ')}}</small><span v-if="row.modelKind==='shared'" class="model-badge">{{ uiText("通用组合 · 合计一次") }}</span></div><small class="model-opening-date" :title="row.openedDateSource==='first_order'?uiText('按首笔有效订单日期补充'):undefined">{{ uiText("开模日期") }} {{row.openedDate||'—'}}</small></div>
-    <div v-for="p in products" :key="productKey(p)" class="product-cell" role="cell" :data-product-id="p.productLineId" :data-product-key="productKey(p)">
-     <small class="record-label">{{p.productName}}</small>
-     <button v-if="clickable(cell(row,p))" class="matrix-cell-button" :aria-label="uiText('{value0} · {value1} · {value2}',{value0:(p.productName),value1:(row.modelNames.join(' / ')),value2:(cell(row,p)?.stateLabel||'查看依据')})" @click="open(cell(row,p),row)"><strong>{{qty(cell(row,p)?.salesQuantity)}}<small v-if="cell(row,p)?.salesQuantity!=null">{{ uiText("件") }}</small></strong><span v-if="visibleState(cell(row,p))" class="state-label" :class="tone(cell(row,p)?.state)">{{uiText(String((cell(row,p)?.stateLabel) ?? ''))}}</span></button>
-     <template v-else><strong class="plain-quantity">{{qty(cell(row,p)?.salesQuantity)}}</strong><span v-if="visibleState(cell(row,p))" class="state-label" :class="tone(cell(row,p)?.state)">{{uiText(String((cell(row,p)?.stateLabel) ?? ''))}}</span></template>
+    <div class="model-cell" role="cell"><small class="record-label">{{ uiText("手机型号") }}</small><strong>{{modelNames||uiText('未登记型号')}}</strong><div class="model-meta"><small v-if="row.phoneCodes.length">{{ uiText("编码 ") }}{{row.phoneCodes.join(' / ')}}</small><span v-if="row.modelKind==='shared'" class="model-badge" :title='uiText("通用组合 · 合计一次")'>{{ uiText("通用组合") }}</span></div><small class="model-opening-date" :title="row.openedDateSource==='first_order'?uiText('按首笔有效订单日期补充'):undefined">{{ uiText("开模日期") }} {{row.openedDate||'—'}}</small></div>
+    <div v-for="{product,key,value} in cells" :key="key" class="product-cell" role="cell" :data-product-id="product.productLineId" :data-product-key="key">
+     <small class="record-label">{{product.productName}}</small>
+     <button v-if="clickable(value)" class="matrix-cell-button" :aria-label="uiText('{value0} · {value1} · {value2}',{value0:product.productName,value1:modelNames,value2:value?.stateLabel||'查看依据'})" @click="open(value,row)"><strong>{{qty(value?.salesQuantity)}}<small v-if="value?.salesQuantity!=null">{{ uiText("件") }}</small></strong><span v-if="visibleState(value)" class="state-label" :class="tone(value?.state)">{{uiText(value?.stateLabel??'')}}</span></button>
+     <template v-else><strong class="plain-quantity">{{qty(value?.salesQuantity)}}</strong><span v-if="visibleState(value)" class="state-label" :class="tone(value?.state)">{{uiText(value?.stateLabel??'')}}</span></template>
     </div>
     <div class="matrix-total" role="cell"><small class="record-label">{{ uiText("已选产品合计") }}</small><button v-if="row.cells.some(c=>c.groupIds.length||c.sourceGroupKeys?.length)" @click="emit('total',row)">{{qty(row.totalSalesQuantity)}}<small>{{ uiText("件") }}</small></button><strong v-else>{{qty(row.totalSalesQuantity)}}</strong></div>
    </article>
    <el-empty v-if="data&&!data.content.length" :description="products.length?uiText('当前筛选范围暂无型号记录'):uiText('请先选择要查看的产品列')"/>
   </div>
-  <div v-if="data&&products.length" class="matrix-row matrix-foot" role="row"><strong class="summary-label">{{ uiText("当前筛选合计") }}</strong><div v-for="p in products" :key="productKey(p)" role="cell"><small class="record-label">{{p.productName}}</small><strong>{{qty(data.productTotals.find(t=>productKey(t)===productKey(p))?.salesQuantity)}}</strong></div><div class="matrix-total" role="cell"><small class="record-label">{{ uiText("已选产品合计") }}</small><strong>{{qty(data.totalSalesQuantity)}}</strong></div></div>
+  <div v-if="data&&products.length" class="matrix-row matrix-foot" role="row"><strong class="summary-label">{{ uiText("当前筛选合计") }}</strong><div v-for="{product,key} in productColumns" :key="key" role="cell"><small class="record-label">{{product.productName}}</small><strong>{{qty(totals.get(key))}}</strong></div><div class="matrix-total" role="cell"><small class="record-label">{{ uiText("已选产品合计") }}</small><strong>{{qty(data.totalSalesQuantity)}}</strong></div></div>
  </div>
 </template>
 <style scoped>

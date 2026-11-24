@@ -7,6 +7,7 @@ import java.util.*;
 /** The matrix repositions existing groups. A shared quantity is placed in exactly one cell. */
 final class MoldSalesMatrixProjection {
     private MoldSalesMatrixProjection(){}
+    private record PhoneProduct(long phoneId,long productId) {}
     static Set<Long> ids(Object value){var ids=new TreeSet<Long>();if(value instanceof Collection<?> values)for(var v:values)if(v instanceof Number n)ids.add(n.longValue());return ids;}
     private static long id(Object value){return value instanceof Number n?n.longValue():0;}
     private static BigDecimal quantity(Object v){return v==null?BigDecimal.ZERO:new BigDecimal(v.toString());}
@@ -16,8 +17,10 @@ final class MoldSalesMatrixProjection {
         case "applying"->"申请中";case "draft"->"申请草稿";case "catalogued"->"已建产品资料";case "historical"->"历史档案·适配待核对";
         case "needs_review"->"待核对";case "paused"->"已暂停";case "terminated"->"已终止";default->"—";};}
     static boolean matches(Map<String,Object> g,String keyword,String filter){
-        String search=List.of("styleName","productName","styleCode","modelNames","canonicalModelNames","phoneCodes","canonicalPhoneCodes","brandNames").stream().map(k->Objects.toString(g.get(k),"")).reduce("",(a,b)->a+" "+b);
-        if(!keyword.isBlank()&&!search.toLowerCase(Locale.ROOT).contains(keyword.strip().toLowerCase(Locale.ROOT)))return false;
+        if(!keyword.isBlank()){
+            String search=List.of("styleName","productName","styleCode","modelNames","canonicalModelNames","phoneCodes","canonicalPhoneCodes","brandNames").stream().map(k->Objects.toString(g.get(k),"")).reduce("",(a,b)->a+" "+b);
+            if(!search.toLowerCase(Locale.ROOT).contains(keyword.strip().toLowerCase(Locale.ROOT)))return false;
+        }
         var production=g.get("production") instanceof Map<?,?> p?p:Map.of();
         return switch(filter){
             case "withSales"->quantity(g.get("salesQuantity")).signum()>0;
@@ -36,26 +39,42 @@ final class MoldSalesMatrixProjection {
     static List<Map<String,Object>> rows(List<Map<String,Object>> groups,Map<Long,List<Map<String,Object>>> coverage,List<Map<String,Object>> phones,List<Map<String,Object>> products,List<Long> selected,Long brandId,String keyword,String filter,boolean connected,List<String> selectedKeys){
         var allowed=new LinkedHashMap<String,Map<String,Object>>();for(var p:products){String key=MoldSalesHistoricalProjection.productKey(p);if(selectedKeys==null?(selected==null||p.get("productLineId")!=null&&selected.contains(id(p.get("productLineId")))):selectedKeys.contains(key))allowed.put(key,p);}
         var rows=new LinkedHashMap<String,Map<String,Object>>();var seenGroups=new HashSet<String>();
-        for(var g:groups){long productId=id(g.get("productLineId"));String product=MoldSalesHistoricalProjection.productKey(g),sourceGroupKey=MoldSalesHistoricalProjection.groupKey(g);if(!allowed.containsKey(product)||brandId!=null&&!ids(g.get("brandIds")).contains(brandId)||!matches(g,keyword,filter)||!seenGroups.add(sourceGroupKey))continue;
+        var linkedItemsByProduct=new HashMap<Long,Set<Long>>();
+        for(var g:groups){
+            long productId=id(g.get("productLineId"));
+            String product=MoldSalesHistoricalProjection.productKey(g),sourceGroupKey=MoldSalesHistoricalProjection.groupKey(g);
+            var itemIds=ids(g.get("itemIds"));
+            // Even filtered-out order groups still own their registered mold links.
+            if(allowed.containsKey("product:"+productId)&&!itemIds.isEmpty()){
+                linkedItemsByProduct.computeIfAbsent(productId,ignored->new HashSet<>()).addAll(itemIds);
+            }
+            if(!allowed.containsKey(product)||brandId!=null&&!ids(g.get("brandIds")).contains(brandId)||!matches(g,keyword,filter)||!seenGroups.add(sourceGroupKey))continue;
             String key=Objects.toString(g.get("rowKey"));var row=rows.computeIfAbsent(key,k->row(k,g.get("brandIds"),g.get("brandNames"),g.get("modelNames"),g.get("canonicalPhoneCodes"),g.get("phoneModelIds"),g.get("modelKind")));
             mergeNames(row,"modelNames",g.get("modelNames"));mergeNames(row,"modelNames",g.getOrDefault("canonicalModelNames",List.of()));mergeNames(row,"phoneCodes",g.get("canonicalPhoneCodes"));mergeNames(row,"phoneModelIds",g.get("phoneModelIds"));mergeBrands(row,g);
             var cell=cell(row,product,g.get("productLineId"),connected);MoldSalesRules.mergeOpeningDate(cell,g);MoldSalesRules.mergeOpeningDate(row,g);var cellGroups=records(cell.get("groups"));var sourceGroup=new LinkedHashMap<String,Object>();sourceGroup.put("groupId",g.get("groupId"));sourceGroup.put("sourceGroupKey",sourceGroupKey);sourceGroup.put("readonly",Boolean.TRUE.equals(g.get("readonly")));sourceGroup.put("modelNames",modelNames(g));sourceGroup.put("phoneCodes",g.get("phoneCodes"));sourceGroup.put("salesQuantity",g.get("salesQuantity"));if(g.containsKey("sourceBreakdown"))sourceGroup.put("sourceBreakdown",g.get("sourceBreakdown"));cellGroups.add(sourceGroup);addSources(cell,g);cell.put("historyReviewRows",id(cell.get("historyReviewRows"))+id(g.get("historyReviewRows")));
-            if(g.get("groupId")!=null)((Set<Long>)cell.get("groupIds")).add(id(g.get("groupId")));((Set<String>)cell.get("sourceGroupKeys")).add(sourceGroupKey);((Set<Long>)cell.get("itemIds")).addAll(ids(g.get("itemIds")));if(connected)cell.put("salesQuantity",quantity(cell.get("salesQuantity")).add(quantity(g.get("salesQuantity"))));
+            if(g.get("groupId")!=null)((Set<Long>)cell.get("groupIds")).add(id(g.get("groupId")));((Set<String>)cell.get("sourceGroupKeys")).add(sourceGroupKey);((Set<Long>)cell.get("itemIds")).addAll(itemIds);if(connected)cell.put("salesQuantity",quantity(cell.get("salesQuantity")).add(quantity(g.get("salesQuantity"))));
             var states=(List<String>)cell.get("states");states.add("historical");var registered=new HashMap<Long,Long>();
             for(long phone:Boolean.TRUE.equals(g.get("salesScopeOnly"))?Set.<Long>of():ids(g.get("phoneModelIds")))for(var c:coverage.getOrDefault(phone,List.of()))if(id(c.get("productLineId"))==productId){
-                for(var mold:records(c.get("molds")))if(ids(g.get("itemIds")).contains(id(mold.get("itemId")))){states.add(Objects.toString(mold.get("state"),"needs_review"));registered.merge(id(mold.get("itemId")),id(mold.get("registeredSets")),Math::max);}
-                for(var app:records(c.get("applications")))if(ids(g.get("itemIds")).contains(id(app.get("itemId")))){states.add(Objects.toString(app.get("coverageState"),"applying"));((Set<Long>)cell.get("applicationIds")).add(id(app.get("applicationId")));}
+                for(var mold:records(c.get("molds")))if(itemIds.contains(id(mold.get("itemId")))){states.add(Objects.toString(mold.get("state"),"needs_review"));registered.merge(id(mold.get("itemId")),id(mold.get("registeredSets")),Math::max);}
+                for(var app:records(c.get("applications")))if(itemIds.contains(id(app.get("itemId")))){states.add(Objects.toString(app.get("coverageState"),"applying"));((Set<Long>)cell.get("applicationIds")).add(id(app.get("applicationId")));}
             }
             cell.put("registeredSets",id(cell.get("registeredSets"))+registered.values().stream().mapToLong(Long::longValue).sum());
+        }
+        var represented=new HashSet<PhoneProduct>();
+        for(var row:rows.values()){
+            var members=ids(row.get("phoneModelIds"));
+            for(var cell:records(row.get("cells")))if(!((Collection<?>)cell.get("sourceGroupKeys")).isEmpty()){
+                for(long member:members)represented.add(new PhoneProduct(member,id(cell.get("productLineId"))));
+            }
         }
         // Coverage has the same ACLs and exact ID links as market-watch. No market source is needed.
         for(var phone:phones){long phoneId=id(phone.get("phoneModelId"));if(brandId!=null&&id(phone.get("brandId"))!=brandId)continue;
             for(var cover:coverage.getOrDefault(phoneId,List.of())){long product=id(cover.get("productLineId"));if(!allowed.containsKey("product:"+product))continue;String key="phone:"+phoneId;
-                var linkedGroups=groups.stream().filter(g->id(g.get("productLineId"))==product&&records(cover.get("molds")).stream().anyMatch(m->ids(g.get("itemIds")).contains(id(m.get("itemId"))))).toList();
                 // Existing archive coverage is already represented by its complete shared row. Never
                 // add a second standard-phone row with a zero quantity pointing at the same orders.
-                if(!linkedGroups.isEmpty())continue;
-                boolean represented=rows.values().stream().filter(r->ids(r.get("phoneModelIds")).contains(phoneId)).flatMap(r->records(r.get("cells")).stream()).anyMatch(c->id(c.get("productLineId"))==product&&!((Collection<?>)c.get("sourceGroupKeys")).isEmpty());if(represented)continue;
+                var linkedItems=linkedItemsByProduct.getOrDefault(product,Set.of());
+                if(records(cover.get("molds")).stream().anyMatch(m->linkedItems.contains(id(m.get("itemId"))))
+                    ||represented.contains(new PhoneProduct(phoneId,product)))continue;
                 var pseudo=new HashMap<String,Object>();pseudo.put("modelNames",List.of(phone.get("modelName")));pseudo.put("phoneCodes",List.of(Objects.toString(phone.get("phoneCode"),"")));pseudo.put("brandNames",List.of(phone.get("brandName")));pseudo.put("productName",cover.get("productLineName"));pseudo.put("unmapped",Objects.toString(phone.get("phoneCode"),"").isBlank());if(!matches(pseudo,keyword,filter))continue;
                 var row=rows.computeIfAbsent(key,k->row(k,List.of(phone.get("brandId")),List.of(phone.get("brandName")),List.of(phone.get("modelName")),List.of(Objects.toString(phone.get("phoneCode"),"")),List.of(phoneId),"single"));
                 var cell=cell(row,"product:"+product,product,connected);((List<String>)cell.get("states")).add(Objects.toString(cover.get("state"),"uncovered"));cell.put("registeredSets",cover.getOrDefault("registeredSets",0));

@@ -111,11 +111,32 @@ public class PhoneModelReferenceRepository {
             .forEach(r->out.put(((Number)r.get("id")).longValue(),r));
         return out;
     }
+    Map<Long,Map<String,Object>> identityMembers(List<Long> ids) {
+        return identityRows("""
+            select m.id,m.brand_id as "brandId",m.model_name as "modelName",m.aliases
+            from plm_phone_model_member m join plm_phone_brand b on b.id=m.brand_id where m.id in
+            """,ids);
+    }
+    Map<Long,Map<String,Object>> identityBrands(List<Long> ids) {
+        return identityRows("""
+            select id,id as "brandId",name,aliases,prefixes::text as prefixes from plm_phone_brand where id in
+            """,ids);
+    }
+    private Map<Long,Map<String,Object>> identityRows(String sql,List<Long> ids) {
+        if(ids.isEmpty())return Map.of();
+        var result=new HashMap<Long,Map<String,Object>>();
+        queryRows(sql+"("+String.join(",",Collections.nCopies(ids.size(),"?"))+")",ids.toArray())
+            .forEach(row->result.put(((Number)row.get("id")).longValue(),row));
+        return result;
+    }
     private Map<String,Object> one(String sql,long id) {
         var list=rows(sql,id);return list.isEmpty()?null:list.get(0);
     }
     private List<Map<String,Object>> rows(String sql,Object... args) {
-        List<Map<String,Object>> selected=jdbc.query(sql,(rs,n)-> {
+        return withCurrentSource(queryRows(sql,args));
+    }
+    private List<Map<String,Object>> queryRows(String sql,Object... args) {
+        return jdbc.query(sql,(rs,n)-> {
             var row=new LinkedHashMap<String,Object>();var metadata=rs.getMetaData();
             for(int i=1;i<=metadata.getColumnCount();i++) {
                 Object value=rs.getObject(i);
@@ -134,7 +155,6 @@ public class PhoneModelReferenceRepository {
             }
             return row;
         },args);
-        return withCurrentSource(selected);
     }
     /** V20261014_1720 also reads here before the later planning/source migrations exist.
      * Keep the original identity query replayable; optional CRM provenance is one batched projection,

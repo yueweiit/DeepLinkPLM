@@ -17,13 +17,29 @@ final class MoldSalesReconciliation {
         for(String raw:jdbc.queryForList("select decisions::text from plm_mold_sales_reconciliation order by created_at,batch_id",String.class)){
             try{for(var d:json.readTree(raw))result.decisions.put(key(d.path("styleCode").asText(),d.path("phoneCode").asText()),d);}catch(Exception e){throw new IllegalStateException("关联依据读取失败",e);}
         }
-        if(result.decisions.values().stream().anyMatch(MoldSalesReconciliation::codeBased)){
+        var reviewedCodeIds=new LinkedHashSet<Long>();
+        for(var decision:result.decisions.values()){
+            var codes=decision.path("codeBasis").path("codes");
+            if(codeBased(decision)&&codes.isArray())for(var source:codes)reviewedCodeIds.add(source.path("sourceCodeId").asLong());
+        }
+        if(!reviewedCodeIds.isEmpty()){
             var codes=new HashMap<Long,String>();
-            for(var row:jdbc.queryForList("select source_code_id,mold_code from plm_mold_code_source where not source_disabled"))codes.put(((Number)row.get("source_code_id")).longValue(),Objects.toString(row.get("mold_code"),"").trim().toUpperCase(Locale.ROOT));
+            String placeholders=String.join(",",Collections.nCopies(reviewedCodeIds.size(),"?"));
+            for(var row:jdbc.queryForList("select source_code_id,mold_code from plm_mold_code_source where not source_disabled and source_code_id in ("+placeholders+")",reviewedCodeIds.toArray())){
+                codes.put(((Number)row.get("source_code_id")).longValue(),Objects.toString(row.get("mold_code"),"").trim().toUpperCase(Locale.ROOT));
+            }
             for(var entry:result.decisions.entrySet())if(validCodeBasis(entry.getValue(),codes))result.validCodeBindings.add(entry.getKey());
         }
-        if(!result.decisions.isEmpty())for(var row:jdbc.queryForList("select style_code,phone_code,array_to_json(array_agg(distinct coalesce(source_data->>'name','')))::text names from plm_mold_sales_fact where source_kind='crm' and eligibility='eligible' group by style_code,phone_code")){
-            String k=key(row.get("style_code").toString(),row.get("phone_code").toString());var d=result.decisions.get(k);if(d==null||codeBased(d))continue;
+        var reviewedNames=result.decisions.values().stream().filter(d->!codeBased(d)).toList();
+        if(reviewedNames.isEmpty())return result;
+        var arguments=new ArrayList<Object>(reviewedNames.size()*2);
+        for(var decision:reviewedNames){
+            arguments.add(decision.path("styleCode").asText());
+            arguments.add(decision.path("phoneCode").asText());
+        }
+        String pairs=String.join(",",Collections.nCopies(reviewedNames.size(),"(?,?)"));
+        for(var row:jdbc.queryForList("select style_code,phone_code,array_to_json(array_agg(distinct coalesce(source_data->>'name','')))::text names from plm_mold_sales_fact where source_kind='crm' and eligibility='eligible' and (style_code,phone_code) in ("+pairs+") group by style_code,phone_code",arguments.toArray())){
+            String k=key(row.get("style_code").toString(),row.get("phone_code").toString());var d=result.decisions.get(k);
             try{for(var name:json.readTree(row.get("names").toString()))if(!contains(d.path("sourceNames"),name.asText()))result.changedSources.add(k);}catch(Exception e){throw new IllegalStateException(e);}
         }
         return result;
