@@ -15,6 +15,7 @@ public class PhoneModelCoverageService {
     private com.yuewei.plm.module.manufacturing.ManufacturingIdentityService manufacturing;
     public static final List<String> STATES=List.of("uncovered","catalogued","draft","applying","planned","making","partial","confirmed","reusable","paused","terminated","needs_review");
     private static final List<String> PRIORITY=List.of("reusable","making","partial","confirmed","planned","applying","draft","catalogued","needs_review","paused","terminated","uncovered");
+    private record PhoneArchive(long phoneId,long itemId) {}
     @SuppressWarnings("unchecked")
     public Map<Long,List<Map<String,Object>>> batch(List<Long> ids) {
         access.requireDomesticView();access.requirePermission("collaboration:view");if(ids.isEmpty())return Map.of();
@@ -95,12 +96,16 @@ public class PhoneModelCoverageService {
         sql=sql.replace("__RELATION__",PhoneProductEvidence.memberRelationSql("p","source_phone.phone_model_id"));
         var args=new ArrayList<Object>();for(int i=0;i<6;i++)args.addAll(safe);
         var molds=jdbc.queryForList(sql,args.toArray());var seen=new HashSet<String>();
+        var archivesWithVisibleSets=new HashSet<PhoneArchive>();
+        for(var mold:molds)if(mold.get("moldSetId")!=null){
+            archivesWithVisibleSets.add(new PhoneArchive(id(mold.get("phoneModelId")),id(mold.get("itemId"))));
+        }
         // Prefer verified links over production-intent links to the same real set.
         molds.sort(Comparator.<Map<String,Object>,Boolean>comparing(m->Boolean.TRUE.equals(m.get("compatibilityConfirmed"))).reversed());
         for(var mold:molds) {
             long phone=id(mold.get("phoneModelId"));Long line=nullableId(mold.get("productLineId"));
             String key=phone+":"+mold.get("itemId")+":"+mold.get("moldSetId");if(!seen.add(key))continue;
-            if(mold.get("moldSetId")==null&&molds.stream().anyMatch(m->id(m.get("phoneModelId"))==phone&&Objects.equals(m.get("itemId"),mold.get("itemId"))&&m.get("moldSetId")!=null))continue;
+            if(mold.get("moldSetId")==null&&archivesWithVisibleSets.contains(new PhoneArchive(phone,id(mold.get("itemId")))))continue;
             String state=moldState(mold);mold.put("state",state);mold.put("reusable","reusable".equals(state));mold.put("pcState",partState(mold,"pc"));mold.put("tpuState",partState(mold,"tpu"));
             mold.put("hasRegisteredSets",((Number)mold.get("registeredSets")).longValue()>0);mold.put("reviewReasons",MoldCompatibilityPolicy.reviewReasons(mold));
             for(String prefix:List.of("pc","tpu"))for(String suffix:List.of("PhysicalStatus","Status","Arrival","AcceptanceStatus","AcceptanceDate"))mold.remove(prefix+suffix);

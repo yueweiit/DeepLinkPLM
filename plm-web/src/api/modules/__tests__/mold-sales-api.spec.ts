@@ -1,13 +1,24 @@
 import {beforeEach,describe,expect,it,vi} from 'vitest'
 const request=vi.hoisted(()=>({get:vi.fn(),put:vi.fn(),post:vi.fn()}))
 vi.mock('../../request',()=>({default:request,unwrapResponse:(r:{data:{data:unknown}})=>r.data.data}))
-import {getMoldCost,saveMoldCost,getMoldSalesOptions,getMoldSalesMatrix,getMoldSales,getSalesArchiveSources,importSalesArchive,getHistoryReview,getHistoryReviewSources,previewHistoryReview,applyHistoryReview,getHistoryReviewOrders} from '../moldSales'
+import {getMoldCost,saveMoldCost,getMoldSalesOptions,getMoldSalesMatrix,getMoldSales,getMoldSalesDetail,getMoldSalesSourceDetail,exportMoldSalesFile,getSalesArchiveSources,importSalesArchive,getHistoryReview,getHistoryReviewSources,previewHistoryReview,applyHistoryReview,getHistoryReviewOrders} from '../moldSales'
 describe('mold actual cost API',()=>{
  beforeEach(()=>{vi.clearAllMocks();request.get.mockResolvedValue({data:{data:{version:3}}});request.put.mockResolvedValue({data:{data:{version:4}}})})
  it('reads current actual amounts, budget and history from the selected group',async()=>{expect(await getMoldCost(7)).toEqual({version:3});expect(request.get).toHaveBeenCalledWith('/mold-sales/groups/7/cost')})
  it('sends the exact group baseline, all explicit actual amounts and reason once',async()=>{const input={version:3,groupToken:'group-snapshot',amounts:{manufacturingCost:20000,freightCost:3000,customsCost:0,otherCost:25.5},reason:'补充实际结算与运费'};expect(await saveMoldCost(7,input)).toEqual({version:4});expect(request.put).toHaveBeenCalledExactlyOnceWith('/mold-sales/groups/7/cost',input)})
  it('reads authorized own products and brands from the existing sales scope',async()=>{await getMoldSalesOptions();expect(request.get).toHaveBeenCalledWith('/mold-sales/options')})
  it('preserves explicit empty product selection and the same brand query in both views',async()=>{const params={page:1,size:50,brandId:3,productLineIds:''};await getMoldSales(params);await getMoldSalesMatrix(params);expect(request.get).toHaveBeenCalledWith('/mold-sales',{params});expect(request.get).toHaveBeenCalledWith('/mold-sales/matrix',{params})})
+ it('requests range-scoped group evidence and downloads the report file as a blob',async()=>{
+  const dates={dateFrom:'2024-12-31',dateTo:'2025-01-02'}
+  await getMoldSalesDetail(7,2,'production',dates)
+  await getMoldSalesSourceDetail('history:RU:0052',2,'sales',dates)
+  expect(request.get).toHaveBeenCalledWith('/mold-sales/groups/7',{params:{page:2,size:20,view:'production',...dates}})
+  expect(request.get).toHaveBeenCalledWith('/mold-sales/source-groups/history%3ARU%3A0052',{params:{page:2,size:20,view:'sales',...dates}})
+  const file=new Blob(['xlsx']),signal=new AbortController().signal,params={...dates,view:'sales',presentation:'matrix',productKeys:'product:51,product:49'}
+  request.get.mockResolvedValue({data:file})
+  expect(await exportMoldSalesFile(params,signal)).toBe(file)
+  expect(request.get).toHaveBeenLastCalledWith('/mold-sales/export',{params,signal,responseType:'blob',timeout:120000,suppressErrorToast:true})
+ })
  it('does not retry a version conflict or replace the submitted values',async()=>{request.put.mockRejectedValue(new Error('资料已变更'));const input={version:3,groupToken:'old-group',amounts:{manufacturingCost:1,freightCost:2,customsCost:0,otherCost:0},reason:'核对'};await expect(saveMoldCost(7,input)).rejects.toThrow('资料已变更');expect(request.put).toHaveBeenCalledTimes(1);expect(input.version).toBe(3)})
  it('reads the prepared archive and submits its exact source identity without an absolute path',async()=>{const source={file:'eccount-orders-verified.jsonl.gz',sha256:'verified-hash'};request.get.mockResolvedValue({data:{data:[source]}});request.post.mockResolvedValue({data:{data:{status:'running',kind:'archive'}}});expect(await getSalesArchiveSources()).toEqual([source]);expect(request.get).toHaveBeenCalledWith('/mold-sales/archive-sources');expect(await importSalesArchive(source)).toEqual({status:'running',kind:'archive'});expect(request.post).toHaveBeenCalledExactlyOnceWith('/mold-sales/archive-import',source)})
  it('leaves an unknown import result for explicit reconciliation rather than retrying the write',async()=>{request.post.mockRejectedValue(new Error('请求超时'));await expect(importSalesArchive({file:'orders.jsonl.gz',sha256:'same-source'})).rejects.toThrow('请求超时');expect(request.post).toHaveBeenCalledTimes(1)})

@@ -8,6 +8,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.security.*;
+import java.time.LocalDate;
 import java.util.*;
 import java.util.zip.GZIPOutputStream;
 import org.junit.jupiter.api.*;
@@ -56,6 +57,50 @@ class MoldSalesArchiveLocalIntegrationTest extends MoldSalesLocalFixture {
     @Test void duplicateHashIsIdempotentAndAnotherFileCannotSilentlyAppendOrReplace()throws Exception{
         var request=prepared(List.of(line(1,"YW","2024-01-01","NFA4030005701","50","Pieza")),true);var s=store();s.importSource(sourceRoot.toString(),request,actor,Set.of());assertThat(s.importSource(sourceRoot.toString(),request,actor,Set.of())).containsEntry("alreadyImported",true);assertThat(jdbc.queryForObject("select count(*) from plm_mold_sales_archive_line",Long.class)).isEqualTo(1L);verify(audit,times(1)).logRequired(any(),eq(actor));
         var other=prepared(List.of(line(2,"YW","2024-01-01","NFA4030005701","60","Pieza")),true);assertThatThrownBy(()->s.importSource(sourceRoot.toString(),other,actor,Set.of())).hasMessageContaining("不同来源须先核对差异");assertThat(amount(first("sales","all").get("salesQuantity"))).isEqualByComparingTo("150");
+    }
+    @Test void importedDailyBucketsKeepThePeriodAndLifetimeSeparateAcrossTheSourceCutoff()throws Exception{
+        imported(List.of(
+            line(1,"YW","2024-11-30","NFA4030005701","50","Pieza"),
+            line(2,"UV","2024-12-31","NFA4030005701","80","Pieza"),
+            line(3,"UV","2024-12-31","NFA4030005701","20","Pieza"),
+            line(4,"YW","2025-01-01","NFA4030005701","900","Pieza"),
+            line(5,"UV","2024-11-30","NFA4030005701","50","PAQ"),
+            line(6,"UV","2024-12-31","NFA4030005701","80","PAQ"),
+            line(7,"UV","2025-01-01","NFA4030005701","20","PAQ")
+        ));
+        assertThat(jdbc.queryForMap("select quantity,line_count,cardinality(order_days) as days from plm_mold_sales_archive_report_bucket"))
+            .containsEntry("quantity",new BigDecimal("150")).containsEntry("line_count",3L).containsEntry("days",2);
+        assertThat(jdbc.queryForMap("select line_count,cardinality(order_days) as days from plm_mold_sales_archive_review_bucket"))
+            .containsEntry("line_count",2L).containsEntry("days",2);
+        var december=LocalDate.of(2024,12,31);
+        var dated=service.page(1,20,"","all",null,null,"production",null,null,null,"quantityDesc",december,december,false);
+        var row=records(dated.get("content")).get(0);
+        assertThat(amount(row.get("salesQuantity"))).isEqualByComparingTo("100");
+        assertThat(row).containsEntry("openedDate","2024-11-30").containsEntry("historyReviewRows",1L);
+        assertThat(amount(((Map<?,?>)row.get("production")).get("lifetimeOrderQuantity"))).isEqualByComparingTo("250");
+        var both=service.matrix(1,20,"","all",null,null,"sales",null,"quantityDesc",december,december.plusDays(1),false);
+        assertThat(amount(both.get("totalSalesQuantity"))).isEqualByComparingTo("200");
+        assertThat(both).containsEntry("historyReviewRows",1L);
+        var crm=service.page(1,20,"","all",null,null,"sales",null,null,null,"quantityDesc",december.plusDays(1),null,false);
+        assertThat(crm).containsEntry("historyReviewRows",0L);
+    }
+    @Test void legacyUnconfirmedRowsStillUseTheCurrentOrderValidityRules()throws Exception{
+        imported(List.of(
+            line(1,"YW","2024-12-31","NFA4030005701","50","Pieza"),
+            line(2,"YW","2024-12-31","NFA4030005701","40","Pieza"),
+            line(3,"YW","2024-12-31","NFA4030005701","30","Pieza")
+        ));
+        jdbc.update("update plm_mold_sales_archive_line set eligibility='unconfirmed_order' where source_id in (?,?)",
+            String.format("%064x",2),String.format("%064x",3));
+        jdbc.update("update plm_mold_sales_archive_line set order_status='cancelled' where source_id=?",String.format("%064x",3));
+        refreshSyntheticArchive();
+        assertThat(jdbc.queryForObject("select line_count from plm_mold_sales_archive_report_bucket",Long.class)).isEqualTo(1L);
+        var day=LocalDate.of(2024,12,31);
+        var page=service.page(1,20,"","all",null,null,"sales",null,null,null,"quantityDesc",day,day,false);
+        assertThat(amount(page.get("totalSalesQuantity"))).isEqualByComparingTo("90");
+        assertThat(page).containsEntry("historyReviewRows",2L);
+        var group=(Map<?,?>)service.detail(101,1,20,"sales",day,day).get("group");
+        assertThat(amount(group.get("salesQuantity"))).isEqualByComparingTo("90");
     }
     @Test void lowerCaseAndPaddedHistoricalFinalCodesKeepTheirOriginalTextButUseTheSameSharedIdentity()throws Exception{
         jdbc.update("insert into plm_product(product_id,product_type,parent_product_id,finished_product_code) values(2,'sku',1,'NFA4020005701')");

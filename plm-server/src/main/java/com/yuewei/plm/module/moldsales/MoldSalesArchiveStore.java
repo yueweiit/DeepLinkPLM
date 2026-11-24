@@ -71,8 +71,27 @@ final class MoldSalesArchiveStore {
         JsonNode summary=node(b.get("summary"));summary.fields().forEachRemaining(e->out.put(e.getKey(),json.convertValue(e.getValue(),Object.class)));return out;
     }
     Map<String,Object> status(boolean administrator){
-        var all=metadata();if(administrator||!Boolean.TRUE.equals(all.get("imported")))return all;
+        return status(metadata(),administrator);
+    }
+    static Map<String,Object> status(Map<String,Object> all,boolean administrator){
+        if(administrator||!Boolean.TRUE.equals(all.get("imported")))return all;
         return Map.of("imported",true,"importedAt",all.get("importedAt"));
+    }
+    List<Map<String,Object>> reportReviewRows(MoldSalesPeriod period){
+        if(period.dateFrom()!=null&&!period.dateFrom().isBefore(CUTOFF))return List.of();
+        if(!period.bounded()){
+            return jdbc.queryForList("select style_code,phone_code,line_count as n from plm_mold_sales_archive_review_bucket");
+        }
+        var arguments=new ArrayList<Object>();
+        return jdbc.queryForList("""
+            select a.style_code,a.phone_code,r.n
+            from plm_mold_sales_archive_review_bucket a
+            join lateral (
+              select sum(d.lines)::bigint as n
+              from unnest(a.order_days,a.day_lines) d(day,lines)
+              where %s
+            ) r on r.n is not null
+            """.formatted(period.sql("d.day",arguments)),arguments.toArray());
     }
     private static List<String> companies(JsonNode header){var out=new ArrayList<String>();for(var c:header.path("companies"))out.add(c.asText());return out;}
     private static long count(JsonNode n,String field){require(n.path(field).isIntegralNumber()&&n.path(field).canConvertToLong()&&n.path(field).asLong()>=0,"历史订单行数声明无效");return n.path(field).asLong();}

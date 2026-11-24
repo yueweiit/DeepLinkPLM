@@ -5,6 +5,7 @@ import com.yuewei.plm.common.security.CurrentUser;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.time.LocalDate;
 import java.util.*;
 import java.util.zip.GZIPOutputStream;
 import org.junit.jupiter.api.*;
@@ -29,6 +30,7 @@ class MoldSalesHistoricalLocalIntegrationTest extends MoldSalesLocalFixture {
         jdbc.update("insert into plm_mold_sales_history_batch(batch_id,policy_hash,archive_hash,report_hash,recommendation_hash,source_file,approval_text,reason,summary,created_by)values(?,?,?,?,?,'synthetic-policy.json','QA synthetic','QA',?::jsonb,'qa')",batch,"c".repeat(64),"b".repeat(64),"d".repeat(64),"e".repeat(64),snapshot);
         archiveLine(1,"RU","0058","三合一",100,"Phone A / Phone B","02");archiveLine(2,"RU","0058","三合一",25,"Phone A / Phone B","07");archiveLine(3,"RU","0059","三合一",40,"Original Phone C","02");
         archiveLine(4,"AB","0058","AirBag Pintura羽绒服喷油",60,"Phone A / Phone B","02");archiveLine(5,"AB","0058","AirBag Liso羽绒服透明",30,"Phone A / Phone B","30");archiveLine(6,"AB","0058","Rainbow Transparente亮甲透色",20,"Phone A / Phone B","31");archiveLine(7,"AB","0058","Double Diseño",46,"Phone A / Phone B","02");
+        refreshSyntheticArchive();
         jdbc.update("insert into plm_mold_sales_line values('active-missing',(select snapshot_id from plm_mold_sales_snapshot),'CURRENT','CURRENT','closed','NFA4030999902','FA','9999',11,'eligible','{\"businessDate\":\"2026-10-20\",\"name\":\"New current phone\"}')");
         var costs=(ObjectNode)json.readTree(budgetJson());var ru=costs.withArray("rows").addObject();ru.put("styleCode","RU");ru.put("moldManufacturing","18354.00");ru.put("freight","0");ru.put("customs","0");ru.put("fuel","0");ru.put("landedTotal","18354.00");ru.put("currency","CNY");ru.put("referenceSellingPrice","0");ru.put("referenceUnitProductionCost","0");ru.put("referenceOnly",true);ru.put("sourceKind","user_confirmation");ru.putArray("unknownFields").add("freight").add("customs").add("fuel").add("referenceSellingPrice").add("referenceUnitProductionCost");
         jdbc.update("update plm_mold_sales_snapshot set costs=?::jsonb",json.writeValueAsString(costs));
@@ -46,6 +48,95 @@ class MoldSalesHistoricalLocalIntegrationTest extends MoldSalesLocalFixture {
     Map<String,Object> live(){return map(map(service.status().get("historyReview")).get("summary"));}
     BigDecimal quantity(Map<String,Object> summary,String kind){return amount(map(map(summary.get("categories")).get(kind)).get("quantity"));}
     String originalArchive(){return jdbc.queryForObject("select jsonb_agg(to_jsonb(a)order by source_id)::text from plm_mold_sales_archive_line a",String.class);}
+
+    @Test void inclusiveOrderWindowAgreesWithMatrixAndDrilldownWithoutChangingOpeningOrCumulativeProduction(){
+        jdbc.update("""
+            insert into plm_mold_sales_line values(
+              'next-day',(select snapshot_id from plm_mold_sales_snapshot),'qa-next-day','QA','closed',
+              'NFA4030005701','FA','0057',30,'eligible','{"businessDate":"2025-01-02","name":"Phone A"}'
+            )
+            """);
+        var archiveDay=LocalDate.parse("2024-10-30");
+        var crmDay=LocalDate.parse("2025-01-01");
+        var selected=List.of("product:1","product:48");
+        var report=service.report("matrix","","all",null,null,"sales",null,null,selected,"quantityDesc",archiveDay,archiveDay,true);
+        var paged=service.matrix(1,1,"","all",null,null,"sales",selected,"quantityDesc",archiveDay,archiveDay,true);
+        assertThat(amount(report.get("totalSalesQuantity"))).isEqualByComparingTo("165");
+        assertThat(amount(report.get("unassignedQuantity"))).isEqualByComparingTo("11");
+        assertThat(paged.get("productTotals")).isEqualTo(report.get("productTotals"));
+        assertThat(paged.get("totalElements")).isEqualTo(rows(report.get("content")).size());
+        assertThat(rows(paged.get("content"))).containsExactly(rows(report.get("content")).get(0));
+
+        var historical=service.sourceDetail("history:RU:0058",1,20,"sales",archiveDay,archiveDay);
+        assertThat(historical.get("totalElements")).isEqualTo(2L);
+        assertThat(amount(map(historical.get("group")).get("salesQuantity"))).isEqualByComparingTo("125");
+        var noHistoricalOrders=service.sourceDetail("history:RU:0058",1,20,"sales",crmDay,null);
+        assertThat(noHistoricalOrders.get("totalElements")).isEqualTo(0L);
+        assertThat(map(noHistoricalOrders.get("group"))).containsEntry("openedDate","2024-10-30");
+        var physical=service.detail(101L,1,20,"production",crmDay,crmDay);
+        assertThat(physical.get("totalElements")).isEqualTo(1L);
+        var physicalGroup=map(physical.get("group"));
+        var cumulative=map(physicalGroup.get("production"));
+        assertThat(physicalGroup).containsEntry("openedDate","2025-01-01");
+        assertThat(amount(cumulative.get("orderQuantity"))).isEqualByComparingTo("100");
+        assertThat(amount(cumulative.get("lifetimeOrderQuantity"))).isEqualByComparingTo("130");
+        assertThat(amount(cumulative.get("finishedTotal"))).isEqualByComparingTo("130");
+        assertThat(cumulative.get("manualFinishedTotal")).isNull();
+        var future=service.detail(101L,1,20,"sales",crmDay.plusDays(2),null);
+        assertThat(map(future.get("group"))).containsEntry("openedDate","2025-01-01");
+        assertThat(future.get("totalElements")).isEqualTo(0L);
+        assertThatThrownBy(()->service.report("matrix","","all",null,null,"sales",null,null,selected,"quantityDesc",crmDay,archiveDay,true))
+            .hasMessage("开始日期不能晚于结束日期");
+    }
+
+    @Test void bootstrapDefaultsToFourSalesColumnsAndRetainsAllProductionProducts(){
+        jdbc.update("""
+            insert into plm_product(product_id,product_specific_code,product_type,product_name,status)
+            values(60,'XA','product_line','Extra A','published'),(61,'XB','product_line','Extra B','published')
+            """);
+        jdbc.update("""
+            insert into plm_collaboration_item(item_id,style_name,compatible_models,product_line_id,phone_model_code_item_id)
+            values(160,'Extra A','Phone A',60,1),(161,'Extra B','Phone A',61,1)
+            """);
+        visible.addAll(List.of(160L,161L));
+        var sales=service.page(1,100,"","all",null,null,"sales",null,null,null,"quantityDesc",null,null,true);
+        var production=service.page(1,100,"","all",null,null,"production",null,null,null,"quantityDesc",null,null,true);
+        var defaults=(Collection<?>)map(sales.get("options")).get("defaultProductKeys");
+        assertThat(defaults).hasSize(4);
+        assertThat(rows(sales.get("content"))).allSatisfy(group->assertThat(defaults.contains(group.get("productKey"))).isTrue());
+        assertThat(rows(production.get("content"))).extracting(group->group.get("productKey"))
+            .contains("product:1","product:48","product:51","product:60","product:61");
+        var noProducts=service.page(1,100,"","all",null,null,"production",null,null,List.of(),"quantityDesc",null,null,true);
+        assertThat(rows(noProducts.get("content"))).isEmpty();
+    }
+
+    @Test void reportSharesScopedPhysicalAndHistoricalQuantityWithTheOrderDetail(){
+        jdbc.update("""
+            insert into plm_mold_sales_line values
+              ('pending-order',(select snapshot_id from plm_mold_sales_snapshot),'QA1','QA1','pending',
+               'NBA4030005802','BA','0058',30,'eligible','{"businessDate":"2025-01-02","name":"Phone A"}'),
+              ('partial-order',(select snapshot_id from plm_mold_sales_snapshot),'QA2','QA2','partial_shipped',
+               'NBA4030005802','BA','0058',12,'eligible','{"businessDate":"2025-01-02","name":"Phone A"}')
+            """);
+        var date=LocalDate.parse("2025-01-02");
+        var report=service.report("detail","","all",51L,151L,"production",null,null,null,"quantityDesc",date,date,false);
+        assertThat(map(map(report.get("status")).get("historyReview")).get("summary")).isEqualTo(live());
+
+        when(access.actor()).thenReturn(new CurrentUser(3L,"scoped","Scoped",false));financeRead=false;visible.clear();visible.add(151L);
+        when(access.visibleSqlClause(anyString(),anyString())).thenAnswer(i->i.getArgument(0).equals("item")?i.getArgument(1)+"=151":"false");
+        var scoped=service.report("detail","","all",null,null,"production",null,null,null,"quantityDesc",date,date,false);
+        var summary=rows(scoped.get("content")).get(0);
+        var detail=map(service.detail(151L,1,20,"production",date,date).get("group"));
+        assertThat(rows(scoped.get("content"))).hasSize(1);
+        assertThat(map(scoped.get("status"))).doesNotContainKey("historyReview");
+        for(String field:List.of("production","sourceBreakdown","delivery","openedDate","salesQuantity"))
+            assertThat(summary.get(field)).isEqualTo(detail.get(field));
+        assertThat(amount(summary.get("salesQuantity"))).isEqualByComparingTo("42");
+        assertThat(amount(map(summary.get("production")).get("finishedTotal"))).isEqualByComparingTo("62");
+        assertThat(amount(map(summary.get("delivery")).get("pendingQuantity"))).isEqualByComparingTo("30");
+        assertThat(amount(map(summary.get("delivery")).get("partialOrderQuantity"))).isEqualByComparingTo("12");
+        assertThat(summary).containsEntry("openedDate","2024-10-30");
+    }
 
     @Test void restoresRuWithoutCreatingMoldsAndCountsSharedCombinationAndReferenceCostOnce(){
         String before=originalArchive();var page=service.page(1,50,"","all",48L,null,"sales",null,null);var groups=rows(page.get("content"));assertThat(groups).hasSize(2);assertThat(amount(page.get("totalSalesQuantity"))).isEqualByComparingTo("165");
@@ -113,6 +204,7 @@ class MoldSalesHistoricalLocalIntegrationTest extends MoldSalesLocalFixture {
         jdbc.update("update plm_mold_sales_archive_line set business_date='2020-01-01' where source_id=?",String.format("%064x",1));
         jdbc.update("update plm_mold_sales_archive_line set business_date='2018-01-01' where source_id=?",String.format("%064x",3));
         jdbc.update("update plm_mold_sales_archive_line set business_date='2010-01-01',eligibility='cancelled' where source_id=?",String.format("%064x",2));
+        refreshSyntheticArchive();
         String before=originalArchive();
         var newest=rows(service.page(1,1,"","all",48L,null,"sales",null,null,null,"phoneCodeDesc").get("content")).get(0);
         assertThat(newest.get("phoneCodes").toString()).contains("0059");assertThat(newest).containsEntry("openedDate","2018-01-01").containsEntry("openedDateSource","first_order");

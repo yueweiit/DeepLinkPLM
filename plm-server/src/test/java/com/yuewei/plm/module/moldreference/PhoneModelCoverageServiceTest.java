@@ -1,8 +1,12 @@
 package com.yuewei.plm.module.moldreference;
 
+import com.yuewei.plm.common.security.CurrentUser;
+import com.yuewei.plm.module.pilot.PilotAccessService;
 import java.util.*;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
 import static org.assertj.core.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 class PhoneModelCoverageServiceTest {
     Map<String,Object> physical() {var row=new LinkedHashMap<String,Object>();row.putAll(Map.of("moldSetId",10L,"phoneStatus","enabled","brandStatus","enabled","codeItemId",1L,"codeStatus","enabled","codeDeletedFlag",0,"pcCode","MHA201144","tpuCode","MHA101144"));return row;}
@@ -37,6 +41,31 @@ class PhoneModelCoverageServiceTest {
     }
     @Test void archiveOnlyReferencesNeedSetReviewAndAStartDateDoesNotConfirmPhysicalParts() {
         var row=physical();row.remove("moldSetId");assertThat(PhoneModelCoverageService.moldState(row)).isEqualTo("needs_review");row.put("moldSetId",10L);row.put("openedDate","2026-10-14");assertThat(PhoneModelCoverageService.moldState(row)).isEqualTo("making");
+    }
+    @Test void onlyAVisibleSetForTheSamePhoneAndArchiveSuppressesItsPlaceholder() {
+        var jdbc=mock(JdbcTemplate.class);
+        var access=mock(PilotAccessService.class);
+        var actor=new CurrentUser(1L,"scoped","范围测试",false);
+        when(access.access()).thenReturn(new PilotAccessService.Access(actor,"domestic",List.of("collaboration:view"),false,true));
+        when(access.visibleSqlClause(anyString(),anyString())).thenReturn("true");
+        var verified=physical();
+        verified.putAll(Map.of("phoneModelId",7L,"itemId",101L,"productLineId",1L,"productLineName","骑士","compatibilityConfirmed",true,"registeredSets",1L));
+        var intent=new LinkedHashMap<>(verified);
+        intent.put("compatibilityConfirmed",false);
+        var duplicate=new LinkedHashMap<>(intent);
+        duplicate.remove("moldSetId");
+        var otherPhone=new LinkedHashMap<>(duplicate);
+        otherPhone.put("phoneModelId",8L);
+        when(jdbc.queryForList(contains("with links"),any(Object[].class)))
+            .thenReturn(new ArrayList<>(List.of(duplicate,intent,verified,otherPhone)));
+        var result=new PhoneModelCoverageService(jdbc,access).batch(List.of(7L,8L));
+
+        assertThat((List<?>)result.get(7L).get(0).get("molds")).hasSize(1);
+        assertThat(result.get(7L).get(0)).containsEntry("registeredSets",1L);
+        @SuppressWarnings("unchecked") var visible=(List<Map<String,Object>>)result.get(7L).get(0).get("molds");
+        assertThat(visible.get(0)).containsEntry("moldSetId",10L).containsEntry("compatibilityConfirmed",true);
+        assertThat((List<?>)result.get(8L).get(0).get("molds")).hasSize(1);
+        assertThat(result.get(8L).get(0)).containsEntry("state","needs_review");
     }
     @Test void reviewExplainsMissingApplicableSetWithoutRequestingAnotherPhysicalSet() {
         var row=physical();row.remove("moldSetId");row.put("registeredSets",2);

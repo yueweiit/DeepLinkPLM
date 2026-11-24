@@ -18,8 +18,8 @@ class MoldSalesReconciliationTest {
     MoldSalesReconciliation load(JsonNode d,List<Map<String,Object>> sources) throws Exception {
         var jdbc=mock(JdbcTemplate.class);
         when(jdbc.queryForList(startsWith("select decisions::text"),eq(String.class))).thenReturn(List.of(json.writeValueAsString(List.of(d))));
-        when(jdbc.queryForList(startsWith("select source_code_id"))).thenReturn(sources);
-        when(jdbc.queryForList(startsWith("select style_code,phone_code"))).thenReturn(List.of(Map.of("style_code","BA","phone_code","0999","names","[\"New spelling on the same code\"]")));
+        when(jdbc.queryForList(startsWith("select source_code_id"),eq(1L))).thenReturn(sources);
+        when(jdbc.queryForList(startsWith("select style_code,phone_code"),eq("BA"),eq("0999"))).thenReturn(List.of(Map.of("style_code","BA","phone_code","0999","names","[\"New spelling on the same code\"]")));
         return MoldSalesReconciliation.load(jdbc,json);
     }
     List<Map<String,Object>> group(String phone) {

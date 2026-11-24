@@ -5,6 +5,7 @@ import com.yuewei.plm.common.util.ProductBusinessCodeGenerator;
 import java.math.*;
 import java.time.LocalDate;
 import java.util.*;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 /** CRM finished-item facts and net valid-order quantity basis. */
@@ -14,7 +15,11 @@ public final class MoldSalesRules {
     private static final Pattern HISTORICAL_CANCELLATION=Pattern.compile("cancel|anulad|取消|作废|\\bvoid\\b",Pattern.CASE_INSENSITIVE);
     public static final String QUANTITY_POLICY="registered_non_cancelled_orders_v2";
     public record Identity(String style,String phone,String eligibility,BigDecimal quantity) {}
-    static LocalDate date(Object value){return value==null?null:LocalDate.parse(value.toString());}
+    static LocalDate date(Object value){
+        if(value instanceof LocalDate day)return day;
+        if(value instanceof java.sql.Date day)return day.toLocalDate();
+        return value==null?null:LocalDate.parse(value.toString());
+    }
     static LocalDate earlier(LocalDate a,LocalDate b){return a==null?b:b==null?a:a.isBefore(b)?a:b;}
     static void openingDate(Map<String,Object> target,LocalDate recorded,LocalDate firstOrder){
         var value=recorded==null?firstOrder:recorded;
@@ -35,11 +40,17 @@ public final class MoldSalesRules {
     }
     static void sortRows(List<Map<String,Object>> rows,String sort,boolean production){
         Comparator<Map<String,Object>> order=switch(sort){
-            case "openedDateDesc"->Comparator.comparing(r->date(r.get("openedDate")),Comparator.nullsLast(Comparator.reverseOrder()));
-            case "quantityDesc"->Comparator.comparing(r->{Object value=r.containsKey("totalSalesQuantity")?r.get("totalSalesQuantity"):production&&r.get("production") instanceof Map<?,?> p?p.get("finishedTotal"):r.get("salesQuantity");return value==null?null:new BigDecimal(value.toString());},Comparator.nullsLast(Comparator.reverseOrder()));
-            default->Comparator.comparing(MoldSalesRules::newestPhoneCode,Comparator.nullsLast(Comparator.reverseOrder()));
+            case "openedDateDesc"->descendingKeys(rows,r->date(r.get("openedDate")));
+            case "quantityDesc"->descendingKeys(rows,r->{Object value=r.containsKey("totalSalesQuantity")?r.get("totalSalesQuantity"):production&&r.get("production") instanceof Map<?,?> p?p.get("finishedTotal"):r.get("salesQuantity");return value instanceof BigDecimal n?n:value==null?null:new BigDecimal(value.toString());});
+            default->descendingKeys(rows,MoldSalesRules::newestPhoneCode);
         };
         rows.sort(order.thenComparing(r->Objects.toString(r.getOrDefault("rowKey",r.get("sourceGroupKey")),"item:"+r.get("groupId"))));
+    }
+    private static <T extends Comparable<? super T>> Comparator<Map<String,Object>> descendingKeys(
+        List<Map<String,Object>> rows,Function<Map<String,Object>,T> key){
+        var keys=new IdentityHashMap<Map<String,Object>,T>();
+        for(var row:rows)keys.put(row,key.apply(row));
+        return Comparator.comparing(keys::get,Comparator.nullsLast(Comparator.reverseOrder()));
     }
     /** 4030 is assembled stock; other final steps come from the existing product/SKU catalogue. */
     public static String finishedSql(Set<String> profiles){
@@ -55,8 +66,11 @@ public final class MoldSalesRules {
         return "case when eligibility in ('eligible','not_finished_stage','unconfirmed_order') then case when coalesce(source_data->>'deleted','0') not in ('0','') then 'deleted' when order_status='cancelled' then 'cancelled' when quantity<=0 or quantity<>trunc(quantity) then 'quantity_review' when (coalesce(source_data->>'seriesCode','')<>'' and left(source_data->>'seriesCode',3)<>'N'||style_code) or (coalesce(source_data->>'phoneCode','')<>'' and source_data->>'phoneCode'<>phone_code) then 'identity_conflict' when "+finishedSql(profiles)+" then 'eligible' else 'not_finished_stage' end else eligibility end";
     }
     public static String eligibleSql(Set<String> profiles){return "("+effectiveEligibilitySql(profiles)+")='eligible'";}
+    static String archiveFinishedSql(Set<String> profiles,String code){
+        return finishedSql(profiles,"upper(btrim("+code+"))");
+    }
     /** Sealed archive validation is not repeated by decoding every large raw JSON on reads. */
-    public static String factEligibilitySql(Set<String> profiles){return "case when source_kind='eccount' and eligibility in ('eligible','not_finished_stage') then case when "+finishedSql(profiles,"upper(btrim(item_code))")+" then 'eligible' else 'not_finished_stage' end else "+effectiveEligibilitySql(profiles)+" end";}
+    public static String factEligibilitySql(Set<String> profiles){return "case when source_kind='eccount' and eligibility in ('eligible','not_finished_stage') then case when "+archiveFinishedSql(profiles,"item_code")+" then 'eligible' else 'not_finished_stage' end else "+effectiveEligibilitySql(profiles)+" end";}
     public static String factEligibleSql(Set<String> profiles){return "("+factEligibilitySql(profiles)+")='eligible'";}
     /** Delivery is a subset of the same basis; partial-order quantities are not unfulfilled-unit counts. */
     public static String pendingDeliverySql(){return "order_status not in ('closed','fully_arrived','partial_shipped','partial_arrived')";}
