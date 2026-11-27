@@ -275,8 +275,12 @@ export async function freezeBom(bomId: number) {
 }
 
 /** POST /api/v1/boms/{bomId}/confirm-current-version */
-export async function confirmCurrentBomVersion(bomId: number) {
-  return unwrapResponse<ProductBomVO>(await request.post(`/boms/${bomId}/confirm-current-version`))
+export async function confirmCurrentBomVersion(bomId: number, revision?: string) {
+  const path = `/boms/${bomId}/confirm-current-version`
+  const response = revision
+    ? await request.post(path, undefined, {headers:{'If-Match': `"${revision}"`}})
+    : await request.post(path)
+  return unwrapResponse<ProductBomVO>(response)
 }
 
 /** POST /api/v1/boms/{bomId}/cancel-confirmation */

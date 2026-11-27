@@ -12,7 +12,7 @@ import {getMasterDataStatus,type MasterDataStatus} from '@/api/modules/masterDat
 
 defineOptions({ name: 'BomCenterView' })
 const masterDataStatus=ref<MasterDataStatus>(),legacy=ref(false)
-onMounted(async()=>{try{masterDataStatus.value=await getMasterDataStatus()}catch{/* Capability is absent on older backends. */}})
+const catalogChecked=ref(false)
 const root = ref<HTMLElement>()
 const selectedProduct = ref<BomProductRow | null>(null)
 const productKeyword = ref('')
@@ -136,8 +136,13 @@ async function openSkus(row: BomLedgerRow) {
 function goWorkbench(row: BomLedgerRow) {
   window.location.hash = `#/projects?projectId=${row.productId}&section=bom`
 }
-onMounted(() => void load())
-onActivated(() => { active = true; void load() })
+onMounted(async()=>{
+  try{masterDataStatus.value=await getMasterDataStatus()}catch{/* Older installations use the historical ledger. */}
+  catalogChecked.value=true
+  if(active&&!masterDataStatus.value?.ready)void load()
+})
+watch(legacy,visible=>{if(visible&&active)void load()})
+onActivated(()=>{active=true;if(catalogChecked.value&&(legacy.value||!masterDataStatus.value?.ready))void load()})
 onDeactivated(() => {
     active = false
   clearTimeout(searchTimer); searchTimer = undefined
@@ -149,10 +154,11 @@ onUnmounted(() => clearTimeout(searchTimer))
 </script>
 
 <template>
-  <section v-if="masterDataStatus?.ready&&!legacy" class="bom-ledger"><CurrentProductCatalog mode="bom" :administrator="masterDataStatus.administrator" @history="legacy=true"/></section>
+  <section v-if="!catalogChecked" class="bom-ledger" v-loading="true" aria-busy="true"/>
+  <section v-else-if="masterDataStatus?.ready&&!legacy" class="bom-ledger"><CurrentProductCatalog mode="bom" :administrator="masterDataStatus.administrator" @history="legacy=true"/></section>
   <main v-else ref="root" class="bom-ledger" v-loading="loading">
     <header class="page-head">
-      <div><h2>{{ uiText("BOM 管理") }}</h2><p>{{ uiText("先选择产品，再查看产品线及旗下型号的正式 BOM。") }}</p></div>
+      <div><h2>{{ uiText("BOM 管理") }}</h2></div>
       <div class="page-actions"><el-button v-if="masterDataStatus?.ready" size="small" @click="legacy=false">{{ uiText("返回本期 BOM") }}</el-button><el-button data-test="historical-bom-import" type="primary" :icon="Upload" @click="historicalImportVisible = true">{{ uiText("批量导入历史 BOM") }}</el-button><el-button :icon="Refresh" circle :title='uiText("刷新")' @click="refresh" /></div>
     </header>
 

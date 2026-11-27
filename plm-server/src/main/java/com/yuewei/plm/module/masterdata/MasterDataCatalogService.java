@@ -1,6 +1,9 @@
 package com.yuewei.plm.module.masterdata;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.yuewei.plm.module.bom.service.BomConfirmationState;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yuewei.plm.common.vo.PageVO;
 import com.yuewei.plm.module.pilot.PilotAccessService;
@@ -54,26 +57,105 @@ public class MasterDataCatalogService {
             var rows=jdbc.queryForList("select s.object_id as \"objectId\",s.source_code as \"sourceCode\",s.source_data::text as source from plm_master_data_source s join plm_process p on p.process_id=s.object_id where s.source_kind=? and s.source_system='mes' and p.deleted_flag=0 and (p.product_id is null or "+access.visibleSqlClause("product","p.product_id")+") order by s.source_code",entry.getValue());rows.forEach(r->r.put("source",parse(r.get("source"))));result.put(entry.getKey(),rows);
         }return result;
     }
-    public Map<String,Object> sku(String sourceId){
-        read();var rows=jdbc.queryForList("select s.source_data::text as data,s.object_type as type,s.object_id as id"+from()+filter(new Query(),new ArrayList<>())+" and s.source_id=?",sourceId);require(rows.size()==1,"当前 SKU 不存在或未获授权");var row=rows.get(0);JsonNode data=parse(row.get("data"));if(!access.hasPermission("finance:read"))((com.fasterxml.jackson.databind.node.ObjectNode)data).remove("basePrice");return Map.of("source",data,"objectType",row.get("type"),"objectId",row.get("id"),"manufacturing",manufacturing(sourceId));
+    private void checkBomPage(Query q) {
+        read();
+        require(q.page >= 1 && q.page <= 100000 && q.size >= 1 && q.size <= 100, "分页范围无效");
     }
-    /** Exact article scope and per-node materials; never expands all shared rows into each SKU. */
-    public List<Map<String,Object>> manufacturing(String sourceId){
-        read();var source=jdbc.queryForList("select s.source_code,s.object_type,s.object_id,s.source_data::text as data"+from()+filter(new Query(),new ArrayList<>())+" and s.source_id=?",sourceId);require(source.size()==1,"SKU 不存在或未获授权");var row=source.get(0);if("partner".equals(row.get("object_type")))return List.of();String article=row.get("source_code").toString();var data=parse(row.get("data"));String color=text(data,"colorNameZh"),product=text(data,"seriesCode");
-        var routes=jdbc.queryForList("""
-            select b.product_bom_id as "bomId",b.product_id as "projectId",b.bom_code as "internalBomCode",ms.source_code as "bomCode",b.quantity::text as "outputQty",b.output_inventory_code as "parentCode",b.output_inventory_name as "parentName",b.custom_bom_specification as specification,
-              ms.source_data->>'version' as "sourceVersion",b.version_no as "versionNo",b.status,b.confirmed_by as "confirmedBy",b.confirmed_at as "confirmedAt",
-              r.product_bom_route_id as "bomRouteId",r.process_id as "processId",r.route_code as "routeCode",r.route_name as "routeName",r.binding_priority as priority
-            from plm_master_data_source ms join plm_product_bom baseline on baseline.product_bom_id=ms.object_id
-              join plm_product_bom b on b.deleted_flag=0 and (b.product_bom_id=baseline.product_bom_id or (b.source_type='mes_derivative' and b.source_product_bom_id=baseline.product_bom_id and b.status='released' and exists(select 1 from plm_product_bom_route_formal_selection fs where fs.product_bom_id=b.product_bom_id and fs.status='active' and fs.deleted_flag=0)))
-              join plm_product_bom_route r on r.product_bom_id=b.product_bom_id and r.deleted_flag=0 and r.status='active'
-            where ms.source_system='mes' and ms.source_kind='bom_main' and b.output_inventory_code=? and ?=any(r.article_codes)
-              and (b.product_bom_id<>baseline.product_bom_id or not exists(select 1 from plm_product_bom derived join plm_product_bom_route_formal_selection fs on fs.product_bom_id=derived.product_bom_id and fs.status='active' and fs.deleted_flag=0 where derived.source_type='mes_derivative' and derived.source_product_bom_id=baseline.product_bom_id and derived.status='released' and derived.deleted_flag=0))
-            order by r.route_code,r.binding_priority desc,b.product_bom_id desc
-            """,product,article);
-        var result=new ArrayList<Map<String,Object>>();var chosen=new HashMap<String,Integer>();
-        for(var route:routes){String code=route.get("routeCode").toString();int priority=((Number)route.get("priority")).intValue();if(chosen.containsKey(code)){require(chosen.get(code)!=priority,"同优先级 BOM 冲突，请工程核对");continue;}
-            if(!routeMatches(product,code,color))continue;chosen.put(code,priority);
+    private String visibleBomRows(Query q,List<Object> args) {
+        return """
+            select jsonb_build_array(s.organization_id,s.source_data->>'productSeriesId',
+                     case when nullif(s.source_data->>'productSeriesId','') is null then s.source_id end)::text as "productKey",
+                   jsonb_build_array(s.organization_id,s.source_data->>'productSeriesId',s.source_data->>'phoneModelId',
+                     coalesce(s.source_data->>'version',''),case when nullif(s.source_data->>'productSeriesId','') is null
+                        or nullif(s.source_data->>'phoneModelId','') is null then s.source_id end)::text as "groupKey",
+                   s.source_id as "sourceId", s.object_id as "objectId", s.object_type as "objectType", s.source_code as "itemCode",
+                   s.source_data->>'seriesCode' as "seriesCode", coalesce(ps.source_data->>'seriesNameZh',s.source_data->>'seriesCode') as "seriesName",
+                   ps.source_data->>'seriesNameEs' as "seriesNameEs", s.source_data->>'modelName' as "modelName", coalesce(p.production_status,'unknown') as "productionStatus",
+                   s.source_data->>'version' as "commercialVersion", s.source_data->>'modelCode' as "modelCode",
+                   s.source_data->>'colorNameZh' as "colorNameZh", s.source_data->>'colorNameEs' as "colorNameEs", s.source_data->>'colorNameEn' as "colorNameEn",
+                   s.source_data->>'colorShortCode' as "colorShortCode", s.source_data->>'colorCode' as "colorCode"
+            """ + ", " + keyword(q,args,true) + " as matched " + from() + filter(q,args,true);
+    }
+
+    public PageVO<Map<String,Object>> bomProducts(Query q) {
+        checkBomPage(q);
+        var args = new ArrayList<Object>();
+        String cte = "with visible as (" + visibleBomRows(q,args) + "), products as (" + """
+            select "productKey" as key,min("seriesName") as "seriesName",min("seriesNameEs") as "seriesNameEs",
+                   min("seriesCode") as "seriesCode",count(distinct "groupKey") as "modelCount"
+            from visible where matched group by "productKey")
+            """;
+        long total = jdbc.queryForObject(cte+"select count(*) from products",Long.class,args.toArray());
+        args.add(q.size); args.add((q.page-1)*q.size);
+        var products=jdbc.queryForList(cte+"select * from products order by \"modelCount\" desc,\"seriesCode\",key limit ? offset ?",args.toArray());
+        return new PageVO<>(products,q.page,q.size,total,(total+q.size-1)/q.size);
+    }
+
+    public PageVO<Map<String,Object>> bomGroups(Query q,String productKey) {
+        checkBomPage(q);
+        var args = new ArrayList<Object>();
+        String visible = "select * from ("+visibleBomRows(q,args)+") scoped where \"productKey\"=?";
+        args.add(productKey);
+        String cte = "with visible as materialized (" + visible + "), groups as (select \"groupKey\",max(\"modelCode\") as model from visible group by \"groupKey\" having bool_or(matched)) ";
+        long total = jdbc.queryForObject(cte + "select count(*) from groups",Long.class,args.toArray());
+        args.add(q.size); args.add((q.page-1)*q.size);
+        var rows = jdbc.queryForList(cte + """
+            , page as (select * from groups order by model desc nulls last,"groupKey" limit ? offset ?)
+            select v.* from page join visible v using ("groupKey")
+            order by page.model desc nulls last,page."groupKey",v."colorShortCode" nulls last,v."itemCode",v."sourceId"
+            """,args.toArray());
+        var routes = lookup(rows.stream().filter(row -> "product".equals(row.get("objectType"))).toList());
+        var groups = new LinkedHashMap<String,List<Map<String,Object>>>();
+        for (var row : rows) {
+            var snapshots = BomCatalogRecipes.applicable(routes.getOrDefault(row.get("sourceId"), List.of()),true);
+            var summaries = snapshots.stream().map(r -> Map.of("bomId",r.get("bomId"),"bomRouteId",r.get("bomRouteId"),
+                "version",r.get("displayVersion"),"state",r.get("engineeringState"),"routeCode",r.get("routeCode"))).toList();
+            row.put("recipes",summaries);
+            groups.computeIfAbsent((String)row.remove("groupKey"),key -> new ArrayList<>()).add(row);
+        }
+        List<Map<String,Object>> content = groups.entrySet().stream()
+            .map(entry -> Map.<String,Object>of("key",entry.getKey(),"colors",entry.getValue())).toList();
+        return new PageVO<>(content,q.page,q.size,total,(total+q.size-1)/q.size);
+    }
+
+    private Map<String,List<Map<String,Object>>> lookup(List<Map<String,Object>> rows) {
+        if (rows.isEmpty()) return Map.of();
+        return BomCatalogRecipes.find(jdbc,json,rows,access.visibleSqlClause("product","b.product_id"));
+    }
+
+    private Map<String,Object> sourceSku(String sourceId) {
+        read();
+        var rows=jdbc.queryForList("select s.source_data::text as data,s.object_type as type,s.object_id as id,s.source_code as article"+from()+filter(new Query(),new ArrayList<>())+" and s.source_id=?",sourceId);
+        require(rows.size()==1,"当前 SKU 不存在或未获授权");
+        return rows.get(0);
+    }
+
+    public Map<String,Object> sku(String sourceId) { return sku(sourceId,false); }
+    public Map<String,Object> sku(String sourceId,boolean versions) {
+        var source=sourceSku(sourceId);
+        var data=parse(source.get("data"));
+        if(!access.hasPermission("finance:read")) ((com.fasterxml.jackson.databind.node.ObjectNode)data).remove("basePrice");
+        return Map.of("source",data,"objectType",source.get("type"),"objectId",source.get("id"),
+            "manufacturing",materials(sourceId,source,data,versions));
+    }
+    public List<Map<String,Object>> manufacturing(String sourceId) {
+        var source=sourceSku(sourceId);
+        return materials(sourceId,source,parse(source.get("data")),false);
+    }
+    private List<Map<String,Object>> recipesFor(String sourceId, Map<String,Object> source, JsonNode data, boolean versions) {
+        if (!"product".equals(source.get("type"))) return List.of();
+        var request=new LinkedHashMap<String,Object>();
+        request.put("sourceId",sourceId); request.put("seriesCode",text(data,"seriesCode"));
+        request.put("itemCode",source.get("article")); for (String key : List.of("colorCode","colorNameZh","colorNameEn","colorNameEs")) request.put(key,text(data,key));
+        var routes=lookup(List.of(request)).getOrDefault(sourceId,List.of());
+        var selected=BomCatalogRecipes.applicable(routes,versions);
+        require(selected.stream().noneMatch(r -> "conflict".equals(r.get("engineeringState"))),"同优先级 BOM 冲突，请工程核对");
+        return selected;
+    }
+    private List<Map<String,Object>> materials(String sourceId,Map<String,Object> source,JsonNode data,boolean versions) {
+        var result=new ArrayList<Map<String,Object>>();
+        for(var route:recipesFor(sourceId,source,data,versions)){
+            String article=source.get("article").toString();
             long routeId=((Number)route.get("bomRouteId")).longValue();
             String money=access.hasPermission("finance:read")?",i.unit_cost_snapshot as \"unitPrice\",i.currency_code as currency":"";
             var items=jdbc.queryForList("""
@@ -83,7 +165,7 @@ public class MasterDataCatalogService {
                   inv.stock_uom as "stockUnit",material.source_data->>'_mesEffectiveUnit' as "mesEffectiveUnit",material.source_data->'_unitProjection' as "unitProjection"
                 """+money+" from plm_bom_item_target t join plm_product_bom_item i on i.product_bom_item_id=t.product_bom_item_id and i.deleted_flag=0 join plm_process n on n.process_id=t.process_id left join plm_process op on op.process_id=n.operation_master_process_id left join plm_inventory inv on inv.inventory_id=i.inventory_id left join plm_master_data_source material on material.object_id=i.inventory_id and material.source_kind='material_items' left join plm_master_data_source ns on ns.object_type='process' and ns.object_id=n.process_id and ns.source_kind='process_flow_steps' where t.product_bom_route_id=? and (t.article_codes is null or ?=any(t.article_codes)) order by n.sequence_no,i.line_no,i.product_bom_item_id",routeId,article);
             items.forEach(item->{if(item.get("unitProjection")!=null)item.put("unitProjection",parse(item.get("unitProjection")));});
-            require(!items.isEmpty(),"当前成品缺少适用投料行；不能显示共享配方全部物料");route.put("items",items);route.put("graph",graph(((Number)route.get("processId")).longValue()));result.add(route);
+            if(!versions)require(!items.isEmpty(),"当前成品缺少适用投料行；不能显示共享配方全部物料");route.put("items",items);route.put("graph",graph(((Number)route.get("processId")).longValue()));result.add(route);
         }return result;
     }
     public Map<String,Object> graph(long route){
@@ -93,18 +175,61 @@ public class MasterDataCatalogService {
         var edges=jdbc.queryForList("select edge_id as id,from_process_id as \"fromNodeId\",to_process_id as \"toNodeId\",edge_no as \"edgeNo\",relation_type as \"relationType\",label,condition_json as condition from plm_process_edge where route_id=? order by edge_no,edge_id",route);
         edges.forEach(e->{if(e.get("condition")!=null)e.put("condition",parse(e.get("condition")));});return Map.of("nodes",nodes,"edges",edges);
     }
-    private boolean routeMatches(String product,String route,String color){
-        var bindings=jdbc.queryForList("select source_data->'condition_json' as condition from plm_master_data_source where source_system='mes' and source_kind='product_route_binding' and source_data->>'product_code'=? and source_data->>'route_code'=? and source_status='enabled'",product,route);
-        for(var binding:bindings){Object raw=binding.get("condition");if(raw==null||"null".equals(raw.toString()))return true;var condition=parse(raw);var include=strings(condition.path("color_names"));var exclude=strings(condition.path("exclude_color_names"));if((include.isEmpty()||include.contains(color))&&!exclude.contains(color))return true;}return false;
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public Map<String,Object> confirmationScope(String sourceId,long bomId,long routeId) {
+        var source=sourceSku(sourceId);
+        var target=recipesFor(sourceId,source,parse(source.get("data")),true).stream()
+            .filter(r -> ((Number)r.get("bomId")).longValue()==bomId && ((Number)r.get("bomRouteId")).longValue()==routeId
+                && "pending".equals(r.get("engineeringState"))).findFirst();
+        require(target.isPresent(),"版本状态已变化，请刷新用料");
+        var recipe=target.orElseThrow();
+        access.requirePermission("bom:publish"); access.requireEngineeringMaintenance();
+        access.requireProduct(((Number)recipe.get("projectId")).longValue());
+        require(Boolean.TRUE.equals(jdbc.queryForObject("""
+            select exists(select 1 from plm_bom_item_target t join plm_product_bom_item i
+                on i.product_bom_item_id=t.product_bom_item_id and i.deleted_flag=0
+                where t.product_bom_route_id=? and (t.article_codes is null or ?=any(t.article_codes)))
+            """,Boolean.class,routeId,source.get("article"))),"此品目缺少适用投料");
+        String scope="with previous_routes as ("+BomConfirmationState.PREVIOUS_ROUTES+"), "+"""
+            new_codes as (select distinct unnest(article_codes) as code from plm_product_bom_route
+                          where product_bom_id=? and deleted_flag=0 and status='active'),
+            removed_codes as (select unnest(article_codes) from previous_routes except select code from new_codes),
+            coverage(code,removed) as (select code,false from new_codes union all select *,true from removed_codes)
+            """;
+        var counts=jdbc.queryForMap(scope+"select count(code) filter(where not removed) as included,count(code) filter(where removed) as removed from coverage",bomId,bomId);
+        var visible=jdbc.queryForList(scope+"select distinct s.source_code as code,s.source_data->>'modelName' as model,cv.removed"
+            +from()+" join coverage cv on cv.code=s.source_code "+filter(new Query(),new ArrayList<>())
+            +" and s.object_type='product' and s.source_data->>'seriesCode'=? order by code,model",bomId,bomId,recipe.get("parentCode"));
+        var articles=new ArrayList<Map<String,Object>>();var removed=new ArrayList<Map<String,Object>>();
+        for(var item:visible){(Boolean.TRUE.equals(item.remove("removed"))?removed:articles).add(item);}
+        var previous=jdbc.queryForList("""
+            select distinct case when b.product_bom_id=? then coalesce(nullif(?,''),b.version_no) else b.version_no end
+              from plm_product_bom b join plm_product_bom_route_formal_selection f on f.product_bom_id=b.product_bom_id
+             where f.status='active' and f.deleted_flag=0 and b.deleted_flag=0 and b.product_id=?
+               and (b.product_bom_id=? or b.source_product_bom_id=?) and b.product_bom_id<>? order by 1
+            """,String.class,recipe.get("family"),recipe.get("sourceVersion"),recipe.get("projectId"),recipe.get("family"),recipe.get("family"),bomId);
+        return Map.of("count",counts.get("included"),"articles",articles,"removedCount",counts.get("removed"),"removedArticles",removed,"previousVersions",previous,"revision",BomConfirmationState.revision(jdbc,bomId));
     }
     private String from(){return " from plm_master_data_source s left join plm_product p on s.object_type='product' and p.product_id=s.object_id and p.deleted_flag=0 left join plm_phone_model_member pm on pm.id=s.phone_model_id left join plm_code_item c on c.code_item_id=pm.code_item_id left join plm_master_data_source ps on ps.source_system='crm' and ps.source_kind='product_series' and ps.organization_id=s.organization_id and ps.source_id=s.source_data->>'productSeriesId'";}
-    private String filter(Query q,List<Object> args){
+    private String filter(Query q,List<Object> args){return filter(q,args,false);}
+    private String filter(Query q,List<Object> args,boolean bom){
         String where=" where s.source_system='crm' and s.source_kind='product_sku' and s.batch_hash=(select source_hash from plm_master_data_import where status='committed' order by committed_at desc limit 1) and ((s.object_type='product' and p.product_id is not null and "+access.visibleSqlClause("product","s.object_id")+") or (s.object_type='partner' and "+access.visibleSqlClause("partner","s.object_id")+"))";
-        if(q.keyword!=null&&!q.keyword.isBlank()){require(q.keyword.length()<=128,"关键词过长");where+=" and (s.source_code ilike ? or s.source_data->>'productName' ilike ? or s.source_data->>'modelName' ilike ?)";String value="%"+q.keyword.replace("\\","\\\\").replace("%","\\%").replace("_","\\_")+"%";args.addAll(List.of(value,value,value));}
+        if(!bom)where+=" and "+keyword(q,args,false);
         if(q.seriesCode!=null&&!q.seriesCode.isBlank()){where+=" and s.source_data->>'seriesCode'=?";args.add(q.seriesCode);}
         if(q.brandId!=null&&!q.brandId.isBlank()){where+=" and s.source_data->>'phoneBrandId'=?";args.add(q.brandId);}
         if(q.listingStatus!=null&&!q.listingStatus.isBlank()){require(Set.of("listed","unlisted").contains(q.listingStatus),"上架状态无效");where+=" and s.source_data->>'_listingStatus'=?";args.add(q.listingStatus);}
         if(q.productionStatus!=null&&!q.productionStatus.isBlank()){require(Set.of("unknown","active","discontinued").contains(q.productionStatus),"生产状态无效");where+=" and coalesce(p.production_status,'unknown')=?";args.add(q.productionStatus);}return where;
+    }
+    private String keyword(Query q,List<Object> args,boolean bom){
+        if(q.keyword!=null&&!q.keyword.isBlank()){
+            require(q.keyword.length()<=128,"关键词过长");
+            String value="%"+q.keyword.replace("\\","\\\\").replace("%","\\%").replace("_","\\_")+"%";
+            var fields=new ArrayList<>(List.of("s.source_code","s.source_data->>'productName'","s.source_data->>'modelName'"));
+            if(bom) fields.addAll(List.of("ps.source_data->>'seriesNameZh'","ps.source_data->>'seriesNameEs'","s.source_data->>'modelCode'","s.source_data->>'colorNameZh'","s.source_data->>'colorNameEs'"));
+            String predicate="("+String.join(" or ",fields.stream().map(f->f+" ilike ?").toList())+")";
+            fields.forEach(f->args.add(value));return predicate;
+        }
+        return "true";
     }
     private JsonNode parse(Object raw){try{return json.readTree(raw.toString());}catch(Exception e){throw new IllegalStateException("来源资料解析失败",e);}}
     private void read(){store.requireEnabled();access.requireDomesticView();if(!access.hasPermission("product:view"))access.requirePermission("collaboration:view");}

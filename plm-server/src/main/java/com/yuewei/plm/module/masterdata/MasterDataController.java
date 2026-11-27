@@ -17,9 +17,12 @@ public class MasterDataController {
     @PostMapping("/master-data/preview") public ResponseVO<?> preview(@RequestBody MasterDataImportService.PreviewRequest input,HttpServletRequest request){return response(imports.preview(input),request);}
     @PostMapping("/master-data/commit") public ResponseVO<?> commit(@RequestBody MasterDataImportService.CommitRequest input,HttpServletRequest request){return response(imports.commit(input,request),request);}
     @GetMapping("/products/current-catalog") public ResponseVO<?> skus(MasterDataCatalogService.Query query,HttpServletRequest request){return response(catalog.skus(query),request);}
+    @GetMapping("/products/current-catalog/bom-products") public ResponseVO<?> bomProducts(MasterDataCatalogService.Query query,HttpServletRequest request){return response(catalog.bomProducts(query),request);}
+    @GetMapping("/products/current-catalog/bom-groups") public ResponseVO<?> bomGroups(MasterDataCatalogService.Query query,@RequestParam String productKey,HttpServletRequest request){return response(catalog.bomGroups(query,productKey),request);}
+    @GetMapping("/products/current-catalog/{sourceId}/bom-scope") public ResponseVO<?> scope(@PathVariable String sourceId,@RequestParam long bomId,@RequestParam long routeId,HttpServletRequest request){return response(catalog.confirmationScope(sourceId,bomId,routeId),request);}
     @GetMapping("/products/current-catalog/options") public ResponseVO<?> options(HttpServletRequest request){return response(catalog.options(),request);}
     @GetMapping("/process-routes/current") public ResponseVO<?> processes(HttpServletRequest request){return response(catalog.processes(),request);}
-    @GetMapping("/products/current-catalog/{sourceId}") public ResponseVO<?> sku(@PathVariable String sourceId,HttpServletRequest request){return response(catalog.sku(sourceId),request);}
+    @GetMapping("/products/current-catalog/{sourceId}") public ResponseVO<?> sku(@PathVariable String sourceId,@RequestParam(defaultValue="false") boolean versions,HttpServletRequest request){return response(catalog.sku(sourceId,versions),request);}
     @GetMapping("/process-routes/{routeId}/graph") public ResponseVO<?> graph(@PathVariable long routeId,HttpServletRequest request){access.requireDomesticView();access.requirePermission("process:view");return response(catalog.graph(routeId),request);}
     private ResponseVO<?> response(Object result,HttpServletRequest request){return ResponseVO.success(result,RequestIdUtil.getRequestId(request),OffsetDateTime.now());}
 }

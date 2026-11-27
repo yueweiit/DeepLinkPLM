@@ -66,7 +66,7 @@ public final class MasterDataSnapshot {
         require(scoped.isEmpty()||scoped.stream().anyMatch(i->strings(i.path("route_targets").path(routeCode).path("article_codes")).contains(article)),"共享 BOM 缺少当前成品的型号物料范围");
         return applicable.stream().filter(i->{var target=i.path("route_targets").path(routeCode);return !target.has("article_codes")||strings(target.path("article_codes")).contains(article);}).toList();
     }
-    private boolean matchesColor(JsonNode condition,JsonNode sku){
+    static boolean matchesColor(JsonNode condition,JsonNode sku){
         if(condition.isMissingNode()||condition.isNull())return true;
         allowedKeys(condition,Set.of("color_names","exclude_color_names"),"路线适用条件");
         var names=new HashSet<String>();for(String f:List.of("colorCode","colorNameZh","colorNameEn","colorNameEs"))if(text(sku,f)!=null)names.add(text(sku,f).strip().toLowerCase(Locale.ROOT));

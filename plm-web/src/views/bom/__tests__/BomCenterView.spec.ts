@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
 vi.mock('@/api/modules/bom', () => api)
 vi.mock('@/api/modules/masterData',()=>({getMasterDataStatus:vi.fn().mockResolvedValue({enabled:false,ready:false,administrator:false})}))
 
+import {getMasterDataStatus} from '@/api/modules/masterData'
 import BomCenterView from '../BomCenterView.vue'
 import HistoricalBomImportDialog from '../components/HistoricalBomImportDialog.vue'
 
@@ -56,6 +57,15 @@ describe('BomCenterView', () => {
     wrapper.unmount()
   })
 
+  it('loads the current product catalog before fetching any historical BOM rows',async()=>{
+    vi.mocked(getMasterDataStatus).mockResolvedValueOnce({enabled:true,ready:true,administrator:true})
+    const wrapper=mount(BomCenterView,{global:{plugins:[ElementPlus],stubs:{CurrentProductCatalog:{template:`<button data-test="history" @click="$emit('history')">历史</button>`}}}})
+    await vi.waitFor(()=>expect(wrapper.find('[data-test="history"]').exists()).toBe(true))
+    expect(api.getBomProductPage).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="history"]').trigger('click')
+    await vi.waitFor(()=>expect(api.getBomProductPage).toHaveBeenCalledTimes(1))
+    wrapper.unmount()
+  })
   it('provides historical BOM batch import from the ledger', async () => {
     const wrapper = mount(BomCenterView, { global: { plugins: [ElementPlus] } })
     await vi.waitFor(() => expect(api.getBomProductPage).toHaveBeenCalled())
