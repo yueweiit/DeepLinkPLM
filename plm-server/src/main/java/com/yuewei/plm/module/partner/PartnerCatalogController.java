@@ -85,4 +85,7 @@ public class PartnerCatalogController {
 
     @PostMapping(value="/styles/model-sheet-file",consumes="multipart/form-data")
     public ResponseVO<?> modelSheetFile(@RequestParam Map<String,String> input,@RequestPart("file") MultipartFile file,HttpServletRequest request){return ok(catalog.uploadModelSheet(new java.util.LinkedHashMap<>(input),file,request),request);}
+
+    @PostMapping(value="/styles/photo",consumes="multipart/form-data")
+    public ResponseVO<?> photo(@RequestParam Map<String,String> input,@RequestPart("file") MultipartFile file,HttpServletRequest request){return ok(catalog.uploadPhoto(new java.util.LinkedHashMap<>(input),file,request),request);}
 }

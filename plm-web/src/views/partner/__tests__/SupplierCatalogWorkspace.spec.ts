@@ -7,7 +7,7 @@ import SampleColorSelect from '../selection/SampleColorSelect.vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CatalogStyle } from '@/types/partnerCatalog'
 
-const api = vi.hoisted(() => ({ catalogSuppliers: vi.fn(), catalogStyles: vi.fn(), catalogSourceFiles: vi.fn(), catalogStyle: vi.fn(),updateCatalogStyle:vi.fn(),addCatalogSelection: vi.fn(), previewCatalogSelection:vi.fn(), selectionPage: vi.fn() }))
+const api = vi.hoisted(() => ({ uploadCatalogPhoto:vi.fn(),catalogSuppliers: vi.fn(), catalogStyles: vi.fn(), catalogSourceFiles: vi.fn(), catalogStyle: vi.fn(),updateCatalogStyle:vi.fn(),addCatalogSelection: vi.fn(), previewCatalogSelection:vi.fn(), selectionPage: vi.fn() }))
 vi.mock('@/api/modules/partnerCatalog', () => api)
 vi.mock('@/api/modules/partnerSelections', () => ({ selectionPage: api.selectionPage }))
 vi.mock('@/api/modules/partner', () => ({ newRequestId: () => crypto.randomUUID() }))
@@ -52,6 +52,41 @@ const sourceFile=(id:number,name=`同源图片${id}.png`)=>({id,name,version:'V1
 async function chooseCatalogStyle(index=0){if(wrapper.find('.detail-scroll').exists())await click('返回款式列表');wrapper.findAll('.catalog-style-check')[index].getComponent(ElCheckbox).vm.$emit('change',true);await flushPromises();await click('加入选品目录')}
 
 describe('supplier-first product catalog', () => {
+  async function choosePhotoFile(file=new File(['picture'],'product.png',{type:'image/png'})){
+    const input=wrapper.get<HTMLInputElement>('.catalog-photo-input')
+    Object.defineProperty(input.element,'files',{configurable:true,value:[file]})
+    await input.trigger('change');await flushPromises();return file
+  }
+  it('opens the image picker directly and associates only the clicked product using fresh versions',async()=>{
+    const target=row({refs:[],fileDetails:[]}),other=row({rowId:'other-row',name:'另一款',fileDetails:[],refs:[]})
+    api.catalogStyles.mockResolvedValue(page([target,other],{supplier}));api.catalogStyle.mockResolvedValue({...target,rowVersion:8,recordVersion:12})
+    api.uploadCatalogPhoto.mockResolvedValue(row({rowVersion:9,recordVersion:13,fileDetails:[sourceFile(800,'新图.png')]}))
+    await start('/partner-products?supplierCode=TEST-SUP')
+    const picker=vi.spyOn(wrapper.get<HTMLInputElement>('.catalog-photo-input').element,'click')
+    await wrapper.findAll('.catalog-photo-upload')[0].trigger('click');expect(picker).toHaveBeenCalledOnce();expect(api.uploadCatalogPhoto).not.toHaveBeenCalled()
+    const file=await choosePhotoFile()
+    expect(api.uploadCatalogPhoto).toHaveBeenCalledExactlyOnceWith({supplierCode:'TEST-SUP',sourceKind:'selection',recordId:17,rowId:'stable-row',rowVersion:8,recordVersion:12,requestId:expect.any(String)},file)
+    expect(wrapper.findAll('.catalog-style-row')[0].get('.test-photo').attributes('data-photo')).toBe('800')
+    expect(wrapper.findAll('.catalog-photo-upload')).toHaveLength(1);expect(api.updateCatalogStyle).not.toHaveBeenCalled();expect(api.addCatalogSelection).not.toHaveBeenCalled()
+  })
+  it('keeps the same image and request identity when retrying an uncertain upload',async()=>{
+    api.catalogStyles.mockResolvedValue(page([row({refs:[],fileDetails:[]})],{supplier}));api.uploadCatalogPhoto.mockRejectedValueOnce(new Error('网络中断')).mockResolvedValueOnce(row())
+    await start('/partner-products?supplierCode=TEST-SUP');await wrapper.get('.catalog-photo-upload').trigger('click');await choosePhotoFile()
+    expect(wrapper.text()).toContain('网络中断');await click('重试上传')
+    expect(api.uploadCatalogPhoto).toHaveBeenCalledTimes(2);expect(api.uploadCatalogPhoto.mock.calls[1]).toEqual(api.uploadCatalogPhoto.mock.calls[0]);expect(api.catalogStyle).toHaveBeenCalledOnce();expect(wrapper.find('.catalog-photo-upload').exists()).toBe(false)
+  })
+  it('does not write when the picker is cancelled or a file is unsupported',async()=>{
+    api.catalogStyles.mockResolvedValue(page([row({refs:[],fileDetails:[]})],{supplier}));await start('/partner-products?supplierCode=TEST-SUP');await wrapper.get('.catalog-photo-upload').trigger('click')
+    await wrapper.get('.catalog-photo-input').trigger('change');await choosePhotoFile(new File(['svg'],'unsafe.svg',{type:'image/svg+xml'}))
+    expect(api.catalogStyle).not.toHaveBeenCalled();expect(api.uploadCatalogPhoto).not.toHaveBeenCalled()
+  })
+  it('keeps photo preview and provides a separate add button for existing pictures',async()=>{
+    await start('/partner-products?supplierCode=TEST-SUP');expect(wrapper.findComponent(PartnerPhoto).props()).toMatchObject({id:501,previewable:true});expect(wrapper.find('.catalog-photo-add').exists()).toBe(true);expect(wrapper.find('.catalog-photo-upload').exists()).toBe(false)
+  })
+  it('hides upload actions for read-only and discarded products',async()=>{
+    api.catalogStyles.mockResolvedValue(page([row({canWrite:false,fileDetails:[]}),row({rowId:'removed',discarded:true,fileDetails:[]})],{supplier}));await start('/partner-products?supplierCode=TEST-SUP')
+    expect(wrapper.find('.catalog-photo-upload').exists()).toBe(false);expect(wrapper.find('.catalog-photo-add').exists()).toBe(false)
+  })
   it('persists explicitly confirmed phones even when they equal the source-text projection',async()=>{
     const original=row({modelText:'iPhone 11',rowVersion:8,recordVersion:12});api.catalogStyle.mockResolvedValue(original);api.updateCatalogStyle.mockResolvedValue({changed:true})
     await start('/partner-products?supplierCode=TEST-SUP&sourceKind=selection&recordId=17&rowId=stable-row');await click('编辑产品资料')

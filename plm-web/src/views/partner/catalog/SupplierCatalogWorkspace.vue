@@ -5,7 +5,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate, type LocationQueryRaw } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PageContainer from '@/components/PageContainer/index.vue'
-import { catalogStyle, catalogStyles, catalogSuppliers, updateCatalogStyle } from '@/api/modules/partnerCatalog'
+import { catalogStyle, catalogStyles, catalogSuppliers, updateCatalogStyle, uploadCatalogPhoto } from '@/api/modules/partnerCatalog'
 import {t} from '@/locales'
 import { newRequestId } from '@/api/modules/partner'
 import type { CatalogAdditionResult, CatalogPage, CatalogStyle, CatalogSupplier } from '@/types/partnerCatalog'
@@ -32,6 +32,8 @@ const checked = ref(new Map<string, CatalogStyle>()), selectionOpen = ref(false)
 const identityItems=ref<CatalogStyle[]>([])
 const modelSheetItem=ref<CatalogStyle>(),modelSheetMessage=ref('')
 const removing=ref(false),editing=ref<CatalogStyle>()
+const photoInput=ref<HTMLInputElement>(),photoTarget=ref<CatalogStyle>(),photoUploading=ref(false),photoError=ref('')
+const pendingPhoto=ref<{row:CatalogStyle;file:File;requestId:string;identity?:{sourceKind:CatalogStyle['sourceKind'];recordId:number;rowId:string;rowVersion:number;recordVersion:number;supplierCode:string;requestId:string}}>()
 const deleted=computed(()=>route.query.deleted==='true')
 const selectionLoading=ref(false),selectionLoadError=ref(''),selectionLoaded=ref(0),pendingSelection=ref<CatalogStyle[]>([])
 let generation = 0,selectionGeneration=0
@@ -53,6 +55,7 @@ const allPageChecked = computed(() => rows.value.length > 0 && rows.value.every(
 const title = computed(() => isDetail.value ? '供应商款式详情' : supplierCode.value ? `${supplierName.value} · 供应商产品目录` : '供应商产品目录')
 
 async function load() {
+  if(photoUploading.value)return
   cancelSelectionLoad()
   const serial = ++generation
   loading.value = true; error.value = ''
@@ -77,7 +80,7 @@ async function load() {
 watch([supplierCode,deleted], () => { checked.value = new Map(); selectionOpen.value = false; addition.value = undefined; styles.value = undefined })
 watch(() => route.fullPath, () => { selectionOpen.value = false; modelSheetItem.value=undefined; modelSheetMessage.value=''; void load() }, { immediate: true })
 watch(() => route.query.sourceManager, value => { if(value==='1')sourcesOpen.value=true }, {immediate:true})
-function guardInput(){if(selectionBusy.value||removing.value||editing.value){ElMessage.warning(uiText('请先完成或取消当前填写，再切换页面。'));return false}}
+function guardInput(){if(photoUploading.value||selectionBusy.value||removing.value||editing.value){ElMessage.warning(uiText('请先完成或取消当前填写，再切换页面。'));return false}}
 onBeforeRouteUpdate(guardInput);onBeforeRouteLeave(guardInput)
 onBeforeUnmount(() => { generation++;selectionGeneration++ })
 function navigate(query: LocationQueryRaw) { return router.push({ path: '/partner-products', query }) }
@@ -90,7 +93,7 @@ function changePage(value: number) { return navigate({ ...route.query, catalogPa
 function changeSize(value: number) { return navigate({ ...route.query, catalogSize: value, catalogPage: 1 }) }
 function open(row: CatalogStyle) { return navigate({ ...route.query, sourceKind: row.sourceKind, recordId: row.recordId, rowId: row.rowId }) }
 async function setRemoved(row:CatalogStyle){
-  if(!canWrite.value||removing.value)return
+  if(!canWrite.value||removing.value||photoUploading.value)return
   removing.value=true;error.value=''
   try{
     const discarded=row.discarded!==true
@@ -101,7 +104,7 @@ async function setRemoved(row:CatalogStyle){
   }catch(cause){if(cause!=='cancel'&&cause!=='close')error.value=partnerError(cause)}finally{removing.value=false}
 }
 async function edited(){editing.value=undefined;checked.value=new Map();ElMessage.success(t('产品资料已保存'));await load()}
-function editStyle(row:CatalogStyle){if(canWrite.value&&!row.discarded)editing.value=row}
+function editStyle(row:CatalogStyle){if(canWrite.value&&!row.discarded&&!photoUploading.value)editing.value=row}
 function back() { const { sourceKind: _source, recordId: _record, rowId: _row, ...query } = route.query; return navigate(query) }
 function openProduct(id: number) { return navigate({ id, from: route.fullPath }) }
 function openSource() { if (!detail.value) return; const row = detail.value; if(row.sourcePurpose==='catalog_source'){sourcesOpen.value=true;return} return router.push(row.sourceKind === 'selection' ? { path: '/partner-selections', query: { id: row.recordId, from: route.fullPath } } : { path: `/partner-operations/supplier_quote/${row.recordId}`, query: { from: route.fullPath } }) }
@@ -126,10 +129,47 @@ function added(result: CatalogAdditionResult) {
 function modelSheetSaved(result:{style:CatalogStyle}){modelSheetItem.value=undefined;detail.value=result.style;modelSheetMessage.value='本款型号表已更新；未创建产品、样品或手机编码。'}
 const photos = (row: CatalogStyle) => (row.fileDetails || []).filter(file => file.type?.startsWith('image/'))
 const photo = (row: CatalogStyle) => photos(row)[0]
+const canAddPhoto=(row:CatalogStyle)=>canWrite.value&&row.canWrite!==false&&!row.discarded&&!deleted.value
+function choosePhoto(row:CatalogStyle){
+  if(!canAddPhoto(row)||photoUploading.value||editing.value||removing.value||selectionBusy.value)return
+  photoTarget.value=row
+  if(photoInput.value){photoInput.value.value='';photoInput.value.click()}
+}
+async function photoChosen(event:Event){
+  const file=(event.target as HTMLInputElement).files?.[0],row=photoTarget.value
+  if(!file||!row||!canAddPhoto(row)||photoUploading.value)return
+  if(!['image/png','image/jpeg','image/webp'].includes(file.type)||!file.size||file.size>20*1024*1024){ElMessage.warning(uiText('请选择不超过20MB的PNG、JPEG或WebP图片'));return}
+  pendingPhoto.value={row,file,requestId:newRequestId()};photoError.value=''
+  await savePhoto()
+}
+async function savePhoto(){
+  const pending=pendingPhoto.value
+  if(!pending||photoUploading.value)return
+  photoUploading.value=true;photoError.value=''
+  try{
+    if(!pending.identity){
+      const current=await catalogStyle(pending.row.supplierCode,pending.row)
+      if(catalogKey(current)!==catalogKey(pending.row)||current.supplierCode!==pending.row.supplierCode||current.canWrite!==true||current.discarded)throw new Error(uiText('当前产品不可添加图片，请刷新后重试'))
+      pending.identity={sourceKind:current.sourceKind,recordId:current.recordId,rowId:current.rowId,rowVersion:current.rowVersion,recordVersion:current.recordVersion,supplierCode:current.supplierCode,requestId:pending.requestId}
+    }
+    const result=await uploadCatalogPhoto(pending.identity,pending.file)
+    if(catalogKey(result)!==catalogKey(pending.row)||result.supplierCode!==pending.row.supplierCode)throw new Error(uiText('图片关联结果与当前产品不一致，请刷新核对'))
+    if(styles.value)styles.value={...styles.value,content:styles.value.content.map(row=>catalogKey(row)===catalogKey(result)?result:row.recordId===result.recordId&&row.sourceKind===result.sourceKind?{...row,recordVersion:result.recordVersion}:row)}
+    if(checked.value.has(catalogKey(result))){const next=new Map(checked.value);next.set(catalogKey(result),result);checked.value=next}
+    pendingPhoto.value=undefined;ElMessage.success(uiText('产品图片已添加'))
+  }catch(cause){photoError.value=partnerError(cause)}finally{photoUploading.value=false}
+}
+watch(()=>route.fullPath,()=>{pendingPhoto.value=undefined;photoTarget.value=undefined;photoError.value=''})
 </script>
 
 <template>
   <PageContainer :title="title" class="supplier-catalog-workspace">
+    <input ref="photoInput" class="catalog-photo-input" type="file" accept="image/png,image/jpeg,image/webp" aria-label="选择产品图片" @change="photoChosen"/>
+    <el-alert v-if="photoError&&pendingPhoto" :title="`${pendingPhoto.row.name}：${photoError}`" type="error" :closable="false" show-icon>
+      <el-button link :disabled="photoUploading" @click="savePhoto">{{uiText('重试上传')}}</el-button>
+      <el-button link :disabled="photoUploading" @click="choosePhoto(pendingPhoto.row)">{{uiText('重新选择图片')}}</el-button>
+      <el-button link :disabled="photoUploading" @click="pendingPhoto=undefined;photoError=''">{{uiText('取消')}}</el-button>
+    </el-alert>
     <template #actions>
       <el-button v-if="isDetail" @click="back">{{ uiText("返回款式列表") }}</el-button>
       <el-button v-else-if="supplierCode" @click="chooseAnother">{{ uiText("更换供应商") }}</el-button>
@@ -163,7 +203,13 @@ const photo = (row: CatalogStyle) => photos(row)[0]
       <div class="catalog-scroll catalog-style-list" :class="{'without-cost':!canReadCost,'readonly-catalog':!canWrite}" :aria-busy="loading">
         <div class="catalog-style-head" aria-hidden="true"><span>{{ uiText("图片") }}</span><span v-if="canWrite" class="catalog-check-title">{{ uiText("勾选") }}</span><span>{{ uiText("款式编号／名称") }}</span><span>{{ uiText("手机型号") }}</span><span>{{ uiText("供应商颜色") }}</span><span>{{ uiText("材质") }}</span><span v-if="canReadCost">{{ uiText("报价") }}</span><span v-if="canReadCost">{{ uiText("币种") }}</span><span>{{ uiText("起订数量") }}</span><span>{{ uiText("起订口径") }}</span><span>{{ uiText("操作") }}</span></div>
         <article v-for="row in rows" :key="catalogKey(row)" class="catalog-style-row" :data-style-key="catalogKey(row)">
-          <div class="catalog-style-photo"><PartnerPhoto v-if="photo(row)" :id="photo(row)!.id" previewable :preview-files="photos(row)"/><span v-else class="catalog-no-photo">{{ uiText("暂无图片") }}</span><span v-if="photo(row)" class="catalog-photo-open" aria-hidden="true">{{ photos(row).length }}{{ uiText("图") }}</span></div>
+          <div class="catalog-style-photo">
+            <PartnerPhoto v-if="photo(row)" :id="photo(row)!.id" previewable :preview-files="photos(row)"/>
+            <button v-else-if="canAddPhoto(row)" type="button" class="catalog-no-photo catalog-photo-upload" :disabled="photoUploading" :aria-label="`${uiText('添加产品图片')}：${row.name}`" :title="uiText('点击添加图片（PNG / JPEG / WebP，最大20MB）')" @click.stop="choosePhoto(row)">{{photoUploading&&pendingPhoto&&catalogKey(pendingPhoto.row)===catalogKey(row)?uiText('上传中…'):uiText('添加图片')}}</button>
+            <span v-else class="catalog-no-photo">{{ uiText("暂无图片") }}</span>
+            <button v-if="photo(row)&&canAddPhoto(row)" type="button" class="catalog-photo-add" :disabled="photoUploading" :aria-label="`${uiText('添加产品图片')}：${row.name}`" :title="uiText('添加图片')" @click.stop="choosePhoto(row)">+</button>
+            <span v-if="photo(row)" class="catalog-photo-open" aria-hidden="true">{{ photos(row).length }}{{ uiText("图") }}</span>
+          </div>
           <div v-if="canWrite" class="catalog-style-check"><el-checkbox :model-value="checked.has(catalogKey(row))" :aria-label="uiText('选择{value0}',{value0:(row.name)})" :disabled="loading||selectionLoading||row.discarded" @change="check(row,Boolean($event))"/></div>
           <div class="catalog-style-name"><strong class="catalog-style-code">{{row.catalogStyleLabel||row.catalogStyleCode||uiText('款式号待补')}}</strong><el-button link type="primary" @click="open(row)">{{ row.name || uiText('未命名款式') }}</el-button><small v-if="row.supplierItemCode">{{ uiText("供方款号：") }}{{row.supplierItemCode}}</small><el-button v-if="row.productId" link @click="openProduct(row.productId)">{{ row.productCode || uiText('关联我方产品') }}</el-button></div>
           <div class="catalog-style-model"><span class="catalog-cell-label">{{ uiText("手机型号") }}</span><PhoneModelSummary :phones="row.phones||[]" :count="Math.max(new Set(row.phoneModelIds||[]).size,new Set((row.phones||[]).map(phone=>phone.phoneModelId)).size)" :fallback="catalogPhoneSummary(row)" :original-text="row.modelText" scope="supply"/></div>
@@ -227,6 +273,7 @@ const photo = (row: CatalogStyle) => photos(row)[0]
 .catalog-style-row>div:not(.catalog-style-photo):not(.catalog-style-check):not(.catalog-style-actions){display:flex;flex-direction:column;justify-content:center;gap:2px}
 .catalog-style-photo{position:relative;display:flex;align-items:center;justify-content:center}.catalog-style-photo :deep(.partner-photo){width:44px;height:44px}
 .catalog-photo-open{position:absolute;right:4px;top:4px;border:1px solid var(--el-color-primary-light-7);border-radius:3px;background:var(--el-bg-color);color:var(--el-color-primary);padding:0 3px;font-size:11px;line-height:16px;pointer-events:none}
+.catalog-photo-input{display:none}.catalog-photo-upload{border:1px dashed var(--el-border-color);cursor:pointer;padding:2px;line-height:1.4}.catalog-photo-upload:hover{border-color:var(--el-color-primary);color:var(--el-color-primary);background:var(--el-color-primary-light-9)}.catalog-photo-upload:disabled,.catalog-photo-add:disabled{cursor:wait;opacity:.6}.catalog-photo-add{position:absolute;right:0;top:-5px;width:20px;height:20px;border:1px solid var(--el-border-color);border-radius:50%;background:white;color:#303133;cursor:pointer;z-index:1;line-height:16px;padding:0;font-size:16px}.catalog-photo-upload:focus-visible,.catalog-photo-add:focus-visible{outline:2px solid var(--el-color-primary);outline-offset:2px}
 .catalog-no-photo{font-size:11px;color:var(--el-text-color-secondary);background:var(--el-fill-color-light);width:44px;height:44px;display:grid;place-items:center;border-radius:5px}
 .catalog-style-check{display:grid;place-items:center;padding:3px!important}.catalog-style-check .el-checkbox{margin:0}
 .catalog-style-name>.el-button{font-size:14px;font-weight:600;justify-content:flex-start}.catalog-style-code{font-size:12px;color:var(--el-color-primary);font-weight:500}

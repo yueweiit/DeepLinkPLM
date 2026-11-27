@@ -5,6 +5,12 @@ import type { AttachmentVO } from './attachment'
 import type { PartnerFile } from '@/types/partner'
 
 const root = '/partner-catalog'
+export const uploadCatalogPhoto = async (identity: CatalogIdentity & {supplierCode:string;requestId:string}, file:File) => {
+  const data=new FormData()
+  for(const [key,value] of Object.entries(identity))data.append(key,String(value))
+  data.append('file',file)
+  return unwrapResponse<CatalogStyle>(await request.post(`${root}/styles/photo`,data))
+}
 export const catalogSuppliers = async (params: { q?: string; page: number; size: number; deleted?: string }) =>
   unwrapResponse<CatalogPage<CatalogSupplier>>(await request.get(`${root}/suppliers`, { params }))
 
