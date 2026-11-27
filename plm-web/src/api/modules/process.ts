@@ -1,6 +1,32 @@
 import type { ProcessCenterSnapshot } from '@/types/process'
 import type { ProcessRouteRelation } from '@/types/process'
 import request, { unwrapResponse } from '../request'
+import type { RouteEdge, RouteNode } from './masterData'
+
+export interface MesOperation {
+  objectId: number
+  sourceCode: string
+  source: {
+    operation_name: string; operation_name_es?: string
+    category?: string; category_es?: string; version?: string; status?: string
+    execution_mode?: string; scheduling_mode?: string; requires_scheduling?: boolean
+    requires_qc?: boolean; requires_report?: boolean; requires_material?: boolean; requires_machine?: boolean
+  }
+}
+export interface MesRoute {
+  objectId: number; sourceCode: string; productId: number | null
+  seriesName?: string; seriesNameEs?: string; routeStatus?: string
+  operationIds: Array<number | null>
+  source: { product_code?: string; route_name: string; route_name_es?: string; version?: string; status?: string; updated_at?: string }
+}
+export interface ProcessCatalog { routes: MesRoute[]; operations: MesOperation[] }
+export interface ProcessGraph { nodes: RouteNode[]; edges: RouteEdge[] }
+export async function getCurrentProcesses() {
+  return unwrapResponse<ProcessCatalog>(await request.get('/process-routes/current'))
+}
+export async function getCurrentProcessGraph(id: number) {
+  return unwrapResponse<ProcessGraph>(await request.get(`/process-routes/${id}/graph`,{params:{current:true}}))
+}
 
 /* ========== 工艺中心 ========== */
 

@@ -51,11 +51,40 @@ public class MasterDataCatalogService {
         out.put("brands",jdbc.queryForList("select distinct s.source_data->>'phoneBrandId' as id,s.source_data->>'brandName' as name"+from+" order by name"));
         out.put("total",jdbc.queryForObject("select count(*)"+from,Long.class));out.put("listed",jdbc.queryForObject("select count(*)"+from+" and s.source_data->>'_listingStatus'='listed'",Long.class));out.put("purchased",jdbc.queryForObject("select count(*)"+from+" and s.object_type='partner'",Long.class));return out;
     }
+    private static final String CURRENT_BATCH="(select source_hash from plm_master_data_import where status='committed' order by committed_at desc limit 1)";
+
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public Map<String,Object> processes(){
-        store.requireEnabled();access.requireDomesticView();access.requirePermission("process:view");var result=new LinkedHashMap<String,Object>();
-        for(var entry:Map.of("routes","process_flows","operations","operation_templates").entrySet()){
-            var rows=jdbc.queryForList("select s.object_id as \"objectId\",s.source_code as \"sourceCode\",s.source_data::text as source from plm_master_data_source s join plm_process p on p.process_id=s.object_id where s.source_kind=? and s.source_system='mes' and p.deleted_flag=0 and (p.product_id is null or "+access.visibleSqlClause("product","p.product_id")+") order by s.source_code",entry.getValue());rows.forEach(r->r.put("source",parse(r.get("source"))));result.put(entry.getKey(),rows);
-        }return result;
+        store.requireEnabled();
+        access.requireDomesticView();
+        access.requirePermission("process:view");
+        String visibleProduct=access.visibleSqlClause("product","p.product_id");
+        String ordering=" order by s.source_code,s.object_id";
+        var routes=jdbc.queryForList("""
+            select s.object_id as "objectId",s.source_code as "sourceCode",s.source_data::text as source,
+                   p.product_id as "productId",p.status as "routeStatus",product.product_name as "seriesName",
+                   mes.source_data->>'product_name_es' as "seriesNameEs",
+                   (select coalesce(jsonb_agg(n.operation_master_process_id order by n.sequence_no,n.process_id),'[]')::text
+                    from plm_process n where n.parent_process_id=p.process_id and n.deleted_flag=0 and exists
+                      (select 1 from plm_master_data_source step where step.source_system='mes' and step.source_kind='process_flow_steps'
+                       and step.object_id=n.process_id and step.batch_hash=s.batch_hash and step.organization_id=s.organization_id)) as "operationIds"
+            from plm_master_data_source s join plm_process p on p.process_id=s.object_id and p.deleted_flag=0
+            join plm_product product on product.product_id=p.product_id and product.deleted_flag=0
+            left join lateral (select m.source_data from plm_master_data_source m
+              where m.source_system='mes' and m.source_kind='mes_product' and m.object_type='product'
+                and m.organization_id=s.organization_id and m.batch_hash=s.batch_hash and m.object_id=p.product_id
+                and m.source_code=s.source_data->>'product_code'
+              order by m.observed_at desc nulls last,m.source_id limit 1) mes on true
+            where s.source_system='mes' and s.source_kind='process_flows' and
+            """+visibleProduct+" and s.batch_hash="+CURRENT_BATCH+ordering);
+        routes.forEach(r->{r.put("source",parse(r.get("source")));r.put("operationIds",parse(r.get("operationIds")));});
+        var operations=jdbc.queryForList("""
+            select s.object_id as "objectId",s.source_code as "sourceCode",s.source_data::text as source
+            from plm_master_data_source s join plm_process p on p.process_id=s.object_id and p.deleted_flag=0
+            where s.source_system='mes' and s.source_kind='operation_templates'
+            """+" and (p.product_id is null or ("+visibleProduct+" and exists (select 1 from plm_product own where own.product_id=p.product_id and own.deleted_flag=0))) and s.batch_hash="+CURRENT_BATCH+ordering);
+        operations.forEach(r->r.put("source",parse(r.get("source"))));
+        return Map.of("routes",routes,"operations",operations);
     }
     private void checkBomPage(Query q) {
         read();
@@ -168,12 +197,37 @@ public class MasterDataCatalogService {
             if(!versions)require(!items.isEmpty(),"当前成品缺少适用投料行；不能显示共享配方全部物料");route.put("items",items);route.put("graph",graph(((Number)route.get("processId")).longValue()));result.add(route);
         }return result;
     }
-    public Map<String,Object> graph(long route){
-        var owner=jdbc.queryForList("select product_id from plm_process where process_id=? and process_type='routing' and deleted_flag=0",route);require(owner.size()==1,"路线不存在");access.requireProduct(((Number)owner.get(0).get("product_id")).longValue());
-        var nodes=jdbc.queryForList("select n.process_id as id,coalesce(s.source_code,n.node_code) as \"nodeCode\",n.local_node_code as \"localNodeCode\",n.process_name as name,n.sequence_no as \"stepNo\",n.position_x as x,n.position_y as y,coalesce(op.process_code,n.process_param_json->>'operationCode') as \"operationCode\",n.process_param_json as config from plm_process n left join plm_process op on op.process_id=n.operation_master_process_id left join plm_master_data_source s on s.object_id=n.process_id and s.source_kind='process_flow_steps' where n.parent_process_id=? and n.deleted_flag=0 order by n.sequence_no,n.process_id",route);
+    public Map<String,Object> graph(long route){return graph(route,false);}
+
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public Map<String,Object> graph(long route,boolean current){
+        access.requireProcess(route);
+        String stepScope="", edgeScope="", edgeJoin="";
+        String edgeValues="e.edge_no as \"edgeNo\",e.relation_type as \"relationType\",e.label,e.condition_json as condition";
+        Object[] args={route};
+        if(current){
+            var source=jdbc.queryForList("select organization_id,batch_hash from plm_master_data_source where source_system='mes' and source_kind='process_flows' and object_id=? and batch_hash="+CURRENT_BATCH,route);
+            require(source.size()==1,"本期路线不存在");
+            args=new Object[]{route,source.get(0).get("organization_id"),source.get(0).get("batch_hash")};
+            stepScope=" and s.organization_id=? and s.batch_hash=?";
+            // An import reuses the edge ID when the endpoints match. Its versioned attributes belong to the snapshot.
+            edgeJoin=" join plm_master_data_source s on s.source_system='mes' and s.source_kind='process_flow_step_edges' and s.object_id=e.edge_id";
+            edgeScope=" and s.organization_id=? and s.batch_hash=?";
+            edgeValues="(s.source_data->>'edge_no')::integer as \"edgeNo\",s.source_data->>'relation_type' as \"relationType\",s.source_data->>'label' as label,s.source_data->'condition_json' as condition";
+        }
+        var nodes=jdbc.queryForList("""
+            select n.process_id as id,coalesce(s.source_code,n.node_code) as "nodeCode",n.local_node_code as "localNodeCode",
+                   n.process_name as name,n.sequence_no as "stepNo",n.position_x as x,n.position_y as y,
+                   n.operation_master_process_id as "operationId",coalesce(op.process_code,n.process_param_json->>'operationCode') as "operationCode",n.process_param_json as config
+            from plm_process n left join plm_process op on op.process_id=n.operation_master_process_id
+              left join plm_master_data_source s on s.object_id=n.process_id and s.source_system='mes' and s.source_kind='process_flow_steps'
+            where n.parent_process_id=? and n.deleted_flag=0
+            """+stepScope+" order by n.sequence_no,n.process_id",args);
         nodes.forEach(n->{if(n.get("config")!=null)n.put("config",parse(n.get("config")));});
-        var edges=jdbc.queryForList("select edge_id as id,from_process_id as \"fromNodeId\",to_process_id as \"toNodeId\",edge_no as \"edgeNo\",relation_type as \"relationType\",label,condition_json as condition from plm_process_edge where route_id=? order by edge_no,edge_id",route);
-        edges.forEach(e->{if(e.get("condition")!=null)e.put("condition",parse(e.get("condition")));});return Map.of("nodes",nodes,"edges",edges);
+        var edges=jdbc.queryForList("select e.edge_id as id,e.from_process_id as \"fromNodeId\",e.to_process_id as \"toNodeId\","
+            +edgeValues+" from plm_process_edge e"+edgeJoin+" where e.route_id=?"+edgeScope+" order by \"edgeNo\",e.edge_id",args);
+        edges.forEach(e->{if(e.get("condition")!=null)e.put("condition",parse(e.get("condition")));});
+        return Map.of("nodes",nodes,"edges",edges);
     }
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public Map<String,Object> confirmationScope(String sourceId,long bomId,long routeId) {
@@ -213,7 +267,7 @@ public class MasterDataCatalogService {
     private String from(){return " from plm_master_data_source s left join plm_product p on s.object_type='product' and p.product_id=s.object_id and p.deleted_flag=0 left join plm_phone_model_member pm on pm.id=s.phone_model_id left join plm_code_item c on c.code_item_id=pm.code_item_id left join plm_master_data_source ps on ps.source_system='crm' and ps.source_kind='product_series' and ps.organization_id=s.organization_id and ps.source_id=s.source_data->>'productSeriesId'";}
     private String filter(Query q,List<Object> args){return filter(q,args,false);}
     private String filter(Query q,List<Object> args,boolean bom){
-        String where=" where s.source_system='crm' and s.source_kind='product_sku' and s.batch_hash=(select source_hash from plm_master_data_import where status='committed' order by committed_at desc limit 1) and ((s.object_type='product' and p.product_id is not null and "+access.visibleSqlClause("product","s.object_id")+") or (s.object_type='partner' and "+access.visibleSqlClause("partner","s.object_id")+"))";
+        String where=" where s.source_system='crm' and s.source_kind='product_sku' and s.batch_hash="+CURRENT_BATCH+" and ((s.object_type='product' and p.product_id is not null and "+access.visibleSqlClause("product","s.object_id")+") or (s.object_type='partner' and "+access.visibleSqlClause("partner","s.object_id")+"))";
         if(!bom)where+=" and "+keyword(q,args,false);
         if(q.seriesCode!=null&&!q.seriesCode.isBlank()){where+=" and s.source_data->>'seriesCode'=?";args.add(q.seriesCode);}
         if(q.brandId!=null&&!q.brandId.isBlank()){where+=" and s.source_data->>'phoneBrandId'=?";args.add(q.brandId);}

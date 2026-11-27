@@ -740,7 +740,7 @@ watch(
       </div>
 
       <h5 class="route-check-title">{{ uiText("节点配置核对表") }}</h5>
-      <ProcessGraphView v-if="selectedRoute.graph" :graph="selectedRoute.graph"/>
+      <ProcessGraphView v-if="selectedRoute.graph" :graph="selectedRoute.graph" maintenance/>
       <el-table v-else :data="selectedRouteNodeCheckRows" border stripe size="small" class="m4-panel__table">
         <el-table-column prop="displayOrder" :label='uiText("顺序")' width="72" />
         <el-table-column prop="businessOperationCode" :label='uiText("产品工序编码")' min-width="180" />

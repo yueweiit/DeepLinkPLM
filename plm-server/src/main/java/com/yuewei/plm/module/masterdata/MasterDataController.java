@@ -23,6 +23,6 @@ public class MasterDataController {
     @GetMapping("/products/current-catalog/options") public ResponseVO<?> options(HttpServletRequest request){return response(catalog.options(),request);}
     @GetMapping("/process-routes/current") public ResponseVO<?> processes(HttpServletRequest request){return response(catalog.processes(),request);}
     @GetMapping("/products/current-catalog/{sourceId}") public ResponseVO<?> sku(@PathVariable String sourceId,@RequestParam(defaultValue="false") boolean versions,HttpServletRequest request){return response(catalog.sku(sourceId,versions),request);}
-    @GetMapping("/process-routes/{routeId}/graph") public ResponseVO<?> graph(@PathVariable long routeId,HttpServletRequest request){access.requireDomesticView();access.requirePermission("process:view");return response(catalog.graph(routeId),request);}
+    @GetMapping("/process-routes/{routeId}/graph") public ResponseVO<?> graph(@PathVariable long routeId,@RequestParam(defaultValue="false") boolean current,HttpServletRequest request){access.requireDomesticView();access.requirePermission("process:view");return response(catalog.graph(routeId,current),request);}
     private ResponseVO<?> response(Object result,HttpServletRequest request){return ResponseVO.success(result,RequestIdUtil.getRequestId(request),OffsetDateTime.now());}
 }

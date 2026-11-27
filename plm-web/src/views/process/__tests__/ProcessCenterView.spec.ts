@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -12,6 +12,7 @@ const processApi = vi.hoisted(() => ({
 }))
 
 vi.mock('@/api/modules/process', () => processApi)
+vi.mock('@/api/modules/masterData', async original => ({...await original<object>(),getMasterDataStatus: vi.fn().mockResolvedValue({ready:false})}))
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: {} }),
   useRouter: () => ({ push: vi.fn() })
@@ -64,6 +65,7 @@ describe('ProcessCenterView', () => {
 
   it('opens the route relation drawer with colors skus and operations', async () => {
     const wrapper = mount(ProcessCenterView, { global: { plugins: [ElementPlus] }, attachTo: document.body })
+    await flushPromises()
     await wrapper.findAll('.el-segmented__item')[2].trigger('click')
     await vi.waitFor(() => expect(wrapper.text()).toContain('亮甲 2.0'))
     await wrapper.get('[data-test="process-route-skus"]').trigger('click')
