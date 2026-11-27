@@ -40,6 +40,25 @@ class PilotAccessLocalIntegrationTest {
  }
  @Test void exactMoldGrantDoesNotAuthorizeSiblingSetsOrFiles(){long item=item(),a=mold(item,800001),b=mold(item,800002);long id=create("supplier",List.of(new PilotUserService.Scope("mold",a)));as(id);access.requireMold(a);access.requireItem(item);assertThatThrownBy(()->access.requireMold(b)).isInstanceOf(BusinessException.class);long file=jdbc.queryForObject("insert into plm_attachment(owner_object_type,owner_object_id,file_category,file_name,original_file_name,file_size,storage_key,created_by,updated_by) select 'Product',product_line_id,'drawing','test.pdf','test.pdf',0,'test-only','rollback-test','rollback-test' from plm_collaboration_item where item_id=? returning attachment_id",Long.class,item);assertThatThrownBy(()->access.requireFile(file)).isInstanceOf(BusinessException.class);}
  @Test void ProductScopeExpandsToItsMoldsButNotUnrelatedFiles(){long item=item(),mold=mold(item,800001),product=jdbc.queryForObject("select product_line_id from plm_collaboration_item where item_id=?",Long.class,item);long id=create("supplier",List.of(new PilotUserService.Scope("product",product)));as(id);access.requireProduct(product);access.requireItem(item);access.requireMold(mold);assertThat(access.visibleSqlClause("file","a.attachment_id")).contains("entity_type='file'");}
+ @Test void editingOperationsKeepsArchivedObjectGrantsWithoutGrantingNewArchivedObjects(){
+  String login=username();
+  var shipmentId=jdbc.queryForObject("insert into plm_partner_record(kind,code,name,owner_user_id,created_by,updated_by) values('sample_shipment',?,'测试寄样',?,'test','test') returning record_id",Long.class,login,admin.userId());
+  var shipment=new PilotUserService.Scope("partner",shipmentId);
+  long id=((Number)users.save(null,input(login,"domestic",List.of(shipment),null,"active"),null).get("userId")).longValue();
+  jdbc.update("update plm_partner_record set deleted_flag=1 where record_id=?",shipmentId);
+  var readAll=new PilotUserService.UserInput(login,"测试账号","回滚测试","domestic","active",false,"ding-"+login,
+    List.of("partner:view","samples:view-all"),null,List.of(shipment),null,1L);
+  users.save(id,readAll,null);
+  assertThat(jdbc.queryForObject("select permissions @> '[\"samples:view-all\"]'::jsonb and not all_objects from plm_pilot_account where user_id=?",Boolean.class,id)).isTrue();
+  assertThat(jdbc.queryForList("select entity_id from plm_pilot_scope where user_id=?",Long.class,id)).containsExactly(shipmentId);
+  var differentDuties=new PilotUserService.UserInput(login,"测试账号","回滚测试","domestic","active",false,"ding-"+login,
+    readAll.permissions(),List.of("engineering"),List.of(shipment),null,2L);
+  assertThatThrownBy(()->users.save(id,differentDuties,null)).isInstanceOf(BusinessException.class).hasMessageContaining("授权对象不存在");
+  assertThatThrownBy(()->users.save(id,input(login,"supplier",List.of(shipment),2L,"active"),null)).isInstanceOf(BusinessException.class).hasMessageContaining("授权对象不存在");
+  var another=create("domestic",List.of());
+  String otherLogin=jdbc.queryForObject("select username from sys_user where user_id=?",String.class,another);
+  assertThatThrownBy(()->users.save(another,input(otherLogin,"domestic",List.of(shipment),1L,"active"),null)).isInstanceOf(BusinessException.class).hasMessageContaining("授权对象不存在");
+ }
  @Test void staleGrantEditAndAccountDisableInvalidateExistingIdentity(){String login=username();long id=((Number)users.save(null,input(login,"mexico",List.of(),null,"active"),null).get("userId")).longValue();users.save(id,input(login,"mexico",List.of(),1L,"inactive"),null);assertThatThrownBy(()->users.save(id,input(login,"mexico",List.of(),1L,"active"),null)).isInstanceOf(BusinessException.class).hasMessageContaining("已变更");as(id);assertThatThrownBy(access::actor).isInstanceOf(BusinessException.class).hasMessageContaining("停用");}
  @Test @SuppressWarnings("unchecked") void responsibilityEditorInvalidatesOnlyChangedAccountDrafts(){
   String login=username();long changed=((Number)users.save(null,input(login,"supplier",List.of(),null,"active"),null).get("userId")).longValue(),unchanged=create("supplier",List.of());
