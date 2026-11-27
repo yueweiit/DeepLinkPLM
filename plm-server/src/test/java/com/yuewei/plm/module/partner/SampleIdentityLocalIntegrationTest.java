@@ -43,7 +43,7 @@ class SampleIdentityLocalIntegrationTest {
    create table plm_supplier_color_version(color_id bigint,version bigint,snapshot jsonb,created_by text);
    create table plm_attachment(attachment_id bigint primary key,file_name text,version_no text,content_type text,file_size bigint,deleted_flag int default 0);
    create table plm_partner_file(record_id bigint,attachment_id bigint,purpose text default 'material');
-   create table plm_supplier_profile(supplier_code text primary key,supplier_name text,short_code text,deleted_flag int default 0);insert into plm_supplier_profile values('SUP-A','实际原供方','A',0);
+   create table plm_supplier_profile(supplier_code text primary key,supplier_name text,short_code text,deleted_flag int default 0,data jsonb default '{}');insert into plm_supplier_profile values('SUP-A','实际原供方','A',0);
    create table plm_supplier_short_code_reservation(short_code text primary key,supplier_code text);
    """);
   // A pre-existing SP is preserved byte-for-byte by the migration.
@@ -99,10 +99,13 @@ class SampleIdentityLocalIntegrationTest {
  @Test void existingSampleGetsSupplierCodeInListsAndDetailsWithoutChangingItsRecordsEventsOrStock(){
   jdbc.update("update plm_supplier_profile set short_code='' where supplier_code='SUP-A'");
   var receipt=receive(4,"old-plain-sy");long id=number(receipt.get("sampleIdentityId"));String original=text(receipt.get("sampleCode"));
-  jdbc.update("update plm_supplier_profile set short_code='XD' where supplier_code='SUP-A'");
+  jdbc.update("update plm_supplier_profile set supplier_name='更新后的供应商全称',short_code='XD',data=jsonb_build_object('shortName','熊大') where supplier_code='SUP-A'");
   String records=jdbc.queryForObject("select jsonb_agg(to_jsonb(r)order by record_id)::text from plm_partner_record r",String.class),events=jdbc.queryForObject("select jsonb_agg(to_jsonb(e)order by event_id)::text from plm_partner_event e",String.class);
-  var head=registry.detail(id);String readable=text(head.get("sampleCode"));assertThat(readable).startsWith("SY-XD-").endsWith(original.substring(3));assertThat(head).containsEntry("code",original).containsEntry("originalSampleCode",original);
-  for(String keyword:List.of(original,readable)){var rows=maps(registry.page(Map.of("keyword",keyword)).get("content"));assertThat(rows).singleElement().satisfies(row->assertThat(row).containsEntry("sampleCode",readable).containsEntry("originalSampleCode",original));}
+  var head=registry.detail(id);String readable=text(head.get("sampleCode"));assertThat(readable).startsWith("SY-XD-").endsWith(original.substring(3));assertThat(head).containsEntry("code",original).containsEntry("originalSampleCode",original).containsEntry("supplierName","更新后的供应商全称").containsEntry("supplierProfileShortName","熊大");
+  for(String keyword:List.of(original,readable)){var rows=maps(registry.page(Map.of("keyword",keyword)).get("content"));assertThat(rows).singleElement().satisfies(row->assertThat(row).containsEntry("sampleCode",readable).containsEntry("originalSampleCode",original).containsEntry("supplierName","更新后的供应商全称").containsEntry("supplierProfileShortName","熊大"));}
+  var ownDomain=text(head.get("domain"));assertThat(ownDomain).isNotEmpty();
+  assertThat(maps(registry.options(Map.of("view","ledger","domain",ownDomain,"keyword","熊大")).get("suppliers"))).singleElement().satisfies(s->assertThat(s).containsEntry("supplierCode","SUP-A").containsEntry("supplierProfileShortName","熊大"));
+  assertThat(maps(registry.options(Map.of("view","ledger","domain",ownDomain.equals("model")?"research":"model","keyword","熊大")).get("suppliers"))).isEmpty();
   assertThat(samples.detail(number(receipt.get("id")))).containsEntry("sampleCode",readable);assertThat(map(head.get("balances"))).containsEntry("onhand",4L);
   assertThat(jdbc.queryForObject("select jsonb_agg(to_jsonb(r)order by record_id)::text from plm_partner_record r",String.class)).isEqualTo(records);assertThat(jdbc.queryForObject("select jsonb_agg(to_jsonb(e)order by event_id)::text from plm_partner_event e",String.class)).isEqualTo(events);
  }

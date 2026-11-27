@@ -27,3 +27,9 @@ Unchanged backend JAR: `ecd6e87d25719c6546334aeb247fd50b41f75b68a5756f1059781bf7
 Frontend index: `7ac53cc0bd7f346fc2b640d8a4e5cb5426df0fd2d5853e37a9bf684d610f32bd`.
 
 No schema, dependency, credentials, business import, backup or production test fixture is added. Existing static assets are retained for already-open pages. No duplicate write path or replacement picker is introduced. Only exact candidate source is published; unrelated shared-worktree edits are excluded. Private operational evidence, supplier documents and images are not part of this repository.
+
+## 2026-11-27 三个样品台账的分页、供应商与批量操作
+
+每页提供 50、200、1000、2000 和自定义整数。三个入口共用同一账号的选择，切换页长回到第一页并保留已勾选的样品。筛选、明细和批量工具均沿用原业务权限，库位和“未设库位”互斥。供应商简称来自供应商资料的 `data.shortName`，缺少简称时使用全称，历史资料缺失时保留可用的登记名称或编码。全称和简称都可搜索，样品码仍使用原供应商短码。
+
+前端样品台账、寄样、标签、照片及本地化回归 183 项通过。后端查询及 PostgreSQL 样品、寄样验证共 89 项，涵盖权限、供应商改名、名称与短码分离、分域候选和分页边界。Chromium 使用 4230 种模拟样品按每页 2000 条翻页，实际渲染 2000、2000、230 行。复核手机横屏、固定分页、无选中时的批量按钮和资料简称的显示与查找。

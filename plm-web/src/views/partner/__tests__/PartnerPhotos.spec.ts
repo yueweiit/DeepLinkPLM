@@ -23,6 +23,22 @@ afterEach(async()=>{for(const wrapper of wrappers.splice(0))if(wrapper.exists())
 function startPhoto(id=7,allowRetry=true){const wrapper=mount(PartnerPhoto,{props:{id,allowRetry}});wrappers.push(wrapper);return wrapper}
 
 describe('real authenticated photo states',()=>{
+ it('loads a ledger thumbnail through its identity only when it approaches the viewport',async()=>{
+  let intersects:(entries:Partial<IntersectionObserverEntry>[])=>void=()=>{}
+  const disconnect=vi.fn()
+  vi.stubGlobal('IntersectionObserver',class {
+   constructor(callback:typeof intersects){intersects=callback}
+   observe(){} disconnect=disconnect
+  })
+  try{
+   const wrapper=mount(PartnerPhoto,{props:{id:7,sampleIdentityId:71,lazy:true}});wrappers.push(wrapper)
+   await flushPromises();intersects([{isIntersecting:false}]);await flushPromises()
+   expect(api.sampleIdentityPhoto).not.toHaveBeenCalled()
+   intersects([{isIntersecting:true}]);await flushPromises()
+   expect(api.sampleIdentityPhoto).toHaveBeenCalledExactlyOnceWith(71,7,{signal:expect.any(AbortSignal)})
+   expect(disconnect).toHaveBeenCalled();expect(wrapper.find('img').exists()).toBe(true)
+  }finally{vi.unstubAllGlobals()}
+ })
  it('previews the sample ledger photo through the same narrow identity permission and releases it without generic file access',async()=>{
   const user=useUserStore();user.profile={userId:81,userName:'Angel',roleCode:'mexico'} as never;user.permissions=['task:arrival']
   const wrapper=mount(PartnerPhoto,{props:{id:7,sampleIdentityId:71,previewable:true},global:{stubs:{ElEmpty:true,ElDialog:{props:['modelValue','title'],template:'<section v-if="modelValue"><h2>{{title}}</h2><slot/></section>'},ElButton:{template:'<button><slot/></button>'}}}});wrappers.push(wrapper)

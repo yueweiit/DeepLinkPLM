@@ -29,6 +29,6 @@ export const saveSampleLocation=async(data:SampleLocationInputData,id?:number)=>
 export const deleteSampleLocation=async(id:number,data:{requestId:string;version:number})=>unwrapResponse<SampleLocationOption>(await request.delete(`/sample-locations/${id}`,{data}))
 export const setSampleLocations=async(data:Record<string,unknown>)=>unwrapResponse<SampleLocationMoveResult>(await request.post('/sample-identities/bulk-actions/move',data))
 
-export const sampleIdentityOptions=async()=>unwrapResponse<{suppliers:SampleSupplierOption[]}>(await request.get('/sample-identities/options?view=ledger'))
+export const sampleIdentityOptions=async(domain?:string)=>unwrapResponse<{suppliers:SampleSupplierOption[]}>(await request.get('/sample-identities/options',{params:{view:'ledger',domain}}))
 export const sampleLocationReferences=async(id:number)=>unwrapResponse<{id:number;referenced:boolean;referenceCount:number;onhand:number;events:number;records:number;batches:number;references:SampleLocationReference[]}>(await request.get(`/sample-locations/${id}/references`))
 export const sampleIdentityPhoto=async(id:number,fileId:number,options?:{signal?:AbortSignal})=>(await request.get<Blob>(`/sample-identities/${id}/photos/${fileId}/preview`,authorizedPreviewOptions(options))).data

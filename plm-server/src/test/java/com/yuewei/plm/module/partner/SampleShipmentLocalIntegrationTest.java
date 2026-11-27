@@ -31,7 +31,7 @@ class SampleShipmentLocalIntegrationTest {
    create table plm_pilot_scope(user_id bigint,entity_type text,entity_id bigint,unique(user_id,entity_type,entity_id));
    create table plm_partner_record(record_id bigserial primary key,kind text,code text unique,name text,status text default 'draft',version bigint default0,data jsonb default '{}',site text default '',external_id text default '',customer_id bigint,source_project_id bigint,supplier_code text,parent_record_id bigint,owner_user_id bigint,created_by text,updated_by text,updated_at timestamp default now(),deleted_flag int default0,sample_identity_id bigint);
    create table plm_sample_identity(identity_id bigint primary key,identity_key text,source_type text,basis jsonb);
-   create table plm_supplier_profile(supplier_code text primary key,supplier_name text,short_code text,deleted_flag int default 0);
+   create table plm_supplier_profile(supplier_code text primary key,supplier_name text,short_code text,deleted_flag int default 0,data jsonb default '{}');
    create table plm_partner_event(event_id bigserial primary key,record_id bigint,action text,data jsonb,request_id text,created_at timestamp default now(),created_by text,actor_id bigint,unique(record_id,request_id));
    create table plm_partner_revision(revision_id bigserial primary key,record_id bigint,revision bigint,data jsonb,created_by text,created_at timestamp default now(),unique(record_id,revision));
    create table plm_partner_create_request(actor_id bigint,kind text,request_id text,object_id bigint,primary key(actor_id,kind,request_id));
