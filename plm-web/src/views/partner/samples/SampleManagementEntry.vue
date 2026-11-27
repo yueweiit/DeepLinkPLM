@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { t as uiText } from '@/locales'
 
-import {computed,onBeforeUnmount,reactive,ref,watch} from 'vue'
+import {computed,onBeforeUnmount,ref,watch} from 'vue'
 import {useRoute,useRouter} from 'vue-router'
+import {Filter,Location,Plus,Search} from '@element-plus/icons-vue'
 import {useUserStore} from '@/stores/user'
-import {sampleIdentities,sampleIdentity,sampleStyleGroups,sampleIdentityOptions,querySampleIdentities} from '@/api/modules/sampleManagement'
-import type {SampleIdentity,SampleLabel,SamplePage,SampleStyleGroup,SampleSupplierOption,SampleLocationSite,SampleLocationOption} from '@/types/sampleManagement'
+import {sampleIdentities,sampleIdentity,sampleIdentityOptions,querySampleIdentities} from '@/api/modules/sampleManagement'
+import type {SampleIdentity,SampleLabel,SamplePage,SampleSupplierOption,SampleLocationSite,SampleLocationOption} from '@/types/sampleManagement'
 import PartnerWorkspace from '../PartnerWorkspace.vue'
-import PartnerPhoto from '../PartnerPhoto.vue'
+import SampleLedgerTable from './SampleLedgerTable.vue'
 import PartnerFiles from '../PartnerFiles.vue'
 import CatalogCurrentInfo from '../catalog/CatalogCurrentInfo.vue'
 import SampleLabelPrint from './SampleLabelPrint.vue'
@@ -20,35 +21,38 @@ import {sampleLocationAccess,sampleLocationLabel,samplePositionKey,sampleLocatio
 import SampleColorCorrectionDialog from './SampleColorCorrectionDialog.vue'
 import SampleReceiptCorrectionDialog from './SampleReceiptCorrectionDialog.vue'
 import {ElMessage} from 'element-plus'
-import {sampleDomains} from '@/utils/sampleDomains'
+import {sampleRoutes} from '@/utils/sampleDomains'
 import {saveBlob} from '@/utils/file'
 const route=useRoute(),router=useRouter(),user=useUserStore()
 const access=computed(()=>sampleLocationAccess(user)),localOnly=computed(()=>access.value.localOnly),locationOptions=useSampleLocationOptions()
 const legacy=computed(()=>!localOnly.value&&!!(route.query.id||route.query.new||route.query.sourceType||route.query.projectId||route.query.modelProductId||route.query.productId||route.query.customerId||route.query.customerContext||route.query.view==='batches'))
 const mode=computed(()=>route.query.view==='shipments'&&(!localOnly.value||access.value.canWrite)?'shipments':'identities'),domain=computed(()=>String(route.meta.sampleDomain||route.query.domain||''))
-const data=ref<SamplePage<SampleStyleGroup>>(),detail=ref<SampleIdentity>(),keyword=ref(''),appliedKeyword=ref(''),page=ref(1),loading=ref(false),error=ref(''),selected=ref(new Map<number,SampleIdentity>()),printOpen=ref(false),labels=ref<SampleLabel[]>([]),batchChoice=ref(false),pendingAction=ref('')
+const data=ref<SamplePage<SampleIdentity>>(),detail=ref<SampleIdentity>(),keyword=ref(''),appliedKeyword=ref(''),page=ref(1),loading=ref(false),error=ref(''),selected=ref(new Map<number,SampleIdentity>()),printOpen=ref(false),labels=ref<SampleLabel[]>([]),batchChoice=ref(false),pendingAction=ref('')
 const bulkAction=ref<'loan'|'return'|'move'>(),bulkRows=ref<SampleIdentity[]>([]),colorEditing=ref(false)
 const receiptAction=ref<'correct_receipt'|'void_receipt'>(),receiptRows=ref<SampleIdentity[]>([]),receiptStatus=ref('active')
+const filtersOpen=ref(false)
+const filterCount=computed(()=>Number(Boolean(supplierCode.value))+Number(Boolean(site.value&&!localOnly.value))+Number(Boolean(locationId.value))+Number(unlocated.value)+Number(!localOnly.value&&receiptStatus.value!=='active'))
 function correctReceipt(action:'correct_receipt'|'void_receipt',rows:SampleIdentity[]){if(!canWrite.value)return;receiptRows.value=rows;receiptAction.value=action}
 async function receiptSaved(ids:number[]){receiptAction.value=undefined;for(const id of ids)selected.value.delete(id);await load();if(detail.value)await loadDetail();ElMessage.success(uiText('收样登记已更新，原始记录和附件保留'))}
 const suppliers=ref<SampleSupplierOption[]>([]),supplierCode=ref(String(route.query.supplierCode||'')),site=ref<SampleLocationSite|''>(localOnly.value?'MX':''),locationId=ref<number>(),chosenLocation=ref<SampleLocationOption>(),unlocated=ref(false)
-interface Children {page:number;data?:SamplePage<SampleIdentity>;loading:boolean;error:string}
-const children=ref<Record<string,Children>>({}),expanded=ref(new Set<string>()),expanding=ref(false),expandError=ref(''),expandOnLoad=ref(true),selecting=ref(false),locationRows=ref<SampleIdentity[]>([]),locationSetOpen=ref(false),locationManagerOpen=ref(false)
-const selectedInGroup=(row:SampleStyleGroup)=>[...selected.value.values()].filter(value=>value.groupKey===row.groupKey).length
-const groupSelected=(row:SampleStyleGroup)=>selectedInGroup(row)>=row.sampleCount&&row.sampleCount>0
-const pageExpanded=computed(()=>!!data.value?.content.length&&data.value.content.every(row=>expanded.value.has(row.groupKey)))
-const selectedOnPage=computed(()=>(data.value?.content||[]).filter(row=>selectedInGroup(row)>0).length)
-const pageSelected=computed(()=>!!data.value?.content.length&&data.value.content.every(groupSelected))
-function selectPage(checked:boolean){return selectScope((data.value?.content||[]).map(row=>row.groupKey),checked)}
-const selectionError=ref(''),retrySelection=ref<(()=>void)>(),exportProgress=ref(0)
-function clearSelection(){selected.value=new Map();selectionError.value='';retrySelection.value=undefined}
-async function selectScope(groupKeys:string[]|undefined,checked=true){
+const selecting=ref(false),locationRows=ref<SampleIdentity[]>([]),locationSetOpen=ref(false),locationManagerOpen=ref(false)
+const selectionError=ref(''),exportProgress=ref(0)
+let selectionEpoch=0
+function clearSelection(){
+ ++selectionEpoch;selecting.value=false;selected.value.clear();selectionError.value='';exportError.value=''
+}
+function selectPage(checked:boolean){
+ for(const sample of data.value?.content || [])check(sample,checked)
+}
+async function selectResults(){
  if(selecting.value)return
- if(!checked){const next=new Map(selected.value);for(const [id,row] of next)if(!groupKeys||groupKeys.includes(row.groupKey||''))next.delete(id);selected.value=next;return}
- const ticket=epoch,auth=user.token;selecting.value=true;selectionError.value='';retrySelection.value=undefined
- try{const result=await querySampleIdentities({filters:filters(),...(groupKeys?{groupKeys}:{})});if(ticket!==epoch||auth!==user.token)return;const next=new Map(selected.value);for(const row of result.content)next.set(row.sampleIdentityId,row);selected.value=next}
- catch(e){if(ticket===epoch&&auth===user.token){selectionError.value=e instanceof Error?e.message:uiText('读取样品失败，请重试');retrySelection.value=()=>void selectScope(groupKeys,checked)}}
- finally{selecting.value=false}
+ const ticket=++selectionEpoch
+ selecting.value=true;selectionError.value=''
+ try{
+  const result=await querySampleIdentities({filters:filters()})
+  if(ticket===selectionEpoch)selected.value=new Map(result.content.map(sample=>[sample.sampleIdentityId,sample]))
+ }catch(e){if(ticket===selectionEpoch)selectionError.value=e instanceof Error?e.message:uiText('读取样品失败，请重试')}
+ finally{if(ticket===selectionEpoch)selecting.value=false}
 }
 function setLocations(rows:SampleIdentity[]){locationRows.value=rows;locationSetOpen.value=true}
 async function locationsSaved(){locationSetOpen.value=false;await bulkSaved()}
@@ -61,56 +65,59 @@ const exporting=ref(false),exportError=ref('')
 let epoch=0,detailEpoch=0,exportEpoch=0,disposed=false
 const canWrite=computed(()=>!localOnly.value&&user.hasPermission('samples:write'))
 const canCorrectColor=computed(()=>canWrite.value&&(user.permissions.includes('*')||user.profile?.canMaintainEngineeringData===true))
-const domainTitle=computed(()=>domain.value==='model'||domain.value==='research'||domain.value==='partner'?sampleDomains[domain.value]+'样品管理':'样品管理')
+const scopes=[{key:'partner',label:'合作产品'},{key:'research',label:'新品研发'},{key:'model',label:'型号研发'}] as const
 const receiptLabel=computed(()=>domain.value==='model'?'登记型号收样':domain.value==='research'?'登记研发收样':'其他来源收样')
 const correctionColor=(data:Record<string,unknown>|undefined,key:string)=>String((data?.[key] as {colorName?:string})?.colorName||'未填写')
 const quantity=(value:number|undefined)=>value==null?'—':new Intl.NumberFormat('zh-CN').format(value)
-const positions=(row:SampleIdentity)=>(row.positions||row.balances.positions||[]).filter(p=>p.onhand>0)
+const positions=(row:SampleIdentity)=>(row.positions||row.balances.positions||[]).filter(p=>p.onhand>0&&(!localOnly.value||p.site!=='CN'))
 
-function positionSummary(row:SampleStyleGroup){
- const current=row.positions.filter(position=>position.onhand>0)
- if(current.length<=1)return current.map(position=>sampleLocationLabel(position)+' · '+position.onhand)
- const result=sampleLocationSites.flatMap(site=>{const count=new Set(current.filter(position=>position.site===site.value&&position.locationId).map(position=>position.locationId)).size;return count?[uiText('{site} {count} 处',{site:uiText(site.label),count})]:[]})
- const unlocated=current.filter(position=>!position.locationId).reduce((total,position)=>total+position.onhand,0)
- if(unlocated)result.push(uiText('未设库位 {qty} 件',{qty:unlocated}))
- return result
-}
 function filters(){return {domain:domain.value||undefined,keyword:appliedKeyword.value||undefined,supplierCode:supplierCode.value||undefined,site:localOnly.value?'MX':site.value||undefined,locationId:locationId.value,unlocated:unlocated.value||undefined,receiptStatus:receiptStatus.value}}
-async function load(){if(legacy.value||mode.value!=='identities')return;const ticket=++epoch,auth=user.token;loading.value=true;error.value='';expanding.value=false;expandError.value='';children.value={};expanded.value=new Set();try{const next=await sampleStyleGroups({...filters(),page:page.value,size:50});if(ticket===epoch&&auth===user.token){data.value=next;if(expandOnLoad.value)togglePage()}}catch(e){if(ticket===epoch&&auth===user.token)error.value=e instanceof Error?e.message:'读取样品失败，请重试'}finally{if(ticket===epoch)loading.value=false}}
-async function loadChildren(row:SampleStyleGroup,childPage=1){const state=reactive<Children>({page:childPage,loading:true,error:''});children.value[row.groupKey]=state;const ticket=epoch,auth=user.token;try{const result=await sampleIdentities({...filters(),groupKey:row.groupKey,page:childPage,size:20});if(ticket===epoch&&auth===user.token&&children.value[row.groupKey]===state){state.data={...result,content:result.content.map(value=>({...value,groupKey:row.groupKey}))};for(const value of state.data.content)if(selected.value.has(value.sampleIdentityId))selected.value.set(value.sampleIdentityId,value)}}catch(e){if(ticket===epoch&&auth===user.token&&children.value[row.groupKey]===state)state.error=e instanceof Error?e.message:uiText('读取样品详情失败')}finally{state.loading=false}}
-function toggle(row:SampleStyleGroup){if(expanded.value.has(row.groupKey))expanded.value.delete(row.groupKey);else{expanded.value.add(row.groupKey);if(!children.value[row.groupKey])void loadChildren(row)}}
-function togglePage(){
- if(pageExpanded.value){expandOnLoad.value=false;expanded.value.clear();return}
- expandOnLoad.value=true
- expanded.value=new Set((data.value?.content||[]).map(row=>row.groupKey));void loadPageChildren()
-}
-async function loadPageChildren(){
- if(expanding.value)return
- const rows=(data.value?.content||[]).filter(row=>!children.value[row.groupKey]?.data)
- expandError.value=''
- if(!rows.length)return
- const ticket=epoch,auth=user.token;expanding.value=true
+async function load(){
+ const ticket=++epoch
+ if(legacy.value||mode.value!=='identities'||!user.token){loading.value=false;return}
+ loading.value=true;error.value=''
  try{
-  const result=await querySampleIdentities({filters:filters(),groupKeys:rows.map(row=>row.groupKey)})
-  if(ticket!==epoch||auth!==user.token)return
-  const grouped=new Map<string,SampleIdentity[]>(rows.map(row=>[row.groupKey,[]]))
-  for(const sample of result.content)grouped.get(sample.groupKey||'')?.push(sample)
-  const next={...children.value},selection=new Map(selected.value)
-  for(const row of rows){const content=grouped.get(row.groupKey)!;next[row.groupKey]={page:1,loading:false,error:'',data:{content:content.slice(0,20),page:1,size:20,totalElements:content.length,totalPages:Math.ceil(content.length/20)}}}
-  for(const sample of result.content)if(selection.has(sample.sampleIdentityId))selection.set(sample.sampleIdentityId,sample)
-  children.value=next;selected.value=selection
- }catch(e){if(ticket===epoch&&auth===user.token)expandError.value=e instanceof Error?e.message:uiText('读取样品详情失败')}
- finally{if(ticket===epoch)expanding.value=false}
+  const next=await sampleIdentities({...filters(),page:page.value,size:50})
+  if(ticket!==epoch)return
+  if(page.value>Math.max(1,next.totalPages)){page.value=Math.max(1,next.totalPages);await load();return}
+  data.value=next
+  for(const row of next.content)if(selected.value.has(row.sampleIdentityId))selected.value.set(row.sampleIdentityId,row)
+ }catch(e){
+  if(ticket===epoch){data.value=undefined;error.value=e instanceof Error?e.message:uiText('读取样品失败，请重试')}
+ }finally{if(ticket===epoch)loading.value=false}
 }
-async function selectGroup(row:SampleStyleGroup,checked:boolean){return selectScope([row.groupKey],checked)}
-function query(){appliedKeyword.value=keyword.value.trim();if(selected.value.size)ElMessage.info(uiText('筛选已变化，已清空原选择'));clearSelection();page.value=1;void load()}
-async function loadOptions(){try{const result=await sampleIdentityOptions();suppliers.value=result.suppliers}catch(e){error.value=e instanceof Error?e.message:uiText('读取供应商失败，请重试')}await locationOptions.load({...(localOnly.value||site.value?{site:localOnly.value?'MX':site.value as SampleLocationSite}:{})})}
-watch(site,()=>{locationId.value=undefined;void loadOptions();query()})
-watch(locationId,id=>{if(id)chosenLocation.value=locationOptions.rows.value.find(row=>row.id===id)||chosenLocation.value;else chosenLocation.value=undefined})
-function searchLocations(keyword:string){void locationOptions.load({...(localOnly.value||site.value?{site:localOnly.value?'MX':site.value as SampleLocationSite}:{}),keyword:keyword.trim()})}
-watch([supplierCode,locationId,unlocated],query)
-void loadOptions()
-async function loadDetail(){const id=Number(route.query.identityId);if(!id){detail.value=undefined;return}const ticket=++detailEpoch,auth=user.token;loading.value=true;error.value='';try{const value=await sampleIdentity(id);if(ticket===detailEpoch&&auth===user.token)detail.value=value}catch(e){if(ticket===detailEpoch&&auth===user.token)error.value=e instanceof Error?e.message:'读取样品详情失败'}finally{if(ticket===detailEpoch)loading.value=false}}
+function goPage(value:number){if(value!==page.value){page.value=value;void load()}}
+let searchTimer:ReturnType<typeof setTimeout>
+function query(){clearTimeout(searchTimer);appliedKeyword.value=keyword.value.trim()}
+function scheduleSearch(){clearTimeout(searchTimer);searchTimer=setTimeout(query,250)}
+const optionsError=ref(''),supplierOptionsReady=ref(false)
+let optionsEpoch=0
+async function loadOptions(){
+ const ticket=++optionsEpoch
+ optionsError.value=''
+ if(!supplierOptionsReady.value){
+  try{const result=await sampleIdentityOptions();if(ticket!==optionsEpoch)return;suppliers.value=result.suppliers;supplierOptionsReady.value=true}
+  catch(e){if(ticket===optionsEpoch)optionsError.value=e instanceof Error?e.message:uiText('读取供应商失败，请重试')}
+ }
+ if(ticket===optionsEpoch)await locationOptions.load(site.value?{site:site.value}:{})
+}
+watch(filtersOpen,open=>{if(open)void loadOptions()})
+watch(site,()=>{locationId.value=undefined;if(filtersOpen.value)void loadOptions()},{flush:'sync'})
+watch(locationId,id=>{chosenLocation.value=id?locationOptions.rows.value.find(row=>row.id===id)||chosenLocation.value:undefined})
+function searchLocations(keyword:string){void locationOptions.load({...(site.value?{site:site.value}:{}),keyword:keyword.trim()})}
+const detailLoading=ref(false),detailError=ref('')
+async function loadDetail(){
+ const id=Number(route.query.identityId),ticket=++detailEpoch
+ detailError.value=''
+ if(!id||legacy.value||!user.token){detail.value=undefined;detailLoading.value=false;return}
+ detailLoading.value=true
+ try{const value=await sampleIdentity(id);if(ticket===detailEpoch)detail.value=value}
+ catch(e){if(ticket===detailEpoch){detail.value=undefined;detailError.value=e instanceof Error?e.message:uiText('读取样品详情失败')}}
+ finally{if(ticket===detailEpoch)detailLoading.value=false}
+}
+function closeActionMenu(event:MouseEvent){
+ if((event.target as HTMLElement).closest('button'))(event.currentTarget as HTMLElement).closest('details')?.removeAttribute('open')
+}
 function showView(view:string){void router.push({path:route.path,query:{...(domain.value&&!route.meta.sampleDomain?{domain:domain.value}:{}),...(view==='identities'?{}:{view})}})}
 function open(row:SampleIdentity){void router.push({path:route.path,query:{...route.query,identityId:row.sampleIdentityId}})}
 function check(row:SampleIdentity,checked:boolean){if(checked){selected.value.set(row.sampleIdentityId,row)}else selected.value.delete(row.sampleIdentityId)}
@@ -132,34 +139,157 @@ async function exportLabels(){
 function openBatch(id:number,action=''){batchChoice.value=false;void router.push({path:route.path,query:{view:'batches',id,from:route.fullPath,...(action&&action!=='files'?{action}:{})}})}
 function operate(action:string){if(!detail.value)return;pendingAction.value=action;if(detail.value.batches?.length===1)openBatch(detail.value.batches[0]!.id,action);else batchChoice.value=true}
 function closeDetail(){const query={...route.query};delete query.identityId;void router.push({path:route.path,query})}
-watch(()=>[route.path,route.query.view,route.query.id,route.query.new],()=>{++detailEpoch;detail.value=undefined;selected.value=new Map();page.value=1;void load()},{immediate:true})
-watch(()=>route.query.identityId,()=>{++detailEpoch;detail.value=undefined;if(!legacy.value)void loadDetail()},{immediate:true})
-watch(()=>user.token,()=>{receiptAction.value=undefined;bulkAction.value=undefined;colorEditing.value=false;++epoch;++detailEpoch;data.value=undefined;detail.value=undefined;selected.value=new Map();children.value={};expanded.value=new Set();expanding.value=false;expandError.value='';expandOnLoad.value=true;labels.value=[];printOpen.value=false;batchChoice.value=false;error.value=''})
-watch(()=>[user.token,user.profile?.userId],()=>{++exportEpoch;exporting.value=false;exportError.value='';selected.value=new Map()},{flush:'sync'})
-onBeforeUnmount(()=>{disposed=true;++epoch;++detailEpoch;++exportEpoch})
+watch([()=>route.path,()=>route.query.domain,()=>route.query.supplierCode],()=>{
+ clearTimeout(searchTimer);keyword.value='';appliedKeyword.value=''
+ filtersOpen.value=false;supplierCode.value=String(route.query.supplierCode||'')
+ site.value=localOnly.value?'MX':'';locationId.value=undefined;unlocated.value=false;receiptStatus.value='active'
+},{flush:'sync'})
+watch([()=>route.path,domain,legacy,mode,localOnly,appliedKeyword,supplierCode,site,locationId,unlocated,receiptStatus,()=>user.token,()=>user.profile?.userId],()=>{
+ clearSelection();data.value=undefined;page.value=1;void load()
+},{immediate:true})
+watch([()=>route.path,()=>route.query.identityId,legacy,()=>user.token,()=>user.profile?.userId],()=>{
+ detail.value=undefined;void loadDetail()
+},{immediate:true})
+watch([()=>user.token,()=>user.profile?.userId],()=>{
+ ++epoch;++detailEpoch;++optionsEpoch;++exportEpoch;clearSelection()
+ data.value=undefined;detail.value=undefined;suppliers.value=[];supplierOptionsReady.value=false;filtersOpen.value=false
+ receiptAction.value=undefined;bulkAction.value=undefined;colorEditing.value=false;locationSetOpen.value=false;locationManagerOpen.value=false
+ labels.value=[];printOpen.value=false;batchChoice.value=false;exporting.value=false;exportError.value=''
+ site.value=localOnly.value?'MX':'';locationId.value=undefined
+},{flush:'sync'})
+onBeforeUnmount(()=>{disposed=true;clearTimeout(searchTimer);++epoch;++detailEpoch;++selectionEpoch;++exportEpoch;++optionsEpoch})
 </script>
 <template>
  <PartnerWorkspace v-if="legacy"/>
  <section v-else class="sample-management">
-  <header class="sample-title"><h1>{{uiText(String(domainTitle))}}</h1><nav><button :class="{active:mode==='identities'}" @click="showView('identities')">{{uiText('样品台账')}}</button><button v-if="!localOnly||access.canWrite" :class="{active:mode==='shipments'}" @click="showView('shipments')">{{uiText(localOnly?'本人待签收':'寄样物流')}}</button></nav><div class="top-actions"><el-button v-if="access.canWrite" size="small" @click="locationManagerOpen=true">{{uiText('位置管理')}}</el-button><el-button v-if="canWrite&&!['model','research'].includes(domain)" size="small" @click="router.push({path:'/partner-selections',query:{from:route.fullPath}})">{{uiText('从选品目录登记收样')}}</el-button><el-button v-if="canWrite&&domain!=='partner'" size="small" @click="router.push({path:route.path,query:{view:'batches',new:'1',from:route.fullPath}})">{{uiText(receiptLabel)}}</el-button></div></header>
-  <SampleShipments v-if="mode==='shipments'" :domain="domain"/>
-  <template v-else>
-   <div class="sample-filters"><el-input v-model="keyword" size="small" clearable :placeholder="uiText('搜索样品码、款式、型号或颜色')" @keyup.enter="query" @clear="query"/><el-select v-model="supplierCode" size="small" clearable filterable :placeholder="uiText('全部供应商')" :aria-label="uiText('供应商筛选')"><el-option v-for="supplier in suppliers" :key="supplier.supplierCode" :value="supplier.supplierCode" :label="[supplier.supplierName,supplier.shortName].filter(Boolean).join(' · ')"/></el-select><el-select v-model="site" size="small" :disabled="localOnly" :clearable="!localOnly" :placeholder="uiText('全部站点')" :aria-label="uiText('站点筛选')"><el-option v-for="value in sampleLocationSites.filter(value=>!localOnly||value.value==='MX')" :key="value.value" :value="value.value" :label="uiText(value.label)"/></el-select><el-select v-model="locationId" size="small" filterable remote :remote-method="searchLocations" :loading="locationOptions.loading.value" clearable :placeholder="uiText('全部库位')" :aria-label="uiText('库位筛选')"><el-option v-if="chosenLocation&&!locationOptions.rows.value.some(row=>row.id===chosenLocation?.id)" :value="chosenLocation.id" :label="sampleLocationLabel(chosenLocation)"/><el-option v-for="location in locationOptions.rows.value" :key="location.id" :value="location.id" :label="sampleLocationLabel(location)"/></el-select><el-checkbox v-model="unlocated">{{uiText('未设库位')}}</el-checkbox><el-select v-if="!localOnly" v-model="receiptStatus" size="small" :aria-label="uiText('收样登记状态')" @change="query"><el-option :label="uiText('有效登记')" value="active"/><el-option :label="uiText('已删除登记')" value="voided"/><el-option :label="uiText('全部登记')" value="all"/></el-select><el-button size="small" @click="query">{{uiText('查询')}}</el-button><el-button size="small" @click="load">{{uiText('刷新')}}</el-button><el-button size="small" type="primary" plain :loading="expanding&&!pageExpanded" :disabled="loading||!data?.content.length" :aria-expanded="pageExpanded" @click="togglePage">{{uiText(pageExpanded?'收起本页全部':'展开本页全部')}}</el-button><el-button size="small" :loading="selecting" :disabled="loading||!data?.totalSamples" @click="selectScope(undefined)">{{uiText('全选当前筛选结果（{count}种）',{count:data?.totalSamples||0})}}</el-button><el-checkbox :model-value="pageSelected" :disabled="selecting||loading" :indeterminate="selectedOnPage>0&&!pageSelected" @change="selectPage(Boolean($event))">{{uiText('全选本页样品')}}</el-checkbox><span class="ledger-count">{{uiText('共 {styles} 款／{samples} 种样品',{styles:data?.totalElements||0,samples:data?.totalSamples||0})}}</span></div>
-   <div v-if="selected.size" class="selection-actions"><strong>{{uiText('已选 {count} 种样品',{count:selected.size})}}</strong><el-button :disabled="selecting" v-if="access.canWrite" size="small" type="primary" @click="setLocations([...selected.values()])">{{uiText('批量设置位置')}}</el-button><template v-if="canWrite"><el-button :disabled="selecting" size="small" type="danger" plain @click="correctReceipt('void_receipt',[...selected.values()])">{{uiText('批量删除登记（')}}{{selected.size}}）</el-button><el-button :disabled="selecting" size="small" @click="beginBulk('move')">{{uiText('精细移库')}}</el-button><el-button :disabled="selecting" size="small" @click="sendSelected">{{uiText('批量发往墨西哥')}}</el-button><el-button :disabled="selecting" size="small" @click="beginBulk('loan')">{{uiText('批量借出')}}</el-button><el-button :disabled="selecting" size="small" @click="beginBulk('return')">{{uiText('批量归还')}}</el-button></template><el-button :disabled="selecting" size="small" @click="print([...selected.values()])">{{uiText('批量打印标签（')}}{{selected.size}}）</el-button><el-button size="small" :loading="exporting" :disabled="loading||exporting||selecting" @click="exportLabels">{{uiText('批量导出标签（')}}{{selected.size}}）</el-button><el-button link size="small" :disabled="selecting" @click="clearSelection">{{uiText('清空已选')}}</el-button></div>
-   <el-alert v-if="error" :title="error" type="error" :closable="false"><el-button link @click="load">{{uiText('重试')}}</el-button></el-alert><el-alert v-if="exportError" :title="exportError" type="error" :closable="false"><el-button link :disabled="selecting" @click="exportLabels">{{uiText('重试导出')}}</el-button></el-alert>
-   <el-alert v-if="expandError" :title="expandError" type="error" :closable="false"><el-button link :loading="expanding" @click="loadPageChildren">{{uiText('重试')}}</el-button></el-alert><p v-if="selecting" role="status">{{uiText('正在选择样品…')}}</p><p v-if="exporting" role="status">{{uiText('正在生成标签 {done}/{total}',{done:exportProgress,total:selected.size})}}</p><el-alert v-if="selectionError" class="selection-error" :title="selectionError" type="error" :closable="false"><el-button link @click="retrySelection?.()">{{uiText('重试')}}</el-button></el-alert>
-   <div class="identity-table" role="table" :aria-label="uiText('按供应商和款式汇总的样品台账')" v-loading="loading||expanding"><div class="style-row identity-head" role="row"><span><el-checkbox :model-value="pageSelected" :disabled="selecting||loading" :indeterminate="selectedOnPage>0&&!pageSelected" :aria-label="uiText('全选本页样品')" @change="selectPage(Boolean($event))"/> {{uiText('图片')}}</span><span>{{uiText('款式／供应商')}}</span><span>{{uiText('型号／颜色／样品种数')}}</span><span>{{uiText(localOnly?'当地数量':'中国／墨西哥在库')}}</span><span>{{uiText('存放位置／数量')}}</span><span>{{uiText('操作')}}</span></div>
-    <div class="identity-body"><section v-for="row in data?.content" :key="row.groupKey" class="style-group"><article class="style-row" role="row"><div class="identity-photo" role="cell"><el-checkbox :model-value="groupSelected(row)" :disabled="selecting" :indeterminate="selectedInGroup(row)>0&&!groupSelected(row)" :aria-label="uiText('选择款式')+row.name" @change="selectGroup(row,Boolean($event))"/><PartnerPhoto v-if="row.photo" :id="row.photo.id" :sample-identity-id="row.photo.sampleIdentityId" previewable/></div><div role="cell"><button class="identity-link" :aria-expanded="expanded.has(row.groupKey)" @click="toggle(row)">{{expanded.has(row.groupKey)?'▾':'▸'}} {{row.name}}</button><small>{{row.supplierName||uiText('供应商待核对')}}</small></div><div role="cell"><span>{{uiText('{phones} 型号 · {colors} 颜色',{phones:row.phoneCount,colors:row.colorCount})}}</span><small>{{uiText('{count} 种样品',{count:row.sampleCount})}}<template v-if="row.unconfirmedColorCount>0"> · {{uiText('{count} 色名待核对',{count:row.unconfirmedColorCount})}}</template></small></div><div class="identity-numbers" role="cell"><span v-if="!localOnly">{{uiText('中国')}} <b>{{quantity(row.cnOnhand)}}</b> · </span><span>{{uiText(localOnly?'在库':'墨西哥')}} <b>{{quantity(row.mxOnhand)}}</b></span><small>{{uiText('借出 ')}}{{quantity(row.balances.borrowed)}} · {{uiText('在途 ')}}{{quantity(row.balances.inTransit)}}</small></div><div role="cell"><span v-for="summary in positionSummary(row)" :key="summary" class="position-line">{{summary}}</span><small v-if="!positionSummary(row).length">{{uiText('暂无在库位置')}}</small></div><div class="identity-actions" role="cell"><el-button link size="small" type="primary" @click="toggle(row)">{{uiText(expanded.has(row.groupKey)?'收起明细':'展开明细')}}</el-button></div></article>
-     <section v-if="expanded.has(row.groupKey)" class="sample-children" v-loading="children[row.groupKey]?.loading"><el-alert v-if="children[row.groupKey]?.error" :title="children[row.groupKey]!.error" type="error" :closable="false"><el-button link @click="loadChildren(row)">{{uiText('重试')}}</el-button></el-alert><article v-for="sample in children[row.groupKey]?.data?.content" :key="sample.sampleIdentityId" class="identity-row"><div class="identity-photo"><el-checkbox :model-value="selected.has(sample.sampleIdentityId)" :disabled="selecting" :aria-label="uiText('选择')+sample.sampleCode" @change="check(sample,Boolean($event))"/></div><div><button class="identity-link" @click="open(sample)">{{sample.sampleCode}}</button><strong>{{sample.productName||sample.name}}</strong></div><div><span>{{sample.phoneName||sample.specName||uiText('待核对')}}</span><small>{{[sample.colorName,sample.sampleVersion].filter(Boolean).join(' · ')}}</small></div><div><span>{{uiText('在库 ')}}{{quantity(sample.balances.onhand)}} · {{uiText('借出 ')}}{{quantity(sample.balances.borrowed)}}</span><small>{{uiText('在途 ')}}{{quantity(sample.balances.inTransit)}}</small></div><div><span v-for="p in positions(sample)" :key="samplePositionKey(p)" class="position-line">{{sampleLocationLabel(p)}} · {{p.onhand}}</span><small v-if="!positions(sample).length">{{uiText('暂无在库位置')}}</small></div><div class="identity-actions"><el-button link size="small" @click="open(sample)">{{uiText('详情')}}</el-button><template v-if="canWrite"><el-button link size="small" type="primary" @click="correctReceipt('correct_receipt',[sample])">{{uiText('改数量')}}</el-button><el-button link size="small" type="danger" @click="correctReceipt('void_receipt',[sample])">{{uiText('删除登记')}}</el-button></template><el-button v-if="access.canWrite" link size="small" type="primary" :disabled="!sample.balances.onhand" @click="setLocations([sample])">{{uiText('设置位置')}}</el-button><el-button link size="small" @click="print([sample])">{{uiText('标签')}}</el-button></div></article><el-pagination v-if="(children[row.groupKey]?.data?.totalElements||0)>20" :current-page="children[row.groupKey]?.page||1" :page-size="20" :total="children[row.groupKey]?.data?.totalElements||0" layout="total,prev,pager,next" size="small" @current-change="loadChildren(row,$event)"/></section>
-    </section><el-empty v-if="data&&!data.content.length" :description="uiText('暂无匹配样品')"/></div>
-   </div><footer><span>{{uiText('每页50款；展开后查看并选择样品明细。')}}</span><el-pagination v-model:current-page="page" :page-size="50" :total="data?.totalElements||0" :pager-count="5" layout="total,prev,pager,next" size="small" @current-change="load"/></footer>
-  </template>
-  <el-drawer :model-value="!!route.query.identityId" :title="detail?detail.sampleCode+' · '+detail.name:uiText('样品详情')" size="min(920px,96vw)" @close="closeDetail"><div v-loading="loading" class="identity-detail"><el-alert v-if="error" :title="error" type="error" :closable="false"/><template v-if="detail"><div class="detail-actions"><el-button v-if="localOnly&&access.canWrite" size="small" @click="moveLocal(detail)">{{uiText('精细移库')}}</el-button><el-button v-if="access.canWrite" size="small" @click="setLocations([detail])">{{uiText('设置位置')}}</el-button><el-button type="primary" size="small" @click="print([detail])">{{ uiText("打印／补打二维码标签") }}</el-button><template v-if="canWrite"><el-button v-if="detail.sourceType==='catalog'&&canCorrectColor" size="small" @click="colorEditing=true">{{ uiText("更正颜色") }}</el-button><el-button size="small" @click="operate('loan')">{{ uiText("借出") }}</el-button><el-button size="small" @click="operate('return')">{{ uiText("归还") }}</el-button><el-button size="small" @click="operate('move')">{{ uiText("移动位置") }}</el-button><el-button size="small" @click="router.push({path:route.path,query:{view:'shipments',newShipment:'mexico_outbound',sampleIdentityId:detail.sampleIdentityId}})">{{ uiText("发往墨西哥") }}</el-button></template></div><p v-if="detail.legacySampleCode">{{ uiText("旧码 ") }}{{detail.legacySampleCode}}{{ uiText(" 已归入 ") }}{{detail.sampleCode}}{{ uiText("；原收样和流转记录保留。") }}</p><h3>{{detail.productName||detail.name}}</h3><CatalogCurrentInfo :value="detail.currentCatalog" :recorded-name="detail.recordedName"/><p v-if="detail.supplierName">{{ uiText("供应商：") }}{{detail.supplierName}}</p><p>{{detail.phoneName||detail.specName}} · {{[detail.colorName,detail.sampleVersion].filter(Boolean).join(' · ')}}</p><section v-if="!localOnly" class="identity-files"><PartnerFiles kind="sample-identities" :id="detail.sampleIdentityId" :files="detail.files||[]" :model-value="[]" :can-write="false" :can-write-money="false" compact/><el-button v-if="canWrite" size="small" @click="operate('files')">{{ uiText("上传到原收样批次") }}</el-button></section><div class="identity-summary"><strong>{{ uiText("在库 ") }}{{detail.balances.onhand}}</strong><span>{{ uiText("可用 ") }}{{detail.balances.available}}</span><span>{{ uiText("借出 ") }}{{detail.balances.borrowed}}</span><span>{{ uiText("在途 ") }}{{quantity(detail.balances.inTransit)}}</span></div><h3>{{ uiText("当前存放位置／数量") }}</h3><p v-for="p in positions(detail)" :key="samplePositionKey(p)">{{sampleLocationLabel(p)}}{{ uiText(" · 在库 ") }}{{p.onhand}}{{ uiText(" · 可用 ") }}{{p.available}}{{ uiText(" · 留样 ") }}{{p.retained}}{{ uiText(" · 损坏 ") }}{{p.damaged}}</p><p v-if="!positions(detail).length">{{ uiText("当前没有在库实物。") }}</p><h3>{{ uiText("借出待还") }}</h3><p v-for="loan in (detail.loans||detail.balances.loans||[]).filter(l=>l.outstanding>0)" :key="loan.id">{{loan.person}}{{ uiText(" · 待还 ") }}{{loan.outstanding}}{{ uiText(" · 预计 ") }}{{loan.due||uiText('未记录')}}</p><template v-if="!localOnly&&detail.events?.some(e=>e.action==='sample_color_correction')"><h3>{{ uiText("颜色更正记录") }}</h3><p v-for="event in detail.events.filter(e=>e.action==='sample_color_correction')" :key="event.id">{{correctionColor(event.data,'before')}} → {{correctionColor(event.data,'after')}} · {{event.operator}}<br/>{{event.data?.reason}}</p></template><h3 v-if="!localOnly">{{ uiText("收样批次与原流转") }}</h3><article v-for="batch in (!localOnly?detail.batches:[])||[]" :key="batch.id" class="batch-row"><span>{{batch.receivedDate||uiText('日期待核对')}}{{ uiText(" · 实收 ") }}{{quantity(batch.effectiveReceivedQty??batch.receivedQty)}}<template v-if="batch.receiptStatus==='voided'"> · {{uiText('已删除登记，原记录保留')}}</template>{{ uiText(" · 在库 ") }}{{batch.balances.onhand}}{{ uiText(" · 借出 ") }}{{batch.balances.borrowed}}<small>{{ uiText("内部批次 ") }}{{batch.code}}</small></span><el-button size="small" @click="openBatch(batch.id)">{{ uiText("原记录／图片附件／更正") }}</el-button></article></template></div></el-drawer>
+  <header class="sample-title">
+    <h1>{{uiText('样品管理')}}</h1>
+    <nav v-if="!localOnly&&user.hasPermission('partner:view')" class="scope-switch" :aria-label="uiText('业务范围')">
+      <button v-for="scope in scopes" :key="scope.key" :aria-pressed="domain===scope.key" @click="router.push({path:sampleRoutes[scope.key],query:mode==='shipments'?{view:'shipments'}:{}})">{{uiText(scope.label)}}</button>
+    </nav>
+  </header>
+  <div class="ledger-nav">
+    <nav class="view-switch" :aria-label="uiText('样品管理')">
+      <button :aria-pressed="mode==='identities'" @click="showView('identities')">{{uiText('样品台账')}}</button>
+      <button v-if="!localOnly||access.canWrite" :aria-pressed="mode==='shipments'" @click="showView('shipments')">{{uiText(localOnly?'本人待签收':'寄样物流')}}</button>
+    </nav>
+    <div v-if="mode==='identities'" class="header-actions">
+      <el-button v-if="access.canWrite" :icon="Location" size="small" :aria-label="uiText('位置管理')" @click="locationManagerOpen=true"><span class="location-label">{{uiText('位置管理')}}</span></el-button>
+      <el-button v-if="canWrite&&!['model','research'].includes(domain)" :icon="Plus" type="primary" size="small" :title="uiText('从选品目录登记收样')" @click="router.push({path:'/partner-selections',query:{from:route.fullPath}})">{{uiText(domain==='partner'?'登记收样':'从选品目录登记收样')}}</el-button>
+      <el-button v-if="canWrite&&domain!=='partner'" :icon="Plus" type="primary" size="small" :title="uiText(receiptLabel)" @click="router.push({path:route.path,query:{view:'batches',new:'1',from:route.fullPath}})">{{uiText(domain?'登记收样':receiptLabel)}}</el-button>
+    </div>
+  </div>
+  <SampleShipments :key="domain" v-if="mode==='shipments'" :domain="domain"/>
+  <section v-else class="ledger-panel">
+    <div class="ledger-tools">
+      <el-input v-model="keyword" :prefix-icon="Search" clearable :aria-label="uiText('搜索样品码、款式、型号或颜色')" :placeholder="uiText('搜索样品码、款式、型号或颜色')" @input="scheduleSearch" @keyup.enter="query" @clear="query"/>
+      <el-button :icon="Filter" :type="filtersOpen||filterCount?'primary':'default'" plain :aria-expanded="filtersOpen" @click="filtersOpen=!filtersOpen">{{uiText('筛选')}}<template v-if="filterCount"> · {{filterCount}}</template></el-button>
+      <span v-if="data" class="ledger-count">{{uiText('{count} 种样品',{count:data.totalElements})}}</span>
+    </div>
+    <div v-if="filtersOpen" class="filter-panel">
+      <el-select v-model="supplierCode" clearable filterable :placeholder="uiText('全部供应商')" :aria-label="uiText('供应商筛选')">
+        <el-option v-for="s in suppliers" :key="s.supplierCode" :value="s.supplierCode" :label="[s.supplierName,s.shortName].filter(Boolean).join(' · ')"/>
+      </el-select>
+      <el-select v-if="!localOnly" v-model="site" clearable :placeholder="uiText('全部站点')" :aria-label="uiText('站点筛选')">
+        <el-option v-for="s in sampleLocationSites" :key="s.value" :value="s.value" :label="uiText(s.label)"/>
+      </el-select>
+      <el-select v-model="locationId" filterable remote clearable :remote-method="searchLocations" :loading="locationOptions.loading.value" :placeholder="uiText('全部库位')" :aria-label="uiText('库位筛选')">
+        <el-option v-if="chosenLocation&&!locationOptions.rows.value.some(r=>r.id===chosenLocation?.id)" :value="chosenLocation.id" :label="sampleLocationLabel(chosenLocation)"/>
+        <el-option v-for="location in locationOptions.rows.value" :key="location.id" :value="location.id" :label="sampleLocationLabel(location)"/>
+      </el-select>
+      <el-checkbox v-model="unlocated">{{uiText('未设库位')}}</el-checkbox>
+      <el-select v-if="!localOnly" v-model="receiptStatus" :aria-label="uiText('收样登记状态')">
+        <el-option :label="uiText('有效登记')" value="active"/><el-option :label="uiText('已删除登记')" value="voided"/><el-option :label="uiText('全部登记')" value="all"/>
+      </el-select>
+      <el-button size="small" @click="supplierCode='';site=localOnly?'MX':'';locationId=undefined;unlocated=false;receiptStatus='active'">{{uiText('重置')}}</el-button>
+      <el-button size="small" @click="load">{{uiText('刷新')}}</el-button>
+      <el-alert v-if="optionsError||locationOptions.error.value" :title="optionsError||locationOptions.error.value" type="error" :closable="false"><el-button link @click="loadOptions">{{uiText('重试')}}</el-button></el-alert>
+    </div>
+    <div v-if="selected.size" class="selection-actions">
+      <strong>{{uiText('已选 {count} 种样品',{count:selected.size})}}</strong>
+      <el-button v-if="data&&selected.size<data.totalElements" link :disabled="selecting||loading" @click="selectResults">{{uiText('全选当前筛选结果（{count}种）',{count:data.totalElements})}}</el-button>
+      <el-button v-if="access.canWrite" :disabled="selecting" size="small" @click="setLocations([...selected.values()])">{{uiText('批量设置位置')}}</el-button>
+      <details class="more-menu"><summary>{{uiText('更多操作')}}</summary><div class="commands" @click="closeActionMenu">
+        <template v-if="canWrite">
+          <button :disabled="selecting" @click="beginBulk('move')">{{uiText('精细移库')}}</button>
+          <button :disabled="selecting" @click="sendSelected">{{uiText('批量发往墨西哥')}}</button>
+          <button :disabled="selecting" @click="beginBulk('loan')">{{uiText('批量借出')}}</button>
+          <button :disabled="selecting" @click="beginBulk('return')">{{uiText('批量归还')}}</button>
+        </template>
+        <button :disabled="selecting" @click="print([...selected.values()])">{{uiText('批量打印标签（')}}{{selected.size}}）</button>
+        <button :disabled="exporting||loading||selecting" @click="exportLabels">{{uiText('批量导出标签（')}}{{selected.size}}）</button>
+        <button v-if="canWrite" class="danger" :disabled="selecting" @click="correctReceipt('void_receipt',[...selected.values()])">{{uiText('批量删除登记（')}}{{selected.size}}）</button>
+      </div></details>
+      <el-button link :disabled="selecting" @click="clearSelection">{{uiText('清空已选')}}</el-button>
+    </div>
+    <el-alert v-if="error" :title="error" type="error" :closable="false"><el-button link @click="load">{{uiText('重试')}}</el-button></el-alert>
+    <el-alert v-if="exportError" :title="exportError" type="error" :closable="false"><el-button link :disabled="selecting" @click="exportLabels">{{uiText('重试导出')}}</el-button></el-alert>
+    <el-alert v-if="selectionError" :title="selectionError" type="error" :closable="false"><el-button link @click="selectResults">{{uiText('重试')}}</el-button></el-alert>
+    <p v-if="selecting||exporting" role="status">{{selecting?uiText('正在选择样品…'):uiText('正在生成标签 {done}/{total}',{done:exportProgress,total:selected.size})}}</p>
+    <SampleLedgerTable v-loading="loading" :busy="loading||selecting" :local-only="localOnly" :site="site||chosenLocation?.site" :rows="data?.content||[]" :selected="selected" @check-page="selectPage" @check="check" @open="open"/>
+    <footer v-if="(data?.totalElements||0)>50"><el-pagination :current-page="page" :page-size="50" :total="data?.totalElements" :pager-count="5" layout="prev,pager,next" size="small" @current-change="goPage"/></footer>
+  </section>
+  <el-drawer :model-value="!!route.query.identityId" :title="uiText('样品详情')" size="min(480px,100vw)" @close="closeDetail">
+    <div v-loading="detailLoading" class="identity-detail">
+      <el-alert v-if="detailError" :title="detailError" type="error" :closable="false"><el-button link @click="loadDetail">{{uiText('重试')}}</el-button></el-alert>
+      <template v-if="detail">
+        <h2>{{detail.productName||detail.name}}</h2><span class="detail-code">{{detail.sampleCode}}</span>
+        <dl><dt>{{uiText('适用型号')}}</dt><dd>{{detail.phoneName||detail.specName||'—'}}</dd><dt>{{uiText('颜色')}}</dt><dd>{{[detail.colorName,detail.sampleVersion].filter(Boolean).join(' · ')||'—'}}</dd><dt>{{uiText('供应商')}}</dt><dd>{{detail.supplierName||uiText('待核对')}}</dd></dl>
+        <h3>{{uiText('库存与位置')}}</h3>
+        <table class="positions"><thead><tr><th>{{uiText('站点')}}</th><th>{{uiText('库位')}}</th><th>{{uiText('在库')}}</th></tr></thead>
+          <tbody><tr v-for="p in positions(detail)" :key="samplePositionKey(p)"><td>{{p.site==='CN'?uiText('中国'):p.site==='MX'?uiText('墨西哥'):'—'}}</td><td>{{sampleLocationLabel(p)}}</td><td>{{quantity(p.onhand)}}</td></tr></tbody>
+        </table>
+        <p v-if="!positions(detail).length">{{uiText('当前没有在库实物。')}}</p>
+        <div class="identity-summary"><span>{{uiText('可用 ')}}{{detail.balances.available}}</span><span>{{uiText('借出 ')}}{{detail.balances.borrowed}}</span><span>{{uiText('在途 ')}}{{quantity(detail.balances.inTransit)}}</span></div>
+        <div class="detail-actions">
+          <el-button v-if="access.canWrite" type="primary" size="small" :disabled="!detail.balances.onhand" @click="setLocations([detail])">{{uiText('设置位置')}}</el-button>
+          <details class="more-menu"><summary>{{uiText('更多操作')}}</summary><div class="commands" @click="closeActionMenu">
+            <button @click="print([detail])">{{uiText('打印／补打二维码标签')}}</button>
+            <button v-if="localOnly&&access.canWrite" @click="moveLocal(detail)">{{uiText('精细移库')}}</button>
+            <template v-if="canWrite">
+              <button @click="correctReceipt('correct_receipt',[detail])">{{uiText('改数量')}}</button>
+              <button v-if="detail.sourceType==='catalog'&&canCorrectColor" @click="colorEditing=true">{{uiText('更正颜色')}}</button>
+              <button @click="operate('loan')">{{uiText('借出')}}</button><button @click="operate('return')">{{uiText('归还')}}</button>
+              <button @click="operate('move')">{{uiText('移动位置')}}</button>
+              <button @click="router.push({path:route.path,query:{view:'shipments',newShipment:'mexico_outbound',sampleIdentityId:detail.sampleIdentityId}})">{{uiText('发往墨西哥')}}</button>
+              <button class="danger" @click="correctReceipt('void_receipt',[detail])">{{uiText('删除登记')}}</button>
+            </template>
+          </div></details>
+        </div>
+        <details v-if="positions(detail).length"><summary>{{uiText('数量明细')}}</summary>
+          <p v-for="p in positions(detail)" :key="samplePositionKey(p)">{{sampleLocationLabel(p)}} · {{uiText('可用 ')}}{{p.available}} · {{uiText('留样')}} {{p.retained}} · {{uiText('损坏')}} {{p.damaged}}</p>
+        </details>
+        <details v-if="!localOnly"><summary>{{uiText('样品资料')}}</summary>
+          <p v-if="detail.legacySampleCode">{{uiText('旧码 ')}}{{detail.legacySampleCode}}</p>
+          <CatalogCurrentInfo :value="detail.currentCatalog" :recorded-name="detail.recordedName"/>
+          <PartnerFiles kind="sample-identities" :id="detail.sampleIdentityId" :files="detail.files||[]" :model-value="[]" :can-write="false" :can-write-money="false" compact/>
+          <el-button v-if="canWrite" size="small" @click="operate('files')">{{uiText('上传到原收样批次')}}</el-button>
+        </details>
+<h3 v-if="(detail.loans||detail.balances.loans||[]).some(l=>l.outstanding>0)">{{ uiText("借出待还") }}</h3><p v-for="loan in (detail.loans||detail.balances.loans||[]).filter(l=>l.outstanding>0)" :key="loan.id">{{loan.person}}{{ uiText(" · 待还 ") }}{{loan.outstanding}}{{ uiText(" · 预计 ") }}{{loan.due||uiText('未记录')}}</p><template v-if="!localOnly&&detail.events?.some(e=>e.action==='sample_color_correction')"><h3>{{ uiText("颜色更正记录") }}</h3><p v-for="event in detail.events.filter(e=>e.action==='sample_color_correction')" :key="event.id">{{correctionColor(event.data,'before')}} → {{correctionColor(event.data,'after')}} · {{event.operator}}<br/>{{event.data?.reason}}</p></template><details v-if="!localOnly&&detail.batches?.length"><summary>{{ uiText("收样批次与原流转") }}</summary><article v-for="batch in (!localOnly?detail.batches:[])||[]" :key="batch.id" class="batch-row"><span>{{batch.receivedDate||uiText('日期待核对')}}{{ uiText(" · 实收 ") }}{{quantity(batch.effectiveReceivedQty??batch.receivedQty)}}<template v-if="batch.receiptStatus==='voided'"> · {{uiText('已删除登记，原记录保留')}}</template>{{ uiText(" · 在库 ") }}{{batch.balances.onhand}}{{ uiText(" · 借出 ") }}{{batch.balances.borrowed}}<small>{{ uiText("内部批次 ") }}{{batch.code}}</small></span><el-button size="small" @click="openBatch(batch.id)">{{ uiText("原记录／图片附件／更正") }}</el-button></article></details></template></div></el-drawer>
   <el-dialog v-model="batchChoice" :title="pendingAction==='files'?uiText('选择图片附件归属的原收样批次'):uiText('选择本次办理的原收样批次')" width="min(620px,96vw)" append-to-body><p>{{ uiText("同一码可多次收样，借还和移位继续使用原批次数量。") }}</p><div v-for="batch in detail?.batches||[]" :key="batch.id" class="batch-row"><span>{{batch.receivedDate}}{{ uiText(" · 在库 ") }}{{batch.balances.onhand}}{{ uiText(" · 可借 ") }}{{batch.balances.available}}<small>{{ uiText("内部 ") }}{{batch.code}}</small></span><el-button type="primary" size="small" @click="openBatch(batch.id,pendingAction)">{{pendingAction==='files'?uiText('进入本批附件'):uiText('办理本批')}}</el-button></div></el-dialog>
   <SampleLocationSetDialog v-if="locationSetOpen" :samples="locationRows" @close="locationSetOpen=false" @saved="locationsSaved"/><SampleLocationManager v-if="locationManagerOpen" @close="locationManagerOpen=false" @changed="loadOptions"/><SampleBatchActionDialog v-if="bulkAction" :action="bulkAction" :samples="bulkRows" @close="bulkAction=undefined" @saved="bulkSaved"/><SampleColorCorrectionDialog v-if="colorEditing&&detail" :sample="detail" @close="colorEditing=false" @saved="colorSaved"/>
   <SampleReceiptCorrectionDialog v-if="receiptAction&&canWrite" :action="receiptAction" :samples="receiptRows" @close="receiptAction=undefined" @saved="receiptSaved" @inspect="receiptAction=undefined;openBatch($event)"/><SampleLabelPrint v-model="printOpen" :samples="labels"/>
  </section>
 </template>
 <style scoped>
-.sample-management{height:100%;min-height:0;min-width:0;display:flex;flex-direction:column;gap:8px;container-type:inline-size;font-size:12px}.sample-title,.sample-filters,.top-actions,footer,.detail-actions,.identity-summary,.selection-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.sample-title h1{font-size:16px;margin:0;color:#223952}.sample-title nav{display:flex;gap:3px;margin-left:10px}.sample-title nav button{border:0;background:transparent;padding:5px 10px;font:inherit;color:#61768f;cursor:pointer}.sample-title nav button.active{color:#246fbe;border-bottom:2px solid #409eff;font-weight:600}.top-actions{margin-left:auto}.sample-filters>.el-input{flex:1;min-width:180px;max-width:330px}.sample-filters>.el-select{width:140px}.ledger-count{margin-left:auto;color:#76869b}.selection-actions{background:#eff5fc;padding:5px 8px;color:#355b84}.identity-table{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;background:white;border:1px solid #dfe7f0;border-radius:4px}.identity-body{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden}.style-row,.identity-row{display:grid;grid-template-columns:74px minmax(140px,1.3fr) minmax(145px,1.1fr) minmax(140px,1fr) minmax(160px,1.3fr) 110px;gap:9px;align-items:center;padding:5px 10px;min-height:44px;line-height:18px;border-bottom:1px solid #e6edf4}.style-row>div,.identity-row>div{min-width:0;overflow-wrap:anywhere}.identity-row strong{display:block;color:#273d56;font-weight:600}.style-row small,.identity-row small{display:block;color:#73859b;font-size:12px}.identity-head{min-height:32px;background:#eff4fa;color:#516a87;font-size:12px;font-weight:600}.identity-photo{display:flex;align-items:center;gap:6px}.identity-photo :deep(.partner-photo){width:36px;height:36px}.identity-link{padding:0;border:0;background:transparent;text-align:left;font:inherit;color:#2471bf;font-weight:600;cursor:pointer}.position-line{display:block}.identity-actions{display:flex;gap:4px;flex-wrap:wrap}.identity-actions :deep(.el-button+.el-button){margin-left:0}.sample-children{background:#f8fafc;padding:0 4px 4px 20px}.sample-children>.el-pagination{justify-content:flex-end;flex-wrap:wrap;margin:6px}footer{font-size:12px;color:#76879a;justify-content:space-between}footer :deep(.el-pagination){max-width:100%;flex-wrap:wrap}.identity-detail{font-size:12px;line-height:1.7;overflow-wrap:anywhere}.identity-detail h3{font-size:14px;color:#2b435f;margin:18px 0 7px}.batch-row{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid #e1e9f2;min-width:0}.batch-row span{min-width:0;overflow-wrap:anywhere}.batch-row small{display:block;font-size:11px;color:#8190a4}.identity-summary{padding:10px;background:#f0f5fb;color:#395978}.sample-management :deep(.el-button--small),.sample-management :deep(.el-input__wrapper),.sample-management :deep(.el-select__wrapper){min-height:28px;font-size:12px}@container(max-width:1050px){.identity-head{display:none}.style-row,.identity-row{grid-template-columns:64px repeat(2,minmax(0,1fr));gap:6px}.style-row>div:nth-child(3),.identity-row>div:nth-child(3){grid-column:2/-1}.style-row>div:nth-child(4),.identity-row>div:nth-child(4){grid-column:2}.style-row>div:nth-child(5),.identity-row>div:nth-child(5){grid-column:3}.identity-actions{grid-column:2/-1}.sample-title nav{margin-left:0}.top-actions{margin-left:0}.sample-filters>.el-select{flex:1;min-width:130px}}@container(max-width:540px){.style-row,.identity-row{grid-template-columns:54px minmax(0,1fr)}.style-row>div:nth-child(n+3),.identity-row>div:nth-child(n+3){grid-column:2!important}.sample-title nav{flex-wrap:wrap}.sample-children{padding-left:6px}.sample-filters>.el-input{width:100%;max-width:none}}
+.sample-management{height:100%;min-height:0;min-width:0;display:flex;flex-direction:column;container-type:inline-size;color:#25394f}
+.sample-title,.ledger-nav,.header-actions,.view-switch,.scope-switch,.ledger-tools,.filter-panel,.selection-actions,.detail-actions,.identity-summary{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.sample-title{gap:18px;padding:7px 0 11px;border-bottom:1px solid #dce4ed}.sample-title h1{margin:0;font-size:17px}
+.scope-switch{gap:2px;padding:3px;border-radius:6px;background:#e8edf3}.scope-switch button,.view-switch button{background:none;border:0;cursor:pointer;color:#53657a}
+.scope-switch button{padding:4px 10px;border-radius:4px;font-size:12px}.scope-switch button[aria-pressed=true]{color:#233c59;background:#fff;box-shadow:0 1px 2px #1c345622}
+.ledger-nav{justify-content:space-between;padding:12px 0}.view-switch{gap:18px}.view-switch button{font-size:15px;font-weight:600;padding:4px 0 7px;border-bottom:2px solid transparent}.view-switch button[aria-pressed=true]{color:#24445e;border-bottom-color:#2876dc}
+.header-actions :deep(.el-button),.selection-actions :deep(.el-button){margin:0}
+.ledger-panel{display:flex;flex-direction:column;min-height:0;flex:1;border:1px solid #dfe6ef;border-radius:8px;background:#fff}
+.ledger-tools,.filter-panel,.selection-actions{padding:10px 12px;border-bottom:1px solid #e6ebf2}.ledger-tools>.el-input{width:min(330px,55%)}.ledger-count{margin-inline-start:auto;font-size:12px;color:#586c81}
+.filter-panel{background:#f7f9fc}.filter-panel>.el-select{width:155px}.selection-actions{background:#eef5ff;font-size:13px}
+.ledger-panel footer{display:flex;justify-content:flex-end;padding:5px 10px;border-top:1px solid #e2e9f1}
+.more-menu{position:relative}.more-menu>summary{list-style:none;border:1px solid #d7dfe8;border-radius:5px;background:#fff;padding:3px 9px;cursor:pointer;font-size:13px}.more-menu>summary::-webkit-details-marker{display:none}.more-menu>summary::after{content:'⌄';margin-inline-start:5px}
+.commands{position:absolute;top:100%;inset-inline-start:0;z-index:12;display:grid;min-width:150px;padding:4px;border:1px solid #dce5f0;border-radius:5px;box-shadow:0 4px 15px #1833531c;background:white}
+.commands button{text-align:start;white-space:normal;border:0;padding:7px 10px;background:white;color:#29435e;cursor:pointer;font:inherit;font-size:13px}.commands button:hover{background:#eef5ff}.commands button.danger{color:#ab383b}.commands button:disabled{opacity:.5}
+.identity-detail{font-size:13px;color:#293c52}.identity-detail h2{font-size:20px;margin:0}.detail-code{font:13px ui-monospace,monospace;color:#5d7189}.identity-detail dl{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;margin:16px 0}.identity-detail dt{color:#61738a}.identity-detail dd{margin:0}
+.identity-detail h3{margin:16px 0 6px;font-size:14px}.positions{width:100%;border-collapse:collapse;text-align:start}.positions th,.positions td{border-bottom:1px solid #e4eaf0;padding:6px 8px;text-align:start}.positions th{color:#5a6c82;background:#f5f8fb}.positions th:last-child,.positions td:last-child{text-align:end}
+.identity-summary{font-size:12px;color:#5d7187;margin:8px 0 14px}.detail-actions{margin-bottom:16px}.identity-detail>details{border-top:1px solid #e3e9ef;padding:9px 0}.identity-detail>details>summary{font-weight:600;cursor:pointer}
+.batch-row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #e5ebf2}.batch-row small{display:block;color:#62748b}
+@container(max-width:660px){.sample-title{gap:7px}.scope-switch button{padding:5px 7px}.ledger-nav{gap:5px;padding:8px 0}.header-actions,.view-switch{gap:6px}.ledger-tools,.filter-panel,.selection-actions{padding:8px}.ledger-tools>.el-input{flex:1;min-width:120px}.filter-panel>.el-select{flex:1 1 130px}.location-label{display:none}.header-actions :deep(.el-button:has(.location-label) span:empty),.header-actions :deep(.el-button:has(.location-label) .el-icon+span){display:none}.ledger-panel{min-height:0}.selection-actions .commands{inset-inline-start:auto;inset-inline-end:0}}
+@container(max-width:440px){.ledger-count{width:100%;margin:0}.selection-actions{gap:6px}.selection-actions .more-menu{position:static}.selection-actions{position:relative}.selection-actions .commands{left:8px;right:8px;min-width:0}}
 </style>

@@ -26,7 +26,7 @@ function createLocationOptions(){
   const pending=(async()=>{try{const result=await sampleLocationOptions({...query,size:50});if(!disposed&&ticket===generation&&auth===user.token){rows.value=result.content.slice(0,50);more.value=result.hasMore===true||result.content.length>50;loaded.value=true}}catch(e){if(!disposed&&ticket===generation&&auth===user.token)error.value=partnerError(e)}finally{if(ticket===generation){loading.value=false;request=undefined}}})()
   request=pending;return pending
  }
- watch(()=>[user.token,user.profile?.userId],()=>{++generation;request=undefined;rows.value=[];loaded.value=false;more.value=false;loading.value=false;error.value=''})
+ watch([()=>user.token,()=>user.profile?.userId],()=>{++generation;request=undefined;rows.value=[];loaded.value=false;more.value=false;loading.value=false;error.value=''})
  onBeforeUnmount(()=>{disposed=true;++generation})
  return{rows,loading,error,more,load,reload:()=>load(currentQuery,true)}
 }
