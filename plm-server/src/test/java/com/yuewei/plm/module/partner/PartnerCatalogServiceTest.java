@@ -362,6 +362,72 @@ class PartnerCatalogServiceTest {
             catalog=new PartnerCatalogService(store,permissions,suppliers,selections,materials,phones,operations);return sourceRow;
         }
 
+        private com.yuewei.plm.module.attachment.service.DocumentService photoDocuments(){
+            jdbc.execute("create unique index uk_partner_event_request on plm_partner_event(record_id,request_id) where request_id is not null");
+            var documents=(com.yuewei.plm.module.attachment.service.DocumentService)org.springframework.test.util.ReflectionTestUtils.getField(materials,"documents");
+            when(documents.upload(any(),eq("sample_image"),eq("V1"),anyString(),isNull(),anyList(),any())).thenAnswer(call->{
+                jdbc.update("insert into plm_attachment values(99,0,'产品图片.png','V1','image/png',100)");
+                return com.yuewei.plm.module.attachment.vo.AttachmentVO.builder().attachmentId(99L).fileName("产品图片.png").build();
+            });return documents;
+        }
+        private org.springframework.mock.web.MockMultipartFile photoFile(){return new org.springframework.mock.web.MockMultipartFile("file","product.png","image/png",new byte[]{(byte)137,80,78,71,13,10,26,10,0,0,0,0});}
+        private Map<String,Object> photoCommand(String row){return values("supplierCode","SELECTION","sourceKind","selection","recordId",20,"rowId",row,"rowVersion",1,"recordVersion",1,"requestId","photo-click");}
+
+        @Test void photoUploadAssociatesOnlyCurrentStylePreservesHistoryAndReplaysWithoutDuplicating(){
+            String row=styleAdoptionFixture();var documents=photoDocuments();when(permissions.costs()).thenReturn(false);
+            jdbc.update("update plm_partner_selection_row set confirmed=true,data=data||'{\"confirmationSnapshot\":{\"name\":\"历史名称\",\"refs\":[{\"id\":88}]}}'::jsonb where row_id=?::uuid",row);
+            String before=jdbc.queryForObject("select data::text from plm_partner_selection_row where row_id=?::uuid",String.class,row);
+            var result=catalog.uploadPhoto(photoCommand(row),photoFile(),null);
+            assertEquals(List.of(88L,99L),maps(result.get("refs")).stream().map(ref->number(ref.get("id"))).toList());
+            assertEquals(List.of(88L,99L),maps(result.get("fileDetails")).stream().map(ref->number(ref.get("id"))).toList());
+            assertEquals(2L,number(result.get("rowVersion")));assertEquals(2L,number(result.get("recordVersion")));assertFalse(result.containsKey("unitPrice"));
+            var after=decode(store.json,jdbc.queryForObject("select data::text from plm_partner_selection_row where row_id=?::uuid",String.class,row));
+            assertEquals(decode(store.json,before).get("confirmationSnapshot"),after.get("confirmationSnapshot"));assertEquals(decode(store.json,before).get("refs"),after.get("refs"));
+            assertEquals("photo",jdbc.queryForObject("select purpose from plm_partner_file where attachment_id=99",String.class));
+            assertEquals(2L,number(catalog.uploadPhoto(photoCommand(row),photoFile(),null).get("rowVersion")));
+            verify(documents,times(1)).upload(any(),eq("sample_image"),eq("V1"),anyString(),isNull(),anyList(),any());
+            assertEquals(1L,jdbc.queryForObject("select count(*) from plm_partner_event where action='catalog_photo'",Long.class));
+            assertEquals(2L,jdbc.queryForObject("select count(distinct request_id) from plm_partner_event where action in ('catalog_photo','catalog_style_update')",Long.class));
+            jdbc.update("update plm_partner_event set request_id='photo-click' where action='catalog_photo'");
+            assertEquals(2L,number(catalog.uploadPhoto(photoCommand(row),photoFile(),null).get("rowVersion")));
+            verify(documents,times(1)).upload(any(),eq("sample_image"),eq("V1"),anyString(),isNull(),anyList(),any());
+            var different=new org.springframework.mock.web.MockMultipartFile("file","different.png","image/png",new byte[]{(byte)137,80,78,71,13,10,26,10,1});
+            assertThrows(BusinessException.class,()->catalog.uploadPhoto(photoCommand(row),different,null));
+            assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_record where kind in ('product','sample')",Long.class));
+        }
+        @Test void anotherActorsMatchingClientKeyDoesNotBlockAProductPhoto(){
+            String row=styleAdoptionFixture();photoDocuments();
+            var input=photoCommand(row);String request="a".repeat(80);input.put("requestId",request);
+            jdbc.update("insert into plm_partner_event(record_id,action,actor_id,request_id,data) values(20,'catalog_photo',34,?,'{}')",request);
+            assertEquals(2L,number(catalog.uploadPhoto(input,photoFile(),null).get("rowVersion")));
+            assertEquals(2L,number(catalog.uploadPhoto(input,photoFile(),null).get("rowVersion")));
+        }
+        @Test void photoUploadRejectsWrongSupplierStaleVersionDiscardedAndInvalidImageBeforeStoring(){
+            String row=styleAdoptionFixture();var documents=photoDocuments();var input=photoCommand(row);
+            input.put("supplierCode","OTHER");assertThrows(BusinessException.class,()->catalog.uploadPhoto(input,photoFile(),null));input.put("supplierCode","SELECTION");
+            input.put("rowVersion",0);assertThrows(BusinessException.class,()->catalog.uploadPhoto(input,photoFile(),null));input.put("rowVersion",1);
+            assertThrows(BusinessException.class,()->catalog.uploadPhoto(input,new org.springframework.mock.web.MockMultipartFile("file","fake.png","image/png","not an image".getBytes()),null));
+            jdbc.update("update plm_partner_selection_row set data=data||'{\"discarded\":true}'::jsonb where row_id=?::uuid",row);assertThrows(BusinessException.class,()->catalog.uploadPhoto(input,photoFile(),null));
+            verifyNoInteractions(documents);assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_create_request",Long.class));
+        }
+        @Test void quoteProductPhotoIsVisibleWithoutCostPermissionAndDoesNotRewriteConfirmedQuote(){
+            styleAdoptionFixture();photoDocuments();when(permissions.costs()).thenReturn(false);
+            String row=jdbc.queryForObject("select line_id::text from plm_partner_quote_line where record_id=10 limit 1",String.class);
+            jdbc.update("update plm_partner_record set status='confirmed' where record_id=10");
+            jdbc.update("update plm_partner_quote_line set data=?::jsonb where line_id=?::uuid",encode(store.json,values("name","报价原款","supplierCode","QUOTE","unitPrice","99.00","refs",List.of(Map.of("id",88L)))),row);
+            var input=photoCommand(row);input.put("sourceKind","quote");input.put("recordId",10);input.put("supplierCode","QUOTE");
+            doThrow(new BusinessException(40103,"无工程权限")).when(permissions).engineer();assertThrows(BusinessException.class,()->catalog.uploadPhoto(input,photoFile(),null));doNothing().when(permissions).engineer();
+            var result=catalog.uploadPhoto(input,photoFile(),null);assertEquals(List.of(88L,99L),maps(result.get("fileDetails")).stream().map(file->number(file.get("id"))).toList());assertFalse(result.containsKey("unitPrice"));
+            var after=decode(store.json,jdbc.queryForObject("select data::text from plm_partner_quote_line where line_id=?::uuid",String.class,row));assertEquals("99.00",after.get("unitPrice"));assertEquals(1,maps(after.get("refs")).size());assertEquals(2,maps(map(after.get("catalogCurrent")).get("refs")).size());assertEquals("confirmed",jdbc.queryForObject("select status from plm_partner_record where record_id=10",String.class));
+        }
+        @Test void photoAssociationAuditFailureRollsBackAttachmentRefsAndRequest(){
+            String row=styleAdoptionFixture();photoDocuments();String before=jdbc.queryForObject("select data::text from plm_partner_selection_row where row_id=?::uuid",String.class,row);
+            doThrow(new IllegalStateException("QA审计不可用")).when(renameAudit).logRequired(any(),any());
+            var nested=new TransactionTemplate(transactions);nested.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_NESTED);
+            assertThrows(IllegalStateException.class,()->nested.execute(status->catalog.uploadPhoto(photoCommand(row),photoFile(),null)));
+            assertEquals(before,jdbc.queryForObject("select data::text from plm_partner_selection_row where row_id=?::uuid",String.class,row));assertEquals(0L,jdbc.queryForObject("select count(*) from plm_attachment where attachment_id=99",Long.class));assertEquals(0L,jdbc.queryForObject("select count(*) from plm_partner_create_request",Long.class));
+        }
+
         private Map<String,Object> styleCommand(String sourceRow,String request){return values("supplierCode","SELECTION","requestId",request,"targetSelectionId",100L,"targetVersion",1L,"items",List.of(values("sourceKind","selection","recordId",20L,"rowId",sourceRow,"rowVersion",1L,"recordVersion",1L,"selectionIntent","style","selectionModelText","首批型号尚未确定","phoneModelIds",List.of())));}
 
         @Test void realStyleDraftAdoptionKeepsSourceCPAndFilesAndLaterModelsUseTheSameRow(){

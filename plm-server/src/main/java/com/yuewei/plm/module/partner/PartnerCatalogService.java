@@ -619,6 +619,53 @@ public class PartnerCatalogService {
         return result;
     }
 
+    /** Upload and row association share a transaction; confirmed source snapshots stay frozen. */
+    @Transactional
+    public Map<String,Object> uploadPhoto(Map<String,Object> input, MultipartFile file, HttpServletRequest request) {
+        permissions.engineer();
+        require(Set.of("supplierCode","sourceKind","recordId","rowId","rowVersion","recordVersion","requestId").containsAll(input.keySet()), "图片上传只接收当前产品身份和版本");
+        String key=required(input.get("requestId"),"上传标识"), supplier=required(input.get("supplierCode"),"供应商"), kind=text(input.get("sourceKind")), rowId=text(input.get("rowId"));
+        long id=number(input.get("recordId"));
+        require(key.length()<=80,"上传标识过长");
+        require(Set.of("quote","selection").contains(kind)&&id>0&&PartnerSelectionService.validRowId(rowId),"目录来源身份无效");
+        require(file!=null&&!file.isEmpty()&&file.getSize()<=20L*1024*1024,"请选择不超过20MB的产品图片");
+        String type=text(file.getContentType()), name=PartnerFileWorkspace.fileName(file.getOriginalFilename()).toLowerCase(Locale.ROOT);
+        require(type.equals("image/png")&&name.endsWith(".png")||type.equals("image/jpeg")&&name.matches(".*\\.jpe?g$")||type.equals("image/webp")&&name.endsWith(".webp"),"产品图片仅支持PNG、JPEG或WebP，文件扩展名须与格式一致");
+        String hash;
+        try(var stream=file.getInputStream()) {
+            byte[] prefix=stream.readNBytes(12);
+            boolean raster=type.equals("image/png")?prefix.length>=8&&Arrays.equals(Arrays.copyOf(prefix,8),new byte[]{(byte)137,80,78,71,13,10,26,10})
+                :type.equals("image/jpeg")?prefix.length>=3&&(prefix[0]&255)==255&&(prefix[1]&255)==216&&(prefix[2]&255)==255
+                :prefix.length==12&&new String(prefix,0,4,StandardCharsets.US_ASCII).equals("RIFF")&&new String(prefix,8,4,StandardCharsets.US_ASCII).equals("WEBP");
+            require(raster,"图片内容不是声明的PNG、JPEG或WebP格式");
+            var digest=MessageDigest.getInstance("SHA-256");digest.update(prefix);byte[] bytes=new byte[65536];int count;
+            while((count=stream.read(bytes))>=0)if(count>0)digest.update(bytes,0,count);
+            hash=HexFormat.of().formatHex(digest.digest());
+        }catch(java.io.IOException|java.security.NoSuchAlgorithmException e){throw invalid("图片无法读取，请重新选择");}
+        profiles.requireSupplier(supplier);
+        var header=store.load(id,kind.equals("quote")?"supplier_quote":"selection",true);
+        var row=source(kind,id,rowId,supplier);
+        String fingerprint=digest(Map.of("input",input,"sha256",hash));
+        // Events share one unique request key per record, including the nested style edit.
+        String operation=key(store.access.actorId()+":"+key), uploadEvent="catalog-photo-"+operation;
+        Long replay=store.created("catalog_photo",key);
+        if(replay!=null){
+            require(replay==id,"上传标识已用于另一份来源");
+            // Older uploads recorded the original client key as their event key.
+            var events=store.jdbc.queryForList("select data::text from plm_partner_event where record_id=? and actor_id=? and action='catalog_photo' and request_id in (?,?) order by case when request_id=? then 0 else 1 end limit 1",id,store.access.actorId(),uploadEvent,key,uploadEvent);
+            require(events.size()==1&&fingerprint.equals(text(decode(store.json,events.get(0).get("data")).get("fingerprint"))),"上传标识已用于不同图片操作");
+            return detail(kind,id,rowId,supplier);
+        }
+        require(input.containsKey("rowVersion")&&input.containsKey("recordVersion")&&number(input.get("rowVersion"))==number(row.get("rowVersion"))&&number(input.get("recordVersion"))==number(row.get("recordVersion")),"产品资料已变化，请刷新后重新添加图片");
+        var uploaded=materials.uploadCatalogPhoto(id,text(header.get("kind")),file,request);
+        var refs=new ArrayList<>(maps(PartnerCatalogStyles.currentData(sourceData(kind,id,rowId,true)).get("refs")));
+        refs.add(Map.of("id",uploaded.getAttachmentId(),"type","file"));
+        updateStyle(kind,id,rowId,supplier,Map.of("changes",Map.of("refs",refs),"rowVersion",row.get("rowVersion"),"recordVersion",row.get("recordVersion"),"requestId","catalog-photo-refs-"+operation));
+        store.remember("catalog_photo",key,id);
+        store.event(id,"catalog_photo",Map.of("fingerprint",fingerprint,"rowId",rowId,"fileId",uploaded.getAttachmentId()),uploadEvent);
+        return detail(kind,id,rowId,supplier);
+    }
+
     private record FileKey(long recordId, long fileId) {}
     private record SourceRow(long recordId, String rowId) {}
 

@@ -20,6 +20,12 @@ public class PartnerMaterialService {
   store.access.requireEngineeringMaintenance();
   return upload(id,kind,file,"photo",null,"V1","国内工程补充当前款式型号表原图",request,true);
  }
+ /** The catalogue service validates and locks the exact product before calling this. */
+ AttachmentVO uploadCatalogPhoto(long id,String kind,MultipartFile file,HttpServletRequest request){
+  require(Set.of("selection","supplier_quote").contains(kind),"产品图片仅属于供应商目录来源");
+  store.access.requireEngineeringMaintenance();
+  return upload(id,kind,file,"photo",null,"V1","国内工程补充当前供应商产品图片",request,true);
+ }
  private AttachmentVO upload(long id,String kind,MultipartFile file,String purpose,Long previous,String version,String reason,HttpServletRequest request,boolean catalogModelSheet){
   if(!catalogModelSheet&&Set.of("selection","supplier_quote").contains(kind))sources.write(id,true);
   var current=store.load(id,kind,true);store.access.requirePermission(Set.of("sample","sample_shipment").contains(kind)?"samples:write":kind.equals("fulfilment")&&store.access.hasPermission("partner:delivery")?"partner:delivery":"partner:write");
