@@ -3,7 +3,7 @@ import type {SampleCandidates,SampleIdentity,SamplePage,SampleResolution,SampleS
 export const sampleIdentities=async(params:Record<string,unknown>={})=>unwrapResponse<SamplePage<SampleIdentity>>(await request.get('/sample-identities',{params}))
 export interface SampleIdentityQueryInput {filters?:Record<string,unknown>;groupKeys?:string[];ids?:number[];details?:boolean}
 export const querySampleIdentities=async(data:SampleIdentityQueryInput)=>unwrapResponse<{content:SampleIdentity[];totalElements:number}>(await request.post('/sample-identities/query',data,{suppressErrorToast:true}))
-export const sampleIdentity=async(id:number)=>unwrapResponse<SampleIdentity>(await request.get(`/sample-identities/${id}`))
+export const sampleIdentity=async(id:number,ledger=false)=>unwrapResponse<SampleIdentity>(await request.get(`/sample-identities/${id}`+(ledger?'?view=ledger':'')))
 export const sampleIdentityCandidates=async(params:Record<string,unknown>)=>unwrapResponse<SampleCandidates>(await request.get('/sample-identities/candidates',{params}))
 export const resolveSampleIdentity=async(code:string)=>unwrapResponse<SampleResolution>(await request.get('/sample-identities/resolve',{params:{code}}))
 export const createSampleIdentity=async(data:Record<string,unknown>)=>unwrapResponse<SampleIdentity>(await request.post('/sample-identities',data))
@@ -29,6 +29,6 @@ export const saveSampleLocation=async(data:SampleLocationInputData,id?:number)=>
 export const deleteSampleLocation=async(id:number,data:{requestId:string;version:number})=>unwrapResponse<SampleLocationOption>(await request.delete(`/sample-locations/${id}`,{data}))
 export const setSampleLocations=async(data:Record<string,unknown>)=>unwrapResponse<SampleLocationMoveResult>(await request.post('/sample-identities/bulk-actions/move',data))
 
-export const sampleIdentityOptions=async()=>unwrapResponse<{suppliers:SampleSupplierOption[]}>(await request.get('/sample-identities/options'))
+export const sampleIdentityOptions=async()=>unwrapResponse<{suppliers:SampleSupplierOption[]}>(await request.get('/sample-identities/options?view=ledger'))
 export const sampleLocationReferences=async(id:number)=>unwrapResponse<{id:number;referenced:boolean;referenceCount:number;onhand:number;events:number;records:number;batches:number;references:SampleLocationReference[]}>(await request.get(`/sample-locations/${id}/references`))
 export const sampleIdentityPhoto=async(id:number,fileId:number,options?:{signal?:AbortSignal})=>(await request.get<Blob>(`/sample-identities/${id}/photos/${fileId}/preview`,authorizedPreviewOptions(options))).data

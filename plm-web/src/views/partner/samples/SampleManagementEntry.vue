@@ -64,6 +64,7 @@ async function colorSaved(value:SampleIdentity){selected.value.delete(Number(rou
 const exporting=ref(false),exportError=ref('')
 let epoch=0,detailEpoch=0,exportEpoch=0,disposed=false
 const canWrite=computed(()=>!localOnly.value&&user.hasPermission('samples:write'))
+const selectionWritable=computed(()=>![...selected.value.values()].some(row=>row.ledgerReadOnly))
 const canCorrectColor=computed(()=>canWrite.value&&(user.permissions.includes('*')||user.profile?.canMaintainEngineeringData===true))
 const scopes=[{key:'partner',label:'合作产品'},{key:'research',label:'新品研发'},{key:'model',label:'型号研发'}] as const
 const receiptLabel=computed(()=>domain.value==='model'?'登记型号收样':domain.value==='research'?'登记研发收样':'其他来源收样')
@@ -71,7 +72,7 @@ const correctionColor=(data:Record<string,unknown>|undefined,key:string)=>String
 const quantity=(value:number|undefined)=>value==null?'—':new Intl.NumberFormat('zh-CN').format(value)
 const positions=(row:SampleIdentity)=>(row.positions||row.balances.positions||[]).filter(p=>p.onhand>0&&(!localOnly.value||p.site!=='CN'))
 
-function filters(){return {domain:domain.value||undefined,keyword:appliedKeyword.value||undefined,supplierCode:supplierCode.value||undefined,site:localOnly.value?'MX':site.value||undefined,locationId:locationId.value,unlocated:unlocated.value||undefined,receiptStatus:receiptStatus.value}}
+function filters(){return {view:"ledger",domain:domain.value||undefined,keyword:appliedKeyword.value||undefined,supplierCode:supplierCode.value||undefined,site:localOnly.value?'MX':site.value||undefined,locationId:locationId.value,unlocated:unlocated.value||undefined,receiptStatus:receiptStatus.value}}
 async function load(){
  const ticket=++epoch
  if(legacy.value||mode.value!=='identities'||!user.token){loading.value=false;return}
@@ -111,7 +112,7 @@ async function loadDetail(){
  detailError.value=''
  if(!id||legacy.value||!user.token){detail.value=undefined;detailLoading.value=false;return}
  detailLoading.value=true
- try{const value=await sampleIdentity(id);if(ticket===detailEpoch)detail.value=value}
+ try{const value=await sampleIdentity(id,true);if(ticket===detailEpoch)detail.value=value}
  catch(e){if(ticket===detailEpoch){detail.value=undefined;detailError.value=e instanceof Error?e.message:uiText('读取样品详情失败')}}
  finally{if(ticket===detailEpoch)detailLoading.value=false}
 }
@@ -208,9 +209,9 @@ onBeforeUnmount(()=>{disposed=true;clearTimeout(searchTimer);++epoch;++detailEpo
     <div v-if="selected.size" class="selection-actions">
       <strong>{{uiText('已选 {count} 种样品',{count:selected.size})}}</strong>
       <el-button v-if="data&&selected.size<data.totalElements" link :disabled="selecting||loading" @click="selectResults">{{uiText('全选当前筛选结果（{count}种）',{count:data.totalElements})}}</el-button>
-      <el-button v-if="access.canWrite" :disabled="selecting" size="small" @click="setLocations([...selected.values()])">{{uiText('批量设置位置')}}</el-button>
+      <el-button v-if="access.canWrite&&selectionWritable" :disabled="selecting" size="small" @click="setLocations([...selected.values()])">{{uiText('批量设置位置')}}</el-button>
       <details class="more-menu"><summary>{{uiText('更多操作')}}</summary><div class="commands" @click="closeActionMenu">
-        <template v-if="canWrite">
+        <template v-if="canWrite&&selectionWritable">
           <button :disabled="selecting" @click="beginBulk('move')">{{uiText('精细移库')}}</button>
           <button :disabled="selecting" @click="sendSelected">{{uiText('批量发往墨西哥')}}</button>
           <button :disabled="selecting" @click="beginBulk('loan')">{{uiText('批量借出')}}</button>
@@ -218,7 +219,7 @@ onBeforeUnmount(()=>{disposed=true;clearTimeout(searchTimer);++epoch;++detailEpo
         </template>
         <button :disabled="selecting" @click="print([...selected.values()])">{{uiText('批量打印标签（')}}{{selected.size}}）</button>
         <button :disabled="exporting||loading||selecting" @click="exportLabels">{{uiText('批量导出标签（')}}{{selected.size}}）</button>
-        <button v-if="canWrite" class="danger" :disabled="selecting" @click="correctReceipt('void_receipt',[...selected.values()])">{{uiText('批量删除登记（')}}{{selected.size}}）</button>
+        <button v-if="canWrite&&selectionWritable" class="danger" :disabled="selecting" @click="correctReceipt('void_receipt',[...selected.values()])">{{uiText('批量删除登记（')}}{{selected.size}}）</button>
       </div></details>
       <el-button link :disabled="selecting" @click="clearSelection">{{uiText('清空已选')}}</el-button>
     </div>
@@ -242,11 +243,11 @@ onBeforeUnmount(()=>{disposed=true;clearTimeout(searchTimer);++epoch;++detailEpo
         <p v-if="!positions(detail).length">{{uiText('当前没有在库实物。')}}</p>
         <div class="identity-summary"><span>{{uiText('可用 ')}}{{detail.balances.available}}</span><span>{{uiText('借出 ')}}{{detail.balances.borrowed}}</span><span>{{uiText('在途 ')}}{{quantity(detail.balances.inTransit)}}</span></div>
         <div class="detail-actions">
-          <el-button v-if="access.canWrite" type="primary" size="small" :disabled="!detail.balances.onhand" @click="setLocations([detail])">{{uiText('设置位置')}}</el-button>
+          <el-button v-if="access.canWrite&&!detail.ledgerReadOnly" type="primary" size="small" :disabled="!detail.balances.onhand" @click="setLocations([detail])">{{uiText('设置位置')}}</el-button>
           <details class="more-menu"><summary>{{uiText('更多操作')}}</summary><div class="commands" @click="closeActionMenu">
             <button @click="print([detail])">{{uiText('打印／补打二维码标签')}}</button>
             <button v-if="localOnly&&access.canWrite" @click="moveLocal(detail)">{{uiText('精细移库')}}</button>
-            <template v-if="canWrite">
+            <template v-if="canWrite&&!detail.ledgerReadOnly">
               <button @click="correctReceipt('correct_receipt',[detail])">{{uiText('改数量')}}</button>
               <button v-if="detail.sourceType==='catalog'&&canCorrectColor" @click="colorEditing=true">{{uiText('更正颜色')}}</button>
               <button @click="operate('loan')">{{uiText('借出')}}</button><button @click="operate('return')">{{uiText('归还')}}</button>
@@ -259,13 +260,13 @@ onBeforeUnmount(()=>{disposed=true;clearTimeout(searchTimer);++epoch;++detailEpo
         <details v-if="positions(detail).length"><summary>{{uiText('数量明细')}}</summary>
           <p v-for="p in positions(detail)" :key="samplePositionKey(p)">{{sampleLocationLabel(p)}} · {{uiText('可用 ')}}{{p.available}} · {{uiText('留样')}} {{p.retained}} · {{uiText('损坏')}} {{p.damaged}}</p>
         </details>
-        <details v-if="!localOnly"><summary>{{uiText('样品资料')}}</summary>
+        <details v-if="!localOnly&&!detail.ledgerReadOnly"><summary>{{uiText('样品资料')}}</summary>
           <p v-if="detail.legacySampleCode">{{uiText('旧码 ')}}{{detail.legacySampleCode}}</p>
           <CatalogCurrentInfo :value="detail.currentCatalog" :recorded-name="detail.recordedName"/>
           <PartnerFiles kind="sample-identities" :id="detail.sampleIdentityId" :files="detail.files||[]" :model-value="[]" :can-write="false" :can-write-money="false" compact/>
-          <el-button v-if="canWrite" size="small" @click="operate('files')">{{uiText('上传到原收样批次')}}</el-button>
+          <el-button v-if="canWrite&&!detail.ledgerReadOnly" size="small" @click="operate('files')">{{uiText('上传到原收样批次')}}</el-button>
         </details>
-<h3 v-if="(detail.loans||detail.balances.loans||[]).some(l=>l.outstanding>0)">{{ uiText("借出待还") }}</h3><p v-for="loan in (detail.loans||detail.balances.loans||[]).filter(l=>l.outstanding>0)" :key="loan.id">{{loan.person}}{{ uiText(" · 待还 ") }}{{loan.outstanding}}{{ uiText(" · 预计 ") }}{{loan.due||uiText('未记录')}}</p><template v-if="!localOnly&&detail.events?.some(e=>e.action==='sample_color_correction')"><h3>{{ uiText("颜色更正记录") }}</h3><p v-for="event in detail.events.filter(e=>e.action==='sample_color_correction')" :key="event.id">{{correctionColor(event.data,'before')}} → {{correctionColor(event.data,'after')}} · {{event.operator}}<br/>{{event.data?.reason}}</p></template><details v-if="!localOnly&&detail.batches?.length"><summary>{{ uiText("收样批次与原流转") }}</summary><article v-for="batch in (!localOnly?detail.batches:[])||[]" :key="batch.id" class="batch-row"><span>{{batch.receivedDate||uiText('日期待核对')}}{{ uiText(" · 实收 ") }}{{quantity(batch.effectiveReceivedQty??batch.receivedQty)}}<template v-if="batch.receiptStatus==='voided'"> · {{uiText('已删除登记，原记录保留')}}</template>{{ uiText(" · 在库 ") }}{{batch.balances.onhand}}{{ uiText(" · 借出 ") }}{{batch.balances.borrowed}}<small>{{ uiText("内部批次 ") }}{{batch.code}}</small></span><el-button size="small" @click="openBatch(batch.id)">{{ uiText("原记录／图片附件／更正") }}</el-button></article></details></template></div></el-drawer>
+<h3 v-if="(detail.loans||detail.balances.loans||[]).some(l=>l.outstanding>0)">{{ uiText("借出待还") }}</h3><p v-for="loan in (detail.loans||detail.balances.loans||[]).filter(l=>l.outstanding>0)" :key="loan.id">{{loan.person}}{{ uiText(" · 待还 ") }}{{loan.outstanding}}{{ uiText(" · 预计 ") }}{{loan.due||uiText('未记录')}}</p><template v-if="!localOnly&&detail.events?.some(e=>e.action==='sample_color_correction')"><h3>{{ uiText("颜色更正记录") }}</h3><p v-for="event in detail.events.filter(e=>e.action==='sample_color_correction')" :key="event.id">{{correctionColor(event.data,'before')}} → {{correctionColor(event.data,'after')}} · {{event.operator}}<br/>{{event.data?.reason}}</p></template><details v-if="!localOnly&&!detail.ledgerReadOnly&&detail.batches?.length"><summary>{{ uiText("收样批次与原流转") }}</summary><article v-for="batch in (!localOnly?detail.batches:[])||[]" :key="batch.id" class="batch-row"><span>{{batch.receivedDate||uiText('日期待核对')}}{{ uiText(" · 实收 ") }}{{quantity(batch.effectiveReceivedQty??batch.receivedQty)}}<template v-if="batch.receiptStatus==='voided'"> · {{uiText('已删除登记，原记录保留')}}</template>{{ uiText(" · 在库 ") }}{{batch.balances.onhand}}{{ uiText(" · 借出 ") }}{{batch.balances.borrowed}}<small>{{ uiText("内部批次 ") }}{{batch.code}}</small></span><el-button size="small" @click="openBatch(batch.id)">{{ uiText("原记录／图片附件／更正") }}</el-button></article></details></template></div></el-drawer>
   <el-dialog v-model="batchChoice" :title="pendingAction==='files'?uiText('选择图片附件归属的原收样批次'):uiText('选择本次办理的原收样批次')" width="min(620px,96vw)" append-to-body><p>{{ uiText("同一码可多次收样，借还和移位继续使用原批次数量。") }}</p><div v-for="batch in detail?.batches||[]" :key="batch.id" class="batch-row"><span>{{batch.receivedDate}}{{ uiText(" · 在库 ") }}{{batch.balances.onhand}}{{ uiText(" · 可借 ") }}{{batch.balances.available}}<small>{{ uiText("内部 ") }}{{batch.code}}</small></span><el-button type="primary" size="small" @click="openBatch(batch.id,pendingAction)">{{pendingAction==='files'?uiText('进入本批附件'):uiText('办理本批')}}</el-button></div></el-dialog>
   <SampleLocationSetDialog v-if="locationSetOpen" :samples="locationRows" @close="locationSetOpen=false" @saved="locationsSaved"/><SampleLocationManager v-if="locationManagerOpen" @close="locationManagerOpen=false" @changed="loadOptions"/><SampleBatchActionDialog v-if="bulkAction" :action="bulkAction" :samples="bulkRows" @close="bulkAction=undefined" @saved="bulkSaved"/><SampleColorCorrectionDialog v-if="colorEditing&&detail" :sample="detail" @close="colorEditing=false" @saved="colorSaved"/>
   <SampleReceiptCorrectionDialog v-if="receiptAction&&canWrite" :action="receiptAction" :samples="receiptRows" @close="receiptAction=undefined" @saved="receiptSaved" @inspect="receiptAction=undefined;openBatch($event)"/><SampleLabelPrint v-model="printOpen" :samples="labels"/>

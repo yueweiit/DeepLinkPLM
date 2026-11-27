@@ -9,7 +9,9 @@ final class SampleIdentityQuery {
  private static final List<String> POSITION_TOTALS=List.of("good","retained","damaged","onhand","available");
  private final PartnerStore store;
  private final String visible;
- SampleIdentityQuery(PartnerStore store,String visible){this.store=store;this.visible=visible;}
+ private final boolean fullLedger;
+ SampleIdentityQuery(PartnerStore store,String visible){this(store,visible,false);}
+ SampleIdentityQuery(PartnerStore store,String visible,boolean fullLedger){this.store=store;this.visible=visible;this.fullLedger=fullLedger;}
 
  Map<String,Object> page(Map<String,String> query){
   String grouping=text(query.get("groupBy"));require(grouping.isEmpty()||grouping.equals("style"),"样品分组方式无效");
@@ -29,7 +31,7 @@ final class SampleIdentityQuery {
   require(!input.containsKey("details")||input.get("details") instanceof Boolean,"详情开关无效");
   var filters=new LinkedHashMap<String,String>();
   for(var entry:map(input.get("filters")).entrySet()){
-   require(Set.of("domain","supplierCode","site","locationId","unlocated","keyword","receiptStatus").contains(entry.getKey()),"样品筛选字段无效");
+   require(Set.of("domain","supplierCode","site","locationId","unlocated","keyword","receiptStatus","view").contains(entry.getKey()),"样品筛选字段无效");
    require(entry.getValue() instanceof String||entry.getValue() instanceof Number||entry.getValue() instanceof Boolean,"样品筛选值无效");filters.put(entry.getKey(),String.valueOf(entry.getValue()));
   }
   var ids=new LinkedHashSet<Long>();var keys=new LinkedHashSet<String>();
@@ -55,23 +57,27 @@ final class SampleIdentityQuery {
  private List<Map<String,Object>> load(Map<String,String> query,Set<Long> selectedIds,boolean details){
   String site=SampleSiteAccess.read(store,query.get("site"));boolean mexico=SampleSiteAccess.mexico(store);String domain=text(query.get("domain")),supplier=text(query.get("supplierCode"));
   var args=new ArrayList<Object>();String where="r.kind='sample_identity' and r.deleted_flag=0 and coalesce(r.data->>'redirectIdentityId','')=''";
-  if(!mexico)where+=" and ("+visible+")";
+  if(!mexico&&!fullLedger)where+=" and ("+visible+")";
   String receiptStatus=text(query.getOrDefault("receiptStatus","active"));require(Set.of("active","voided","all").contains(receiptStatus),"收样登记筛选无效");
-  if(!receiptStatus.equals("all")){String scope="b.kind='sample' and b.deleted_flag=0 and b.sample_identity_id=r.record_id and ("+(mexico?"true":store.access.visibleSqlClause("partner","b.record_id"))+")";String any="exists(select 1 from plm_partner_record b where "+scope+")",active="exists(select 1 from plm_partner_record b where "+scope+" and "+SampleReceiptCorrections.activeSql("b")+")";where+=" and "+(receiptStatus.equals("active")?"(not "+any+" or "+active+")":any+" and not "+active);}
+  String scopedBatch=mexico?"true":store.access.visibleSqlClause("partner","b.record_id");
+  String batchScope=fullLedger?"true":scopedBatch;
+  if(!receiptStatus.equals("all")){String scope="b.kind='sample' and b.deleted_flag=0 and b.sample_identity_id=r.record_id and ("+batchScope+")";String any="exists(select 1 from plm_partner_record b where "+scope+")",active="exists(select 1 from plm_partner_record b where "+scope+" and "+SampleReceiptCorrections.activeSql("b")+")";where+=" and "+(receiptStatus.equals("active")?"(not "+any+" or "+active+")":any+" and not "+active);}
 
   if(!domain.isEmpty()){SampleDomains.validate(domain);where+=" and r.data->>'domain'=?";args.add(domain);}
   if(!supplier.isEmpty()){where+=" and coalesce(nullif(r.supplier_code,''),r.data->>'supplierCode')=?";args.add(supplier);}
   if(!selectedIds.isEmpty()){where+=" and r.record_id in ("+marks(selectedIds.size())+")";args.addAll(selectedIds);}
   if(number(query.get("identityId"))>0){where+=" and r.record_id=?";args.add(number(query.get("identityId")));}
-  var raw=store.jdbc.queryForList("select r.record_id as id,r.code,r.name,r.status,r.version,r.supplier_code,r.data::text from plm_partner_record r where "+where+" order by r.updated_at desc,r.record_id desc",args.toArray());
+  // Preserve the original operation scope while projecting shared stock from all sample batches.
+  String restricted=fullLedger?"not ("+visible+")":"false";
+  var raw=store.jdbc.queryForList("select "+restricted+" as ledger_read_only,r.record_id as id,r.code,r.name,r.status,r.version,r.supplier_code,r.data::text from plm_partner_record r where "+where+" order by r.updated_at desc,r.record_id desc",args.toArray());
   if(raw.isEmpty())return List.of();
   var headers=new LinkedHashMap<Long,Map<String,Object>>();
-  for(var row:raw){var h=decode(store.json,row.get("data"));for(String key:List.of("id","code","name","status","version"))h.put(key,row.get(key));if(text(h.get("supplierCode")).isEmpty())h.put("supplierCode",text(row.get("supplier_code")));h.put("sampleIdentityId",row.get("id"));h.put("sampleCode",row.get("code"));var basis=map(h.get("identityBasis"));for(String field:List.of("catalogStyleId","colorId"))if(number(h.get(field))<=0&&number(basis.get(field))>0)h.put(field,number(basis.get(field)));headers.put(number(row.get("id")),h);}
+  for(var row:raw){var h=decode(store.json,row.get("data"));if(Boolean.TRUE.equals(row.get("ledger_read_only")))h.put("ledgerReadOnly",true);else h.remove("ledgerReadOnly");for(String key:List.of("id","code","name","status","version"))h.put(key,row.get(key));if(text(h.get("supplierCode")).isEmpty())h.put("supplierCode",text(row.get("supplier_code")));h.put("sampleIdentityId",row.get("id"));h.put("sampleCode",row.get("code"));var basis=map(h.get("identityBasis"));for(String field:List.of("catalogStyleId","colorId"))if(number(h.get(field))<=0&&number(basis.get(field))>0)h.put(field,number(basis.get(field)));headers.put(number(row.get("id")),h);}
   var suppliers=store.jdbc.queryForList("select supplier_code,supplier_name,short_code from plm_supplier_profile");var supplierNames=new HashMap<String,Map<String,Object>>();for(var s:suppliers)supplierNames.put(text(s.get("supplier_code")),s);
   var recordedSupplierNames=new HashMap<Long,String>();for(var h:headers.values()){String code=text(h.get("supplierCode"));var s=supplierNames.getOrDefault(code,Map.of());String recorded=text(h.get("supplierName"));if(recorded.isEmpty())recorded=text(map(h.get("sourceSnapshot")).get("supplierName"));recordedSupplierNames.put(number(h.get("id")),recorded);String name=text(s.get("supplier_name"));if(name.isEmpty())name=recorded;h.put("supplierCode",code);h.put("supplierName",name);h.put("supplierShortName",text(s.get("short_code")));SampleCodes.project(h,s.get("short_code"));}
   if(!mexico)new PartnerCatalogStyles(store).projectCurrent(new ArrayList<>(headers.values()));
-  String ids=marks(headers.size());var batchArgs=new ArrayList<Object>(headers.keySet());String batchScope=mexico?"true":store.access.visibleSqlClause("partner","b.record_id");
-  var batches=store.jdbc.queryForList("select b.record_id as id,b.code,b.version,b.sample_identity_id,b.data::text,"+SampleReceiptCorrections.effectiveSql("b")+" as effective_received_qty from plm_partner_record b where b.kind='sample' and b.deleted_flag=0 and b.sample_identity_id in ("+ids+") and ("+batchScope+") order by b.record_id",batchArgs.toArray());
+  String ids=marks(headers.size());var batchArgs=new ArrayList<Object>(headers.keySet());
+  var batches=store.jdbc.queryForList("select "+(fullLedger?"("+scopedBatch+")":"true")+" as scoped_batch,b.record_id as id,b.code,b.version,b.sample_identity_id,b.data::text,"+SampleReceiptCorrections.effectiveSql("b")+" as effective_received_qty from plm_partner_record b where b.kind='sample' and b.deleted_flag=0 and b.sample_identity_id in ("+ids+") and ("+batchScope+") order by b.record_id",batchArgs.toArray());
   var events=new HashMap<Long,List<Map<String,Object>>>();var files=new HashMap<Long,List<Map<String,Object>>>();var directions=new HashMap<Long,String>();var locations=new HashMap<Long,Map<String,Object>>();
   locations.putAll(locations(store,mexico));
   if(!batches.isEmpty()){
@@ -80,7 +86,12 @@ final class SampleIdentityQuery {
    var eventIds=details&&!mexico?bids:missing;
    if(!eventIds.isEmpty())for(var e:store.jdbc.queryForList("select event_id as id,record_id,action,data::text from plm_partner_event where record_id in ("+marks(eventIds.size())+") order by event_id",eventIds.toArray())){e.put("data",decode(store.json,e.get("data")));events.computeIfAbsent(number(e.get("record_id")),k->new ArrayList<>()).add(e);}
    for(var batch:batches)if(!batch.containsKey("ledgerBalance"))batch.put("ledgerBalance",SampleLedger.replay(events.getOrDefault(number(batch.get("id")),List.of())).view());
-   String fileScope=mexico?"pf.purpose='photo' and not exists(select 1 from plm_partner_file private_file where private_file.attachment_id=a.attachment_id and private_file.purpose in ('financial','cooperation_cost'))":"pf.purpose in ('photo','material') and ("+store.access.visibleSqlClause("file","a.attachment_id")+")";
+   String samplePhoto="pf.purpose='photo' and not exists(select 1 from plm_partner_file private_file where private_file.attachment_id=a.attachment_id and private_file.purpose in ('financial','cooperation_cost'))";
+   String fileScope=mexico?samplePhoto:"pf.purpose in ('photo','material') and ("+store.access.visibleSqlClause("file","a.attachment_id")+")";
+   if(fullLedger){
+    String scopedSource="exists(select 1 from plm_partner_record b where b.record_id=pf.record_id and ("+scopedBatch+"))";
+    fileScope=store.access.hasPermission("file:read")?"(("+scopedSource+" and "+fileScope+") or ("+samplePhoto+"))":"false";
+   }
    for(var f:store.jdbc.queryForList("select pf.record_id,a.attachment_id as id,a.file_name as name,a.content_type as type from plm_partner_file pf join plm_attachment a on a.attachment_id=pf.attachment_id where pf.record_id in ("+in+") and "+fileScope+" and a.deleted_flag=0 and a.content_type like 'image/%' order by a.attachment_id",bids.toArray()))files.computeIfAbsent(number(f.get("record_id")),k->new ArrayList<>()).add(f);
    var shipmentIds=new TreeSet<Long>();for(var batch:batches)for(var transit:maps(map(batch.get("ledgerBalance")).get("transits")))if(number(transit.get("outstanding"))>0&&number(transit.get("shipmentId"))>0)shipmentIds.add(number(transit.get("shipmentId")));
    if(!shipmentIds.isEmpty())for(var shipment:store.jdbc.queryForList("select record_id,data->>'direction' as direction from plm_partner_record where kind='sample_shipment' and deleted_flag=0 and record_id in ("+marks(shipmentIds.size())+")",shipmentIds.toArray()))directions.put(number(shipment.get("record_id")),text(shipment.get("direction")));
@@ -89,8 +100,11 @@ final class SampleIdentityQuery {
   var result=new ArrayList<Map<String,Object>>();long locationId=number(query.get("locationId"));boolean unlocated="true".equals(query.get("unlocated"));String keyword=text(query.get("keyword")).toLowerCase(Locale.ROOT),groupKey=text(query.get("groupKey"));
   var corrections=new SampleReceiptCorrections(store);var referenced=details&&!mexico?corrections.referenceBlocks(batches.stream().map(b->number(b.get("id"))).toList()):Set.<Long>of();
   for(var h:headers.values()){
-   var row=project(h,byIdentity.getOrDefault(number(h.get("id")),List.of()),files,directions,locations,site,mexico,locationId,unlocated);
-   if(details&&!mexico)for(var batch:maps(row.get("batches"))){map(batch.get("balances")).put("positions",batch.get("positions"));corrections.enrich(batch,events.getOrDefault(number(batch.get("id")),List.of()),referenced.contains(number(batch.get("id"))));}
+   var memberBatches=byIdentity.getOrDefault(number(h.get("id")),List.of());
+   if(fullLedger&&!memberBatches.isEmpty()&&memberBatches.stream().noneMatch(b->Boolean.TRUE.equals(b.get("scoped_batch"))))h.put("ledgerReadOnly",true);
+   var row=project(h,memberBatches,files,directions,locations,site,mexico,locationId,unlocated);
+   if(fullLedger&&!Boolean.TRUE.equals(row.get("ledgerReadOnly"))&&memberBatches.stream().anyMatch(b->!Boolean.TRUE.equals(b.get("scoped_batch"))))row.put("ledgerSharedStock",true);
+   if(details&&!mexico&&!Boolean.TRUE.equals(row.get("ledgerReadOnly")))for(var batch:maps(row.get("batches"))){map(batch.get("balances")).put("positions",batch.get("positions"));corrections.enrich(batch,events.getOrDefault(number(batch.get("id")),List.of()),referenced.contains(number(batch.get("id"))));}
    if((mexico||!site.isEmpty()||locationId>0||unlocated)&&!hasStock(row))continue;
    if(!groupKey.isEmpty()&&!groupKey.equals(row.get("groupKey")))continue;
    if(!keyword.isEmpty()&&!search(row,keyword)&&!recordedSupplierNames.getOrDefault(number(h.get("id")),"").toLowerCase(Locale.ROOT).contains(keyword))continue;result.add(row);
@@ -99,7 +113,8 @@ final class SampleIdentityQuery {
  }
 
  private Map<String,Object> project(Map<String,Object> head,List<Map<String,Object>> batches,Map<Long,List<Map<String,Object>>> files,Map<Long,String> directions,Map<Long,Map<String,Object>> locations,String site,boolean mexico,long locationId,boolean unlocated){
-  var row=mexico?new LinkedHashMap<String,Object>():new LinkedHashMap<>(head);for(String key:List.of("id","code","sampleIdentityId","sampleCode","originalSampleCode","name","productName","specName","phoneName","phoneModelId","phoneModelIds","phones","colorId","colorName","sampleVersion","supplierCode","supplierName","supplierShortName","catalogStyleId","catalogStyleCode","catalogStyleLabel","productId","domain","sourceType","status","version"))if(head.containsKey(key))row.put(key,head.get(key));
+  boolean restricted=mexico||Boolean.TRUE.equals(head.get("ledgerReadOnly"));
+  var row=restricted?new LinkedHashMap<String,Object>():new LinkedHashMap<>(head);for(String key:List.of("ledgerReadOnly","id","code","sampleIdentityId","sampleCode","originalSampleCode","name","productName","specName","phoneName","phoneModelId","phoneModelIds","phones","colorId","colorName","sampleVersion","supplierCode","supplierName","supplierShortName","catalogStyleId","catalogStyleCode","catalogStyleLabel","productId","domain","sourceType","status","version"))if(head.containsKey(key))row.put(key,head.get(key));
   row.remove("identityBasis");row.put("groupKey",groupKey(head));var totals=zeros(TOTALS);var positions=new LinkedHashMap<String,Map<String,Object>>();var loans=new ArrayList<Map<String,Object>>();var photos=new LinkedHashMap<Long,Map<String,Object>>();var localBatches=new ArrayList<Map<String,Object>>();
   for(var batch:batches){long bid=number(batch.get("id"));var balance=map(batch.get("ledgerBalance"));var batchTotals=zeros(TOTALS);var batchPositions=new ArrayList<Map<String,Object>>();
    for(var raw:maps(balance.get("positions"))){var p=SampleLocations.project(raw,locations);if(!site.isEmpty()&&!site.equals(text(p.get("site"))))continue;if(locationId>0&&locationId!=number(p.get("locationId")))continue;if(unlocated&&!unlocated(p))continue;if(number(p.get("onhand"))==0)continue;
@@ -110,7 +125,7 @@ final class SampleIdentityQuery {
     for(var transit:maps(balance.get("transits")))if(number(transit.get("outstanding"))>0&&(site.isEmpty()||site.equals("MX")&&"mexico_outbound".equals(directions.get(number(transit.get("shipmentId"))))))increase(batchTotals,"inTransit",number(transit.get("outstanding")));
    }
    boolean relevant=hasStock(Map.of("balances",batchTotals));if(relevant||site.isEmpty()&&locationId==0&&!unlocated)for(var f:files.getOrDefault(bid,List.of()))photos.putIfAbsent(number(f.get("id")),Map.of("id",f.get("id"),"name",f.get("name"),"type",f.get("type")));
-   if(relevant||!mexico&&site.isEmpty()&&locationId==0&&!unlocated){var b=mexico?new LinkedHashMap<String,Object>():decode(store.json,batch.get("data"));b.put("id",bid);b.put("code",batch.get("code"));b.put("version",batch.get("version"));if(!mexico){long received=number(batch.get("effective_received_qty"));b.put("effectiveReceivedQty",received);b.put("receiptStatus",received>0?"active":"voided");}b.put("balances",batchTotals);b.put("positions",batchPositions);localBatches.add(b);}
+   if((!fullLedger||Boolean.TRUE.equals(batch.get("scoped_batch")))&&(relevant||!mexico&&site.isEmpty()&&locationId==0&&!unlocated)){var b=restricted?new LinkedHashMap<String,Object>():decode(store.json,batch.get("data"));b.put("id",bid);b.put("code",batch.get("code"));b.put("version",batch.get("version"));if(!mexico){long received=number(batch.get("effective_received_qty"));b.put("effectiveReceivedQty",received);b.put("receiptStatus",received>0?"active":"voided");}b.put("balances",batchTotals);b.put("positions",batchPositions);localBatches.add(b);}
    for(String key:TOTALS)increase(totals,key,number(batchTotals.get(key)));
   }
   totals.put("positions",new ArrayList<>(positions.values()));totals.put("loans",loans);row.put("balances",totals);row.put("positions",totals.get("positions"));row.put("loans",loans);row.put("files",new ArrayList<>(photos.values()));
