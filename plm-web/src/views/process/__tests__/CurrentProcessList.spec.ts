@@ -51,7 +51,7 @@ describe('current process workspace',()=>{
     expect(wrapper.get('.route-head').text()).toContain('MES V2')
     expect(wrapper.get('.route-meta').text()).toContain('已锁定')
     await wrapper.get('.path button').trigger('click');await flushPromises()
-    expect(wrapper.get('.el-input input').element.value).toBe('r-dye')
+    expect((wrapper.get('.el-input input').element as HTMLInputElement).value).toBe('r-dye')
   })
   it('preserves distinct instances and separates a route equipment override from its operation template',async()=>{
     const router=await start({processProduct:'10',processRoute:'81'})
