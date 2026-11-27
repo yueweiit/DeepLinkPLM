@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { t as uiText } from '@/locales'
 
-import { computed, onMounted, reactive, ref, toRaw } from 'vue'
+import { computed, onMounted, reactive, ref, toRaw, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Bottom, Check, CopyDocument, Delete, Plus, Top } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
@@ -33,7 +33,7 @@ const taskRows = ref<ApprovalTask[]>([])
 const workflowRows = ref<WorkflowTemplate[]>([])
 const loading = ref(false)
 const saving = ref(false)
-const activeView = ref<ApprovalView>('workflow')
+const activeView = ref<ApprovalView>(route.query.view === 'tasks' ? 'tasks' : 'workflow')
 const drawerVisible = ref(false)
 const editingTemplateId = ref<number | null>(null)
 
@@ -274,6 +274,11 @@ onMounted(async () => {
   })
   await loadData()
 })
+
+watch(activeView, (view) => {
+  const nextView = view === 'tasks' ? 'tasks' : undefined
+  if (route.query.view !== nextView) void router.replace({ query: { ...route.query, view: nextView } })
+})
 </script>
 
 <template>
@@ -306,7 +311,7 @@ onMounted(async () => {
       </section>
 
       <section class="page-panel" v-loading="loading">
-        <FixedTableViewport v-slot="{ tableHeight }" compact :refresh-key="workflowRows">
+        <FixedTableViewport class="workflow-desktop-table" v-slot="{ tableHeight }" compact :refresh-key="workflowRows">
         <el-table :data="workflowRows" :height="tableHeight" border stripe>
           <el-table-column prop="templateName" :label='uiText("流程模板")' min-width="220" />
           <el-table-column :label='uiText("流程线")' width="140">
@@ -334,6 +339,24 @@ onMounted(async () => {
         </el-table>
         </FixedTableViewport>
       </section>
+      <section class="workflow-mobile-list" v-loading="loading" aria-label="流程模板">
+        <article v-for="row in workflowRows" :key="row.workflowTemplateId" class="workflow-mobile-card">
+          <header>
+            <div><strong>{{ row.templateName }}</strong><small>{{ flowTypeName(row.flowType) }} · {{ row.versionNo }}</small></div>
+            <el-tag :type="row.activeFlag ? 'success' : row.status === 'draft' ? 'warning' : 'info'" effect="light">
+              {{ row.activeFlag ? uiText('启用') : row.status === 'draft' ? uiText('草稿') : uiText('停用') }}
+            </el-tag>
+          </header>
+          <p>{{ row.description || uiText('暂无说明') }}</p>
+          <small>{{ uiText("节点 ") }}{{ row.nodes?.length || 0 }}</small>
+          <footer>
+            <el-button link type="primary" @click="openEditWorkflow(row)">{{ uiText("编辑") }}</el-button>
+            <el-button link :icon="CopyDocument" @click="copyTemplate(row)">{{ uiText("复制") }}</el-button>
+            <el-button v-if="!row.activeFlag" link type="success" :icon="Check" @click="activateTemplate(row)">{{ uiText("启用") }}</el-button>
+          </footer>
+        </article>
+        <el-empty v-if="!loading && !workflowRows.length" :description="uiText('暂无流程模板')" />
+      </section>
     </template>
 
     <template v-else>
@@ -345,7 +368,7 @@ onMounted(async () => {
       />
 
       <section class="page-panel" v-loading="loading">
-        <FixedTableViewport v-slot="{ tableHeight }" compact :refresh-key="table.pagedRows.value">
+        <FixedTableViewport class="task-desktop-table" v-slot="{ tableHeight }" compact :refresh-key="table.pagedRows.value">
         <el-table :data="table.pagedRows.value" :height="tableHeight" border stripe @row-click="openTask">
           <el-table-column prop="objectName" :label='uiText("业务对象")' min-width="260" />
           <el-table-column prop="nodeName" :label='uiText("审批节点")' min-width="180" />
@@ -364,6 +387,20 @@ onMounted(async () => {
           </el-table-column>
         </el-table>
         </FixedTableViewport>
+
+        <div class="task-mobile-list">
+          <article v-for="row in table.pagedRows.value" :key="row.taskId" class="task-mobile-card" @click="openTask(row)">
+            <header><strong>{{ row.objectName }}</strong><StatusTag :status="row.status" object-type="product" /></header>
+            <p>{{ row.nodeName }}</p>
+            <dl>
+              <div><dt>{{ uiText("发起人") }}</dt><dd>{{ row.initiator }}</dd></div>
+              <div><dt>{{ uiText("审批人") }}</dt><dd>{{ row.approver }}</dd></div>
+              <div><dt>{{ uiText("截止日期") }}</dt><dd>{{ row.dueDate || uiText('未设置') }}</dd></div>
+            </dl>
+            <el-button link type="primary" @click.stop="openTask(row)">{{ uiText("查看") }}</el-button>
+          </article>
+          <el-empty v-if="!loading && !table.pagedRows.value.length" :description="uiText('暂无符合条件的审批任务')" />
+        </div>
 
         <div class="toolbar-row pager-row">
           <span class="subtle-text">{{ uiText("共 ") }}{{ table.filteredRows.value.length }}{{ uiText(" 条") }}</span>
@@ -508,6 +545,74 @@ onMounted(async () => {
   gap: 8px;
 }
 
+.workflow-mobile-list,
+.task-mobile-list {
+  display: none;
+}
+
+.workflow-mobile-card,
+.task-mobile-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--plm-color-border-light);
+  border-radius: var(--plm-radius-base);
+  background: var(--plm-color-surface);
+  overflow-wrap: anywhere;
+}
+
+.workflow-mobile-card > header,
+.task-mobile-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.workflow-mobile-card strong,
+.workflow-mobile-card header small {
+  display: block;
+}
+
+.workflow-mobile-card header small {
+  margin-top: 4px;
+  color: var(--plm-color-text-secondary);
+}
+
+.workflow-mobile-card p,
+.task-mobile-card p {
+  margin: 10px 0;
+  color: var(--plm-color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.workflow-mobile-card footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.task-mobile-card {
+  cursor: pointer;
+}
+
+.task-mobile-card dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 0 0 8px;
+}
+
+.task-mobile-card dt {
+  color: var(--plm-color-text-secondary);
+  font-size: 12px;
+}
+
+.task-mobile-card dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+
 .node-order,
 .node-switches {
   flex-direction: column;
@@ -534,6 +639,23 @@ onMounted(async () => {
   .node-switches {
     flex-direction: row;
     flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 680px) {
+  .workflow-desktop-table,
+  .task-desktop-table {
+    display: none;
+  }
+
+  .workflow-mobile-list,
+  .task-mobile-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .task-mobile-card dl {
+    grid-template-columns: 1fr;
   }
 }
 </style>

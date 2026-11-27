@@ -1432,6 +1432,10 @@ onMounted(loadInProgressProjects)
 .dashboard-segment-btn.is-active { background: #e5e7eb; font-weight: 600; }
 .dashboard-segment-btn { position: relative; }
 .dashboard-segment-count { position: absolute; top: -1px; right: -4px; min-width: 12px; height: 12px; display: inline-flex; align-items: center; justify-content: center; padding: 0 3px; border-radius: 999px; background: #FF0000; color: #fff; font-size: 9px; font-weight: 600; line-height: 1; }
+@media (max-width: 640px) {
+  .dashboard-segment-bar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; max-width: 100%; overflow: visible; }
+  .dashboard-segment-btn { min-width: 0; justify-content: center; padding: 8px 6px; white-space: normal; text-align: center; }
+}
 @media (max-width: 900px) { .project-progress-layout { grid-template-columns: 1fr; } .project-progress-info-grid { grid-template-columns: 1fr; } .project-progress-node-actions { align-items: stretch; flex-direction: column; } }
 
 .create-project-form {

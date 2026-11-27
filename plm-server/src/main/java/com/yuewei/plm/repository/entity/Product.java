@@ -29,6 +29,7 @@ public class Product extends BaseEntity {
     private String productName;
     private String productType;
     private String developmentMode;
+    private String productIdentityMode;
     private String developmentRequirements;
     private java.math.BigDecimal targetCost;
     @com.baomidou.mybatisplus.annotation.TableField(updateStrategy=com.baomidou.mybatisplus.annotation.FieldStrategy.NEVER)

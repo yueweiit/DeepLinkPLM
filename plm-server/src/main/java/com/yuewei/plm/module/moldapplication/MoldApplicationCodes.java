@@ -15,6 +15,9 @@ import static com.yuewei.plm.module.moldapplication.MoldApplicationForms.*;
 
 @Service
 public class MoldApplicationCodes {
+    @Autowired private com.yuewei.plm.module.moldsharing.MoldShareMappingService moldSharing;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.yuewei.plm.module.product.identity.ProductCodeReservationService identities;
     private final MoldApplicationRepository repo;private final MoldApplicationProperties props;
     private final ProductBusinessCodeGenerator generator;private final ObjectMapper json;
     private final PhoneModelReferenceService references;
@@ -85,6 +88,7 @@ public class MoldApplicationCodes {
         references.requireSelectedPhone(request.phoneModelId(),request.phoneCodeItemId(),null,request.model());
         var products=repo.jdbc().queryForList("select product_specific_code from plm_product where product_id=? and product_type='product_line' and development_mode='launch_v1' and deleted_flag=0",project);
         if(products.size()!=1)throw invalid("原新品项目不存在");String prefix=text(products.get(0).get("product_specific_code"));
+        if(identities!=null&&identities.isManaged(project))prefix=identities.pinForResearch(project,"开模编码预留："+request.requestId());
         if(prefix==null||!prefix.matches("[A-Z]{2}"))throw invalid("产品特定编码待补齐");
         if(materialCodes==null||materialCodes.isEmpty())throw invalid("请选择开模材质");
         List<Map<String,String>> materials=new ArrayList<>();for(String code:new TreeSet<>(materialCodes)){String part=ProductBusinessCodeGenerator.moldPartType(code);requireMaterialPart(code,part);materials.add(Map.of("code",code,"partType",part));}
@@ -93,14 +97,24 @@ public class MoldApplicationCodes {
     private Map<String,Object> reserveConfigured(Request request,String actor,Long newSetItemId,Map<String,Object> config,boolean research) {
         if(request.requestId()==null||!request.requestId().matches("[A-Za-z0-9:_-]{8,128}"))throw invalid("请提供有效请求ID");
         if(text(request.model())==null||request.model().length()>255)throw invalid("请填写型号");
+        // Always acquire product locks before global code locks, including the legacy path.
+        requireOnSaleProduct(((Number)config.get("productLineId")).longValue(),null);
         repo.jdbc().execute("select pg_advisory_xact_lock(66817399)");
         repo.jdbc().queryForObject("select pg_advisory_xact_lock(610131102)",(rs,n)->true);
         boolean reuse=request.itemId()!=null||request.moldSetId()!=null||request.compatibilityDigest()!=null;
+        JsonNode plan=null;
+        if(request.applicationId()!=null) {
+            var saved=repo.jdbc().queryForList("select source_snapshot_json::text as source,execution_resolution_json::text as resolution from plm_mold_application where application_id=? and deleted_flag=0",request.applicationId());
+            if(saved.size()==1){var resolution=repo.node(saved.get(0).get("resolution"));plan=resolution.path("engineeringPlan").isObject()?resolution.path("engineeringPlan"):repo.node(saved.get(0).get("source")).path("engineeringPlan");}
+        }
+        boolean v2=plan!=null&&plan.path("codeRuleVersion").asInt()==2;
+        List<Map<String,Object>> mappings=List.of();String hole=null;
+        if(v2){MoldEngineeringPlan.requireCoding(plan);moldSharing.requireUnmappedNew(((Number)config.get("productLineId")).longValue(),plan);hole=plan.path("specifications").get(0).path("holeType").asText();if(com.yuewei.plm.module.moldsharing.MoldShareMappingService.mappedMold(plan))mappings=moldSharing.resolvePlan(((Number)config.get("productLineId")).longValue(),plan);}
         Object fingerprint=reuse||request.phoneModelId()!=null?request:new LegacyRequest(request.requestId(),request.tipo(),request.model(),request.phoneCodeItemId(),request.applicationId());
+        if(v2)fingerprint=Map.of("request",fingerprint,"engineeringPlan",plan);
         if(newSetItemId!=null)fingerprint=Map.of("request",fingerprint,"newSetItemId",newSetItemId);
         if(research)fingerprint=Map.of("request",fingerprint,"config",config);
         String hash=MoldApplicationMedia.hash(repo.json(fingerprint).getBytes(StandardCharsets.UTF_8));
-        requireOnSaleProduct(((Number)config.get("productLineId")).longValue(),null);
         var prior=repo.jdbc().queryForList("select request_hash,response::text response from plm_mold_code_reservation where request_id=?",request.requestId());
         if(!prior.isEmpty()) {
             if(!hash.equals(prior.get(0).get("request_hash")))throw new BusinessException(40901,"请求ID已对应另一份编码申请");
@@ -145,16 +159,22 @@ public class MoldApplicationCodes {
         phoneId=((Number)phone.get("code_item_id")).longValue();String phoneCode=phone.get("code_value").toString();
         if(!phoneCode.matches("\\d{4}"))throw invalid("手机型号编码必须为四位数字");
         Map<String,Object> newSetMaster=null;String moldCodePhoneSegment=phoneCode;
-        if(newSetItemId!=null){
+        if(newSetItemId!=null&&mappings.isEmpty()){
             var master=repo.jdbc().queryForList("select item_id as \"itemId\",product_line_id as \"productLineId\",coalesce(nullif(engraved_code,''),phone_model_code) as \"engravedCode\" from plm_collaboration_item where item_id=? and deleted_flag=0",newSetItemId);
             if(master.size()!=1||!Objects.equals(master.get(0).get("productLineId"),config.get("productLineId")))throw invalid("加开主档与产品线配置不一致");
             moldCodePhoneSegment=Objects.toString(master.get(0).get("engravedCode"),"");if(!moldCodePhoneSegment.matches("[0-9]{4}"))throw invalid("已有主档原刻码待核对，请先完善原刻码再加开");newSetMaster=master.get(0);
         }
         List<Map<String,Object>> generated=new ArrayList<>();for(var material:(JsonNode)config.get("materials")) {
-            String value=generator.generateMoldCode(config.get("productSpecificCode").toString(),material.path("code").asText(),moldCodePhoneSegment);
+            String value=v2?generator.generateMoldCode(config.get("productSpecificCode").toString(),material.path("code").asText(),moldCodePhoneSegment,hole):generator.generateMoldCode(config.get("productSpecificCode").toString(),material.path("code").asText(),moldCodePhoneSegment);
+            if(!mappings.isEmpty()) {
+                if(newSetItemId==null||((Number)mappings.get(0).get("itemId")).longValue()!=newSetItemId)throw invalid("共模加开须沿用已确认原主档");
+                String mapped=null;for(var snapshot:(List<Map<String,Object>>)mappings.get(0).get("mappingSnapshots"))if(material.path("code").asText().equals(snapshot.get("materialCode")))mapped=snapshot.get("moldCode").toString();
+                if(mapped==null)throw invalid("本次材质缺少同孔型共模映射");value=mapped;
+            }
             generated.add(Map.of("code",value,"materialCode",material.path("code").asText(),"partType",material.path("partType").asText()));
         }
         var result=new LinkedHashMap<String,Object>();result.put("phoneCodeItemId",phoneId);result.put("phoneModelCode",phoneCode);result.put("productLineId",config.get("productLineId"));result.put("productSpecificCode",config.get("productSpecificCode"));result.put("moldCodes",generated);result.put("generatedCodes",String.join(" / ",generated.stream().map(g->g.get("code").toString()).toList()));if(selectedPhone!=null){result.put("phoneModelId",request.phoneModelId());result.put("phoneSnapshot",selectedPhone);}
+        if(v2){result.put("codeRuleVersion",2);result.put("engineeringPlan",plan);result.put("moldSharingSnapshots",mappings);}
         if(newSetMaster!=null)result.put("newSetMaster",newSetMaster);saveReservation(request,hash,phoneId,result,actor);
         return result;
     }
@@ -163,8 +183,26 @@ public class MoldApplicationCodes {
         var response=reservedSelection(applicationId,generatedCodes);Object value=response.get("compatibility");return value instanceof Map<?,?>?json.convertValue(value,new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>(){}):null;
     }
     public Map<String,Object> reservedNewSet(long applicationId,String generatedCodes){var result=reservedSelection(applicationId,generatedCodes).get("newSetMaster");return result instanceof Map<?,?>?json.convertValue(result,new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>(){}):null;}
+    public Object reservedMoldSharing(long applicationId,String generatedCodes){return reservedSelection(applicationId,generatedCodes).getOrDefault("moldSharingSnapshots",List.of());}
     public Long reservedPhoneModelId(long applicationId,String generatedCodes) {
         var response=reservedSelection(applicationId,generatedCodes);Object value=response.get("phoneModelId");if(value==null&&response.get("compatibility") instanceof Map<?,?> compatible)value=compatible.get("phoneModelId");return value==null?null:((Number)value).longValue();
+    }
+    /** Recheck the reserved context, without allocating any code or changing legacy fingerprints. */
+    boolean validateV2(long applicationId,String generatedCodes,JsonNode plan,Map<String,Object> config) {
+        if(plan==null||plan.path("codeRuleVersion").asInt()!=2)return false;
+        moldSharing.requireUnmappedNew(((Number)config.get("productLineId")).longValue(),plan);
+        var reserved=reservedSelection(applicationId,generatedCodes);
+        if(!Objects.equals(json.valueToTree(reserved.get("engineeringPlan")),plan))throw invalid("工程规格已变化，请重新预留编码");
+        var expected=new HashSet<String>();String phone=text(reserved.get("phoneModelCode"));
+        var materials=new HashSet<String>();for(JsonNode material:(JsonNode)config.get("materials"))materials.add(material.path("code").asText());
+        if(com.yuewei.plm.module.moldsharing.MoldShareMappingService.mappedMold(plan)){
+            var mappings=moldSharing.resolvePlan(((Number)config.get("productLineId")).longValue(),plan);
+            for(var snapshot:(List<Map<String,Object>>)mappings.get(0).get("mappingSnapshots"))if(materials.contains(snapshot.get("materialCode")))expected.add(snapshot.get("moldCode").toString());
+        }else{
+            if(reserved.get("newSetMaster") instanceof Map<?,?> master){var current=repo.jdbc().queryForMap("select coalesce(nullif(engraved_code,''),phone_model_code) as code from plm_collaboration_item where item_id=? and deleted_flag=0",master.get("itemId"));if(!Objects.equals(master.get("engravedCode"),current.get("code")))throw invalid("加开原刻码已变化，请重新核对");phone=current.get("code").toString();}
+            for(String material:materials)expected.add(generator.generateMoldCode(config.get("productSpecificCode").toString(),material,phone,plan.path("specifications").get(0).path("holeType").asText()));
+        }
+        if(expected.size()!=materials.size()||!expected.equals(new HashSet<>(MoldApplicationForms.codes(generatedCodes))))throw invalid("预留编码与产品、材质或共模版本不一致，请重新核对");return true;
     }
     private Map<String,Object> reservedSelection(long applicationId,String generatedCodes) {var rows=repo.jdbc().queryForList("select response::text as response from plm_mold_code_reservation where application_id=? and response->>'generatedCodes'=? order by created_at desc,request_id desc limit 1",applicationId,generatedCodes);return rows.isEmpty()?Map.of():json.convertValue(repo.node(rows.get(0).get("response")),new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>(){});}
 }

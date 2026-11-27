@@ -32,6 +32,7 @@ public class CollaborationService {
     private final PhoneModelReferenceService phones;
     private final MoldMasterRepository masters;
     private final MoldWorkflowRepository workflow;
+    private com.yuewei.plm.module.integration.crm.moldschedule.service.MoldScheduleCrmSyncService crmScheduleSync;
     static final Set<String> MASTER_FIELDS=Set.of("moldName","engravedCode","engravedCodeConfirmed","brandId","compatiblePhones");
     static final Set<String> LEDGER_FIELDS=Set.of("setName","manufacturerName","ownerUserId","notes","pcMoldCodeId","tpuMoldCodeId","pcOriginalMoldCode","tpuOriginalMoldCode","pcInventoryId","tpuInventoryId","pcCurrentLocation","tpuCurrentLocation","pcLocationDetail","tpuLocationDetail","pcPhysicalStatus","tpuPhysicalStatus","quoteAmount","quoteCurrency","quoteBasis","quoteConfirmed");
 
@@ -49,6 +50,13 @@ public class CollaborationService {
     public CollaborationService(JdbcTemplate jdbc,ObjectMapper json,CollaborationRepository repository,
                                 org.springframework.transaction.PlatformTransactionManager transactionManager,OperationLogService operationLog) {
         this(jdbc,json,repository,transactionManager,operationLog,new PilotAccessService(jdbc,json));
+    }
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setCrmScheduleSync(com.yuewei.plm.module.integration.crm.moldschedule.service.MoldScheduleCrmSyncService crmScheduleSync) {
+        this.crmScheduleSync=crmScheduleSync;
+    }
+    public boolean syncCrmMoldSet(long moldSetId,String source) {
+        return crmScheduleSync!=null&&crmScheduleSync.enqueueCurrent(moldSetId,source);
     }
     private void read() {access.requireDomesticView();access.requirePermission("collaboration:view");}
     private String scope(Query query) {return query.getView().equals("delivery")?access.visibleSqlClause("mold","s.mold_set_id"):access.visibleSqlClause("item","i.item_id");}
@@ -200,7 +208,9 @@ public class CollaborationService {
             }
             Map<String,Object> row=repository.row("mold_set",id);
             history(actor,itemId,"mold_set",id,"__created",null,row,registrationBasis+"；部件实物、适配及验收须独立核对");
-            log(actor,itemId,"COLLABORATION_MOLD_CREATE",row,request);return row;
+            log(actor,itemId,"COLLABORATION_MOLD_CREATE",row,request);
+            if(crmScheduleSync!=null)crmScheduleSync.enqueueCurrent(id,"mold-set-created");
+            return row;
         });
     }
     public List<RowResult> save(BatchSave dto,HttpServletRequest request) {
@@ -216,6 +226,32 @@ public class CollaborationService {
         protectQuote(results.stream().filter(r->r.row()!=null).map(RowResult::row).toList());
         protectQuote(results.stream().map(RowResult::conflicts).toList());
         return results;
+    }
+    @FunctionalInterface
+    public interface LockedRowPrecondition {
+        void verify(Map<String,Object> current);
+    }
+    /** Narrow in-process integration bridge. The caller owns the atomic/idempotent transaction. */
+    public RowResult saveCrmScheduleDates(long id,Map<String,com.fasterxml.jackson.databind.JsonNode> dates,
+                                         String reason,LockedRowPrecondition precondition,HttpServletRequest request) {
+        if(!org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive())
+            throw new IllegalStateException("CRM date save requires an enclosing transaction");
+        access.requireDomesticView();access.requirePermission("schedule:write");access.requireMold(id);
+        if(dates==null||dates.isEmpty()||!Set.of("actualMexicoArrivalDate","plannedAcceptanceDate","plannedProductionDate").containsAll(dates.keySet()))
+            throw invalid("CRM 仅可修改实际抵墨、计划验收和计划试模量产");
+        if(reason==null||reason.isBlank()||precondition==null)throw invalid("缺少修改原因或保存前置条件");
+        workflow.lockExecution(id);lock("mold_set",id);
+        var current=repository.row("mold_set",id);precondition.verify(current);
+        CurrentUser actor=actor();Set<String> allowed=groups(actor);
+        List<CellChange> changes=new ArrayList<>();
+        for(var entry:dates.entrySet()) {
+            Field f=field("mold_set",entry.getKey());
+            if(!allowed.contains(f.group()))throw new BusinessException(40103,"没有填写权限："+f.label());
+            Object after=normalise(f,entry.getValue());
+            if(!same(current.get(entry.getKey()),after))changes.add(new CellChange(entry.getKey(),json.valueToTree(current.get(entry.getKey())),entry.getValue(),reason));
+        }
+        if(changes.isEmpty())return new RowResult("mold_set",id,"saved","数据未变化",List.of(),current);
+        return saveRow(actor,allowed,new RowPatch("mold_set",id,changes),request);
     }
     private RowResult saveRow(CurrentUser actor,Set<String> allowed,RowPatch patch,HttpServletRequest request) {
         requireRecord(patch.entityType(),patch.id());
@@ -311,6 +347,10 @@ public class CollaborationService {
         }
         jdbc.update("update "+table(patch.entityType())+" set master_data_version=master_data_version+1,updated_at=now(),updated_by=? where "+idColumn(patch.entityType())+"=?",actor.username(),patch.id());
         log(actor,itemId,"COLLABORATION_UPDATE",patch,request);
+        if(crmScheduleSync!=null) {
+            if(patch.entityType().equals("mold_set"))crmScheduleSync.enqueueCurrent(patch.id(),"collaboration-save");
+            else crmScheduleSync.enqueueForItem(itemId,"collaboration-master-save");
+        }
         return new RowResult(patch.entityType(),patch.id(),"saved","已保存",List.of(),repository.row(patch.entityType(),patch.id()));
     }
     @SuppressWarnings("unchecked")

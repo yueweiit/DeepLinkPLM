@@ -12,6 +12,23 @@ import org.junit.jupiter.params.provider.ValueSource;
 class ProductBusinessCodeGeneratorTest {
     private final ProductBusinessCodeGenerator generator = new ProductBusinessCodeGenerator();
 
+    @Test void newHoleCodesKeepLeadingZerosAndFinishedGoodsKeepTheirOwnPhone(){
+        assertThat(generator.generateMoldCode("BA","10","0185","large")).isEqualTo("MBA10D0185");
+        assertThat(generator.generateMoldCode("BA","20","0185","precision")).isEqualTo("MBA20J0185");
+        assertThat(generator.generateMoldCode("BA","10","0185","mixed")).isEqualTo("MBA10H0185");
+        assertThat(ProductBusinessCodeGenerator.moldPhoneCode("MBA20J0185")).isEqualTo("0185");
+        assertThat(ProductBusinessCodeGenerator.moldHoleMarker("MBA200185")).isEmpty();
+        assertThat(generator.parseMoldCode("MBA20J0185","BA",List.of("20"),"0185").phoneModelCode()).isEqualTo("0185");
+        assertThat(ProductBusinessCodeGenerator.splitCompleteMoldCodes("MBA10 / MBA10J1121 / MBA201121 / MBA20H0185 / MBA20X0185")).containsExactly("MBA10J1121","MBA201121","MBA20H0185");
+        assertThat(generator.generateProductStateCode("BA","4030","1122","01")).isEqualTo("NBA4030112201");
+        assertThat(generator.generateSharedProductMappingCode("NA", "4030", "large", "1121", "01"))
+            .isEqualTo("NNA4030D112101");
+        assertThat(generator.parseSharedProductMappingCode("NNA4030D112101"))
+            .isEqualTo(new ProductBusinessCodeGenerator.SharedProductMappingCodeParts(
+                "NNA4030D112101", "NA", "4030", "large", "1121", "01"));
+        assertThatThrownBy(()->generator.generateMoldCode("BA","10","1122","other")).isInstanceOf(BusinessException.class);
+    }
+
     @Test
     void generatesMoldAndProductStateCodes() {
         assertThat(generator.generateMoldCode("FA", "10", "1291")).isEqualTo("MFA101291");
@@ -125,5 +142,9 @@ class ProductBusinessCodeGeneratorTest {
         assertThatThrownBy(() -> generator.generateProductStateCode("BA", "4030", "119", "02")).isInstanceOf(BusinessException.class);
         assertThatThrownBy(() -> generator.generateProductStateCode("BA", "403", "1199", "02")).isInstanceOf(BusinessException.class);
         assertThatThrownBy(() -> generator.parseProductStateCode("NBAA4030119902")).isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> generator.generateSharedProductMappingCode("BA", "4030", "other", "1121", "01"))
+            .isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> generator.parseSharedProductMappingCode("NBA4030112101"))
+            .isInstanceOf(BusinessException.class);
     }
 }

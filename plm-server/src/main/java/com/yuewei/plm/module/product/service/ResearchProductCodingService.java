@@ -73,16 +73,53 @@ public class ResearchProductCodingService {
             ) configured order by code,name
             """)) {
             String code = text(row.get("code"));
-            var metadata = decode(row.get("metadata"));
-            var defaults = map(metadata.get("defaultProcessParamJson"));
-            String state = text(row.get("material_status_code"));
-            if (state.isBlank()) state = text(defaults.getOrDefault("materialStatusCode", metadata.get("materialStatusCode")));
-            boolean finished = Boolean.TRUE.equals(row.get("finished_product_flag"))
-                || Boolean.TRUE.equals(metadata.get("finishedProductFlag")) || Boolean.TRUE.equals(defaults.get("finishedProductFlag"))
-                || Set.of("40", "FINISHED", "FINISHED_PRODUCT", "成品").contains(state.toUpperCase(Locale.ROOT));
-            if (code.matches("[0-9]{4}") && finished) result.putIfAbsent(code, Map.of("code", code, "name", text(row.get("name"))));
+            if (code.matches("[0-9]{4}") && finishedOperation(row,"finished_product_flag","material_status_code","metadata"))
+                result.putIfAbsent(code, Map.of("code", code, "name", text(row.get("name"))));
         }
         return List.copyOf(result.values());
+    }
+
+    public Set<String> finishedOperationCodes(long productLineId) {
+        var result=new LinkedHashSet<String>();
+        for(var row:jdbc.queryForList("""
+            with recursive active_products(product_id) as (
+              select product_id from plm_product where product_id=? and deleted_flag=0 and master_data_status='active'
+              union all
+              select child.product_id from plm_product child
+              join active_products parent on parent.product_id=child.parent_product_id
+              where child.deleted_flag=0 and child.master_data_status='active'
+            )
+            select distinct coalesce(nullif(p.operation_craft_code,''),p.process_param_json->>'operationCraftCode') as code,
+              p.finished_product_flag as "finishedProductFlag",p.material_status_code as "materialStatusCode",p.process_param_json::text as metadata,
+              master.finished_product_flag as "masterFinishedProductFlag",master.material_status_code as "masterMaterialStatusCode",master.process_param_json::text as "masterMetadata",
+              product.product_code as "productCode",product.product_specific_code as "productSpecificCode"
+            from plm_process p join plm_process route on route.process_id=p.parent_process_id
+              join plm_product product on product.product_id=route.product_id
+              join active_products active_product on active_product.product_id=product.product_id
+              join plm_product line on line.product_id=case when product.product_type='product_line' then product.product_id else product.parent_product_id end
+                and line.product_type='product_line' and line.deleted_flag=0
+              left join plm_process master on master.process_id=p.operation_master_process_id
+            where line.product_id=? and p.process_type='operation' and p.deleted_flag=0 and p.status in ('confirmed','locked','enabled')
+              and route.deleted_flag=0 and route.status<>'archived'
+              and (p.operation_master_process_id is null or (master.deleted_flag=0 and master.status in ('confirmed','locked','enabled')))
+            """,productLineId,productLineId)) {
+            String code=text(row.get("code"));
+            boolean productFinal=text(row.get("productCode")).equals("N"+text(row.get("productSpecificCode"))+code);
+            boolean finished=productFinal
+                ||finishedOperation(row,"finishedProductFlag","materialStatusCode","metadata")
+                ||finishedOperation(row,"masterFinishedProductFlag","masterMaterialStatusCode","masterMetadata");
+            if(code.matches("[0-9]{4}")&&finished)result.add(code);
+        }
+        return Set.copyOf(result);
+    }
+
+    private boolean finishedOperation(Map<String,Object> row,String flagKey,String stateKey,String metadataKey) {
+        var metadata=decode(row.get(metadataKey));var defaults=map(metadata.get("defaultProcessParamJson"));
+        String state=text(row.get(stateKey));
+        if(state.isBlank())state=text(defaults.getOrDefault("materialStatusCode",metadata.get("materialStatusCode")));
+        return Boolean.TRUE.equals(row.get(flagKey))||Boolean.TRUE.equals(metadata.get("finishedProductFlag"))
+            ||Boolean.TRUE.equals(defaults.get("finishedProductFlag"))
+            ||Set.of("40","FINISHED","FINISHED_PRODUCT","成品").contains(state.toUpperCase(Locale.ROOT));
     }
 
     public String requireOperationCode(String code) {

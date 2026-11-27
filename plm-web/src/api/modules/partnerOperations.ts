@@ -2,6 +2,7 @@ import request, { unwrapResponse } from '../request'
 import type { BusinessData, PartnerPage, PartnerRow } from '@/types/partner'
 import type { PhoneObjectPage, ObjectPhoneGroup } from '@/components/PhoneObjectSelect/types'
 import type { CatalogListingOptions, CatalogListingRequest, ListedCatalogRow } from '@/types/partnerLifecycle'
+import type { CrmListingCapabilities, CrmListingPushOptions, CrmListingPushItem, CrmListingSync } from '@/types/partnerLifecycle'
 
 export type OperationKind = 'supplier_quote' | 'sample_fee' | 'inspection' | 'fulfilment' | 'listing'
 export interface OperationCapabilities { engineering: boolean; costs: boolean; listing: boolean; delivery: boolean; externalListingConnected: boolean }
@@ -16,6 +17,12 @@ export const catalogListingOptions = async (selectionId:number,selectionRowId:st
 export const confirmCatalogListing = async (data:CatalogListingRequest) => unwrapResponse<PartnerRow>(await request.post(`${root}/catalog/listing-confirmations`,data))
 export const listedCatalogPage = async (params:{status:'listed'|'pending'|'unlisted'|'all';keyword?:string;page:number;size:number}) => unwrapResponse<PartnerPage & {content:ListedCatalogRow[]}>(await request.get(`${root}/catalog/listings`,{params}))
 export const operationTasks = async () => unwrapResponse<PartnerRow[]>(await request.get(root + '/tasks'))
+const crmListingRoot = root + '/catalog/listings'
+export const crmListingCapabilities = async () => unwrapResponse<CrmListingCapabilities>(await request.get(`${crmListingRoot}/crm-capabilities`))
+export const crmListingPushOptions = async (id:number) => unwrapResponse<CrmListingPushOptions>(await request.get(`${crmListingRoot}/${id}/crm-push-options`))
+export const pushCrmListings = async (requestId:string,items:CrmListingPushItem[]) => unwrapResponse<{taskIds:number[];status?:string;replayed?:boolean}>(await request.post(`${crmListingRoot}/crm-pushes`,{requestId,items}))
+export const crmListingSync = async (id:number) => unwrapResponse<CrmListingSync>(await request.get(`${crmListingRoot}/${id}/crm-sync`))
+export const retryCrmListing = async (id:number,taskId:number,requestId:string) => unwrapResponse<{taskIds:number[]}>(await request.post(`${crmListingRoot}/${id}/crm-retries`,{taskId,requestId}))
 export const operationSpecOptions = async (params: BusinessData) => unwrapResponse<PartnerPage & PhoneObjectPage<BusinessData>>(await request.get(root + '/spec-options', { params }))
 export const operationSpecPhones = async (params: BusinessData) => unwrapResponse<PhoneObjectPage<ObjectPhoneGroup> & { unlinkedCount: number }>(await request.get(root + '/spec-options/phones', { params }))
 export async function uploadOperationFile(kind: OperationKind, id: number, file: File, purpose = 'material') {

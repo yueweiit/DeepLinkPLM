@@ -9,6 +9,16 @@ const app=(values:Partial<MoldApplication>={})=>({applicationId:88,approvalNo:nu
 const authorization={approverUserId:'16693147192083157833',approverName:'周汉琴',taskId:'task-88'}
 function render(applications:MoldApplication[],editable=true){return mount(ResearchMoldCoding,{props:{applications,inputs:{},editable,busy:false,canCreate:editable,canPrepare:editable},global:{plugins:[ElementPlus]}})}
 describe('minimal step-five automatic coding',()=>{
+ it('shows new hole-specific identities alongside legacy codes without changing the own-phone SKU',()=>{
+  const generatedMoldCodes=['mba10j1121','MBA10J1121','MBA20J1121','MBD10D0185','MDN20H0185','MBA101121','MBA10','MBA10X1121','XMBA10J1121']
+  const view=render([app({researchCoding:{status:'ready',missingFields:[],generatedMoldCodes,generatedProductCodes:['NBA4030112201']}})])
+  expect(view.findAll('code').map(code=>code.text())).toEqual(['MBA10J1121','MBA20J1121','MBD10D0185','MDN20H0185','MBA101121','NBA4030112201'])
+  expect(generatedMoldCodes[0]).toBe('mba10j1121');view.unmount()
+ })
+ it('extracts new complete codes from historical text with the same strict boundaries',()=>{
+  const view=render([app({generatedCodes:'mba10j1121 / MBA20J1121\\nMBD10D0185 MDN20H0185 MBA101121 MBA10 XMBA10J1121 MBA10J11219 _MBA10J1121 MBA10J1121-X MBA10J1121suffix MBA10X1121'})])
+  expect(view.findAll('code').map(code=>code.text())).toEqual(['MBA10J1121','MBA20J1121','MBD10D0185','MDN20H0185','MBA101121']);view.unmount()
+ })
  it('opens the existing application entry with no separate generate or confirm action',async()=>{
   const view=render([])
   expect(view.text()).toContain('Tiffany 同意后，自动生成 M 码和 N 码。')

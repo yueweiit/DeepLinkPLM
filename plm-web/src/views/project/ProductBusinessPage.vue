@@ -2,6 +2,7 @@
 import { t as uiText } from '@/locales'
 
 import { computed, defineAsyncComponent, ref, watch } from "vue";
+import { Filter, Search } from '@element-plus/icons-vue'
 import PhoneObjectIdSelect from '@/components/PhoneObjectSelect/IdSelect.vue'
 import { getResearchReferencePage, getResearchReferencePhones } from '@/api/modules/productResearch'
 import type { PhoneObjectProvider } from '@/components/PhoneObjectSelect/types'
@@ -29,6 +30,7 @@ const business = computed(() =>
 const selected = computed(() => Number(route.query.productId) || 0);
 const keyword = ref(""),
   status = ref("all"),
+  mobileFiltersExpanded = ref(false),
   page = ref(1),
   total = ref(0),
   loading = ref(false),
@@ -110,7 +112,7 @@ watch(
         >{{ uiText("返回新品研发") }}</el-button
       >
     </header>
-    <div class="filters">
+    <div class="filters filters--desktop">
       <el-input
         v-model="keyword"
         clearable
@@ -131,6 +133,15 @@ watch(
       /></el-select>
       <el-button @click="reset">{{ uiText("搜索") }}</el-button>
       <PhoneObjectIdSelect :model-value="null" :provider="projectProvider" :phone-first="false" type="product" :label='uiText("选择新品项目")' :placeholder='uiText("选择新品项目，查看或登记")' @update:model-value="$event && open($event)"/>
+    </div>
+    <div class="filters filters--mobile">
+      <el-input v-model="keyword" clearable :placeholder='uiText("搜索新品名称、编码或业务内容")' @keyup.enter="reset" @clear="reset" />
+      <el-button type="primary" :icon="Search" :aria-label='uiText("搜索")' :title='uiText("搜索")' @click="reset" />
+      <el-button :type="mobileFiltersExpanded || status !== 'all' ? 'primary' : 'default'" :icon="Filter" :aria-label='uiText("更多筛选")' :title='uiText("更多筛选")' :aria-expanded="mobileFiltersExpanded" @click="mobileFiltersExpanded=!mobileFiltersExpanded" />
+      <div v-if="mobileFiltersExpanded" class="filters-advanced">
+        <el-select v-if="business.kind !== 'cost'" v-model="status" :aria-label='uiText("业务状态")' @change="reset"><el-option :label='uiText("全部状态")' value="all" /><el-option v-for="s in stateOptions" :key="s" :value="s" :label="statuses[s]" /></el-select>
+        <PhoneObjectIdSelect :model-value="null" :provider="projectProvider" :phone-first="false" type="product" :label='uiText("选择新品项目")' :placeholder='uiText("选择新品项目，查看或登记")' @update:model-value="$event && open($event)" />
+      </div>
     </div>
     <div class="summary">
       {{ summary.projectCount }}{{ uiText(" 个项目 · ") }}{{ total }}
@@ -344,6 +355,9 @@ watch(
   max-width: 100%;
   flex-wrap: wrap;
 }
+.filters--mobile {
+  display: none;
+}
 @container business (max-width:650px) {
   .business-card {
     grid-template-columns: minmax(0, 1fr);
@@ -364,6 +378,49 @@ watch(
   }
   .records {
     min-height: 280px;
+  }
+}
+@media (max-width: 767px) {
+  .filters--desktop {
+    display: none;
+  }
+  .filters--mobile {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 40px 40px;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+  }
+  .filters--mobile > .el-input,
+  .filters--mobile > .el-button {
+    min-width: 0;
+    margin: 0;
+  }
+  .filters--mobile > .el-input :deep(.el-input__wrapper) {
+    min-height: 40px;
+  }
+  .filters--mobile > .el-button {
+    width: 40px;
+    height: 40px;
+    min-height: 40px;
+    padding: 0;
+  }
+  .filters-advanced {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--el-border-color-lighter);
+  }
+  .filters-advanced > .el-select {
+    width: 100%;
+    min-width: 0;
+  }
+  .filters-advanced :deep(.reference-object-select),
+  .filters-advanced :deep(.reference-trigger) {
+    width: 100%;
+    min-width: 0;
   }
 }
 </style>

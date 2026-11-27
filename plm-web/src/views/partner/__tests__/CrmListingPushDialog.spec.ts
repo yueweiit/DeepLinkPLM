@@ -1,0 +1,21 @@
+import {flushPromises,mount,type VueWrapper} from '@vue/test-utils'
+import ElementPlus from 'element-plus'
+import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
+import CrmListingPushDialog from '../operations/CrmListingPushDialog.vue'
+const api=vi.hoisted(()=>({crmListingPushOptions:vi.fn(),pushCrmListings:vi.fn(),retryCrmListing:vi.fn(),newRequestId:vi.fn()}))
+vi.mock('@/api/modules/partnerOperations',()=>api)
+vi.mock('@/api/modules/partner',()=>({newRequestId:api.newRequestId}))
+vi.mock('../PartnerPhoto.vue',()=>({default:{props:['id'],template:'<span class="photo" />'}}))
+let wrapper:VueWrapper
+const options=()=>({listingId:88,snapshotVersion:'a'.repeat(64),enabled:true,adapterReady:true,authorized:true,canSubmit:true,reason:'',product:{productId:71,productCode:'PP-71',name:'经营款',catalogStyleCode:'CP-1',photos:[{id:81,version:'V1'}]},reasons:[],skus:[{specId:1,internalSkuId:101,skuCode:'NBA4030112101',specName:'真实规格',eligible:true,reason:''},{specId:2,internalSkuId:0,specName:'未关联规格',eligible:false,reason:'尚未关联正式 SKU'}],sync:{listingId:88,status:'not_submitted',skus:[]}})
+const button=(text:string)=>wrapper.findAll('button').find(b=>b.text()===text)!
+async function start(readonly=false){wrapper=mount(CrmListingPushDialog,{props:{rows:[{id:88,listingId:88,name:'经营款',kind:'listing',code:'LS-88',status:'pending',version:1}],readonly},global:{plugins:[ElementPlus],stubs:{ElDialog:{props:['modelValue'],template:'<section><slot/><slot name="footer"/></section>'}}}});await flushPromises()}
+beforeEach(()=>{vi.clearAllMocks();api.crmListingPushOptions.mockResolvedValue(options());api.pushCrmListings.mockResolvedValue({taskIds:[1],status:'pending'});api.newRequestId.mockReturnValue('stable-request-123')})
+afterEach(()=>{wrapper?.unmount();document.body.innerHTML=''})
+describe('explicit formal SKU push',()=>{
+ it('opens without selecting SKUs and blocks unmapped operating specs',async()=>{await start();expect(wrapper.findAll('input:checked')).toHaveLength(0);expect(wrapper.findAll('input[type=checkbox]')[1].attributes('disabled')).toBeDefined();expect(wrapper.text()).toContain('尚未关联正式 SKU');expect(button('确认推送').attributes('disabled')).toBeDefined();expect(api.pushCrmListings).not.toHaveBeenCalled()})
+ it('submits only selected SKUs and never claims an actual listing',async()=>{await start();await wrapper.findAll('input[type=checkbox]')[0].setValue(true);await button('确认推送').trigger('click');await flushPromises();expect(api.pushCrmListings).toHaveBeenCalledWith('stable-request-123',[{listingId:88,snapshotVersion:'a'.repeat(64),internalSkuIds:[101]}]);expect(wrapper.emitted('saved')).toHaveLength(1);expect(wrapper.text()).not.toContain('已上架成功')})
+ it('retains selection and the exact idempotency request after a timeout',async()=>{api.pushCrmListings.mockRejectedValueOnce(new Error('网络超时'));await start();await wrapper.findAll('input[type=checkbox]')[0].setValue(true);await button('确认推送').trigger('click');await flushPromises();expect(wrapper.text()).toContain('网络超时');expect(button('确认推送').attributes('disabled')).toBeUndefined();await button('确认推送').trigger('click');await flushPromises();expect(api.pushCrmListings.mock.calls[1]).toEqual(api.pushCrmListings.mock.calls[0]);expect(api.newRequestId).toHaveBeenCalledTimes(1)})
+ it('shows the integration gate and cannot submit while CRM is not ready',async()=>{api.crmListingPushOptions.mockResolvedValue({...options(),canSubmit:false,reason:'等待 CRM 接收接口接入'});await start();expect(wrapper.text()).toContain('等待 CRM 接收接口接入');expect(wrapper.findAll('input[type=checkbox]').every(c=>c.attributes('disabled')!==undefined)).toBe(true);expect(button('确认推送').attributes('disabled')).toBeDefined()})
+ it('keeps CRM receipt distinct from listing status',async()=>{const data=options();data.sync={listingId:88,status:'synced',skus:[{internalSkuId:101,status:'synced',listingStatus:'not_listed'}]} as typeof data.sync;api.crmListingPushOptions.mockResolvedValue(data);await start(true);expect(wrapper.text()).toContain('已同步 CRM');expect(wrapper.text()).toContain('未上架');expect(wrapper.findAll('input[type=checkbox]')).toHaveLength(0);expect(wrapper.findAll('button').some(b=>b.text()==='确认推送')).toBe(false)})
+})

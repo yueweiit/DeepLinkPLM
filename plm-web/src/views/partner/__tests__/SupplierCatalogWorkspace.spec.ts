@@ -52,6 +52,30 @@ const sourceFile=(id:number,name=`同源图片${id}.png`)=>({id,name,version:'V1
 async function chooseCatalogStyle(index=0){if(wrapper.find('.detail-scroll').exists())await click('返回款式列表');wrapper.findAll('.catalog-style-check')[index].getComponent(ElCheckbox).vm.$emit('change',true);await flushPromises();await click('加入选品目录')}
 
 describe('supplier-first product catalog', () => {
+  it('keeps supplier actions and product selection actions in compact mobile controls', async () => {
+    await start('/partner-products?supplierCode=TEST-SUP')
+    expect(wrapper.find('.catalog-header-actions__mobile').exists()).toBe(false)
+    expect(wrapper.find('.catalog-search__more-actions').exists()).toBe(true)
+    expect(wrapper.find('.catalog-list-toolbar__mobile-actions').exists()).toBe(true)
+    expect(wrapper.find('.catalog-search').findAll('button')).toHaveLength(2)
+    expect(wrapper.find('.catalog-style-row .catalog-style-name').text()).toContain('磁吸支架款')
+    expect(wrapper.find('.catalog-style-row .catalog-style-model').text()).toContain('iPhone 11')
+    expect(wrapper.find('.catalog-style-row .catalog-style-actions').findAll('button').map(button => button.text())).toEqual(['详情', '编辑', '删除'])
+    expect(catalogSource).toContain('@container(max-width:600px)')
+    expect(catalogSource).toContain('grid-template-columns:42px minmax(0,1fr) minmax(0,1fr)')
+    expect(catalogSource).toContain('.catalog-style-check{position:absolute;top:5px;right:7px;')
+    expect(catalogSource).toContain('.catalog-style-row>.catalog-style-currency{display:none!important}')
+    expect(catalogSource).toContain('.catalog-style-list{border:0;background:transparent;')
+    expect(catalogSource).toContain('.catalog-add-action{white-space:nowrap!important;')
+  })
+
+  it('places supplier directory actions beside its mobile search control', async () => {
+    await start('/partner-products')
+    expect(wrapper.find('.catalog-header-actions__mobile').exists()).toBe(false)
+    expect(wrapper.find('.catalog-search.supplier-search .catalog-search__more-actions').exists()).toBe(true)
+    expect(wrapper.find('.catalog-search.supplier-search').findAll('button')).toHaveLength(2)
+  })
+
   async function choosePhotoFile(file=new File(['picture'],'product.png',{type:'image/png'})){
     const input=wrapper.get<HTMLInputElement>('.catalog-photo-input')
     Object.defineProperty(input.element,'files',{configurable:true,value:[file]})
@@ -508,7 +532,7 @@ describe('catalog compact responsive layout contract',()=>{
 
   it('can keep selecting into the same exact workbench directory after a successful save without carrying a stale client target version',async()=>{api.previewCatalogSelection.mockResolvedValueOnce({canAdd:true,previewToken:'first',targetSelectionId:77,targetVersion:8,items:[],messages:[]}).mockResolvedValue({canAdd:true,previewToken:'second',targetSelectionId:77,targetVersion:9,items:[],messages:[]});const router=await start('/partner-products?supplierCode=TEST-SUP&selectionId=77');await chooseCatalogStyle();await click('加入选品目录');await chooseCatalogStyle();await click('加入选品目录');expect(api.previewCatalogSelection).toHaveBeenCalledTimes(2);expect(api.addCatalogSelection).toHaveBeenCalledTimes(2);for(const call of api.addCatalogSelection.mock.calls){expect(call[0]).toMatchObject({targetSelectionId:77,targetMode:'supplier_directory'});expect(call[0]).not.toHaveProperty('targetVersion')}expect(api.addCatalogSelection.mock.calls.map(call=>call[0].previewToken)).toEqual(['first','second']);expect(router.currentRoute.value.query.selectionId).toBe('77');expect(api.selectionPage).not.toHaveBeenCalled()})
 
-  it('offers one checked-style selection entry above the list and keeps row and detail views free of duplicate add actions',async()=>{const router=await start('/partner-products?supplierCode=TEST-SUP');expect(wrapper.findAll('button').filter(button=>button.text()==='加入选品目录')).toHaveLength(1);expect(wrapper.get('.catalog-style-actions').findAll('button').map(button=>button.text())).toEqual(['详情','编辑','删除']);expect(wrapper.findAll('button').find(button=>button.text()==='加入选品目录')!.attributes('disabled')).toBeDefined();await click('详情');expect(wrapper.find('.detail-scroll').exists()).toBe(true);expect(wrapper.findAll('button').filter(button=>button.text()==='加入选品目录')).toHaveLength(0);expect(wrapper.get('.test-files').text()).toContain('本款原图.png');expect(wrapper.get('.supplier-style-detail').text()).toContain('iPhone 11');await click('返回款式列表');expect(router.currentRoute.value.query.supplierCode).toBe('TEST-SUP');await chooseCatalogStyle();expect(wrapper.findAll('.selection-model-row')).toHaveLength(1);expect(api.addCatalogSelection).not.toHaveBeenCalled();expect(api.previewCatalogSelection).not.toHaveBeenCalled()})
+  it('offers one checked-style selection entry above the list and keeps row and detail views free of duplicate add actions',async()=>{const router=await start('/partner-products?supplierCode=TEST-SUP');expect(wrapper.findAll('button').filter(button=>button.text()==='加入选品目录')).toHaveLength(1);expect(wrapper.get('.catalog-style-actions').findAll('button').map(button=>button.text())).toEqual(['详情','编辑','删除']);expect(wrapper.findAll('button').find(button=>button.text()==='加入选品目录')!.attributes('disabled')).toBeDefined();await click('详情');expect(wrapper.find('.detail-scroll').exists()).toBe(true);expect(wrapper.find('.catalog-detail-actions-mobile').exists()).toBe(true);expect(wrapper.findAll('button').filter(button=>button.text()==='加入选品目录')).toHaveLength(0);expect(wrapper.get('.test-files').text()).toContain('本款原图.png');expect(wrapper.get('.supplier-style-detail').text()).toContain('iPhone 11');await click('返回款式列表');expect(router.currentRoute.value.query.supplierCode).toBe('TEST-SUP');await chooseCatalogStyle();expect(wrapper.findAll('.selection-model-row')).toHaveLength(1);expect(api.addCatalogSelection).not.toHaveBeenCalled();expect(api.previewCatalogSelection).not.toHaveBeenCalled()})
 
   it('keeps full source-position labels in review details and leaves ordinary source numbers intact',async()=>{
     const labels=['原无序号（Samsung栏111后第1行）','原无序号（Samsung栏111后第2行）','001']

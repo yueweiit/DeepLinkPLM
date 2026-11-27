@@ -22,6 +22,14 @@ async function start(options?:MoldOptions){
 beforeEach(()=>{vi.clearAllMocks();localStorage.clear();api.getMoldOptions.mockResolvedValue(capabilities);api.getMoldApplication.mockResolvedValue(rejected())})
 afterEach(()=>{view?.unmount()})
 describe('shared approval drawer in the original research page',()=>{
+ it('shows the filed mold mapping alongside the original business phone without fetching a live mapping',async()=>{
+  const mapping={id:7,version:1,sourcePhoneName:'iPhone 18 Pro',sourcePhoneCode:'1122',referencePhoneName:'iPhone 17 Pro',referencePhoneCode:'1121',holeType:'precision',moldCode:'MBA10J1121',evidence:'原采用时已确认的实物依据'}
+  const original=rejected({model:'iPhone 18 Pro',generatedCodes:'MBA10J1121',moldSharingSnapshots:[{relationId:9,moldSetId:40,mappingSnapshots:[mapping]}] as MoldApplication['moldSharingSnapshots']})
+  const before=JSON.stringify(original);const {drawer}=await start(capabilities);await drawer.open(88,{projectId:42,initial:original});await flushPromises()
+  const snapshot=view.get('[aria-label="共模采用快照"]').text()
+  expect(snapshot).toContain('iPhone 18 Pro · 1122');expect(snapshot).toContain('iPhone 17 Pro · 1121');expect(snapshot).toContain('MBA10J1121');expect(snapshot).toContain('精孔');expect(snapshot).toContain('V1');expect(snapshot).toContain('原采用时已确认的实物依据')
+  expect(JSON.stringify(original)).toBe(before);expect(api.getMoldApplication).not.toHaveBeenCalled();expect(api.saveMoldApplication).not.toHaveBeenCalled()
+ })
  it('loads only on explicit open and retains the original refusal without navigating or writing',async()=>{
   const {router,drawer}=await start();expect(api.getMoldApplication).not.toHaveBeenCalled();expect(api.getMoldOptions).not.toHaveBeenCalled()
   await drawer.open(88,{projectId:42});await flushPromises()

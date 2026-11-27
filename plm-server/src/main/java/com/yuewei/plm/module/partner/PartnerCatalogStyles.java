@@ -114,19 +114,26 @@ public class PartnerCatalogStyles {
  @Transactional(readOnly=true) public Map<String,Object> selectedSnapshot(long selection,String rowId){return selectedSnapshot(selection,rowId,false);}
  Map<String,Object> selectedSnapshot(long selection,String rowId,boolean lock){return selectionSnapshot(selection,rowId,lock,false);}
  Map<String,Object> selectedSnapshot(long selection,String rowId,boolean lock,PartnerCatalogPhoneResolver.ResolutionScope resolver){return selectionSnapshot(selection,rowId,lock,false,resolver);}
+ Map<String,Object> listingSnapshot(long selection,String rowId,PartnerCatalogPhoneResolver.ResolutionScope resolver){return selectionSnapshot(selection,rowId,false,false,resolver,true);}
  Map<String,Object> receiptSnapshot(long selection,String rowId,boolean lock){return selectionSnapshot(selection,rowId,lock,true);}
  Map<String,Object> receiptSnapshot(long selection,String rowId,boolean lock,PartnerCatalogPhoneResolver.ResolutionScope resolver){return selectionSnapshot(selection,rowId,lock,true,resolver);}
  private Map<String,Object> selectionSnapshot(long selection,String rowId,boolean lock,boolean allowDraft){
   return selectionSnapshot(selection,rowId,lock,allowDraft,null);
  }
  private Map<String,Object> selectionSnapshot(long selection,String rowId,boolean lock,boolean allowDraft,PartnerCatalogPhoneResolver.ResolutionScope resolver){
+  return selectionSnapshot(selection,rowId,lock,allowDraft,resolver,false);
+ }
+ private Map<String,Object> selectionSnapshot(long selection,String rowId,boolean lock,boolean allowDraft,PartnerCatalogPhoneResolver.ResolutionScope resolver,boolean listing){
   store.access.requireDomesticView();store.access.requirePermission("partner:view");var head=store.load(selection,"selection",false);PartnerSelectionService.requireSelectionPurpose(head);
   require(PartnerSelectionService.validRowId(rowId),"来源选样行无效");var found=new PartnerSelectionRows(store).find(selection,rowId,lock);
   boolean draft=!PartnerSelectionService.confirmed(found);require(!found.isEmpty()&&(!draft||allowDraft)&&!Boolean.TRUE.equals(found.get("discarded")),"选样已取消、来源无效或尚未保留收样依据");if(draft)require("my_selection".equals(text(head.get("purpose")))&&Boolean.TRUE.equals(found.get("selected")),"请先从供应商目录选择本次需要的款式及型号");
   var id=identity("selection",selection,rowId);require(!id.isEmpty(),"此历史选样尚未核实目录款式关联");
   new SupplierProfileService(store).requireSupplier(required(found.get("supplierCode"),"样品供应商"));
   var frozen=draft?found:map(map(found.get("confirmationSnapshot")).get("row"));require(!frozen.isEmpty(),"已确认选样缺少原始规格快照，请核对历史依据");
-  var scopeRow=new LinkedHashMap<>(found);for(String field:List.of("catalogStyleId","catalogStyleCode","catalogStyleLabel"))scopeRow.put(field,id.get(field));if(resolver!=null)require(PartnerCatalogScopes.follows(scopeRow),"目录来源待核对，请核实原款式来源后再登记收样");boolean dynamic=resolver!=null;Map<String,Object> current=Map.of();
+  var scopeRow=new LinkedHashMap<>(found);for(String field:List.of("catalogStyleId","catalogStyleCode","catalogStyleLabel"))scopeRow.put(field,id.get(field));
+  // Only explicitly linked late-colour selections follow the current supplier phone scope for listing.
+  if(listing&&(!PartnerCatalogScopes.follows(scopeRow)||!"at_receipt".equals(text(found.get("receiptColorMode")))))resolver=null;
+  if(resolver!=null)require(PartnerCatalogScopes.follows(scopeRow),"目录来源待核对，请核实原款式来源后再登记收样");boolean dynamic=resolver!=null;Map<String,Object> current=Map.of();
   if(dynamic){new PartnerCatalogScopes(store).project(List.of(scopeRow),resolver,lock);current=map(scopeRow.get("currentCatalog"));PartnerCatalogScopes.requireCurrent(current);}
   var pairs=maps(frozen.get("selectedPairs"));boolean atReceipt=pairs.isEmpty()&&(draft||(number(found.get("selectionConfirmationVersion"))>=2&&"at_receipt".equals(text(found.get("receiptColorMode")))));require(!pairs.isEmpty()||atReceipt,"历史选样缺少颜色确认依据，请核对原记录，不能自动扩大范围");
   var colors=new LinkedHashMap<Long,String>();for(var pair:pairs){long color=number(pair.get("colorId"));var actual=store.jdbc.queryForList("select name from plm_supplier_color where color_id=? and supplier_code=?",color,frozen.get("supplierCode"));require(color>0&&actual.size()==1,"所选供应商颜色已失效或尚未明确");String name=text(map(pair.get("colorSnapshot")).get("name"));require(!name.isEmpty(),"本次确认缺少供应商原色快照，不能用当前颜色冒充当时依据");colors.put(color,name);}

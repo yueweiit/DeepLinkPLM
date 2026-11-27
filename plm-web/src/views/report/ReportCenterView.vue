@@ -2,6 +2,8 @@
 import { t as uiText } from '@/locales'
 
 import { computed, onMounted, ref, watch } from 'vue'
+import { useMediaQuery } from '@vueuse/core'
+import { Filter, Search } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getScheduleTasks, type ScheduleTask } from '@/api/modules/schedule'
 import { getFinanceSummary, exportBudgetFile, type FinanceValue } from '@/api/modules/development'
@@ -10,6 +12,8 @@ import { useUserStore } from '@/stores/user'
 import FixedTableViewport from '@/components/FixedTableViewport/index.vue'
 import PageContainer from '@/components/PageContainer/index.vue'
 const user=useUserStore(),route=useRoute(),router=useRouter(),loading=ref(false),error=ref(''),keyword=ref(''),page=ref(1),total=ref(0),overdue=ref(false),currency=ref(''),trialId=ref<number|null>(null)
+const phoneLayout=useMediaQuery('(max-width: 900px)')
+const mobileFiltersExpanded=ref(false)
 const tasks=ref<ScheduleTask[]>([]),budgets=ref<Record<string,FinanceValue>[]>([]),expenses=ref<Record<string,FinanceValue>[]>([]),rules=ref<string[]>([]),trials=ref<Trial[]>([]),metrics=ref<Record<string,unknown>|null>(null)
 const view=computed(()=>['schedule','finance','pilot'].includes(String(route.query.view||''))?String(route.query.view):'schedule')
 const views=computed(()=>[{key:'schedule',label:'项目周期',permission:'report:view'},{key:'finance',label:'预算与实际',permission:'finance:read'},{key:'pilot',label:'试点评估',permission:'report:view'}].filter(v=>user.hasPermission(v.permission)))
@@ -36,28 +40,89 @@ onMounted(load)
 </script>
 <template>
  <PageContainer :title='uiText("报表中心")' :description='uiText("从唯一业务记录读取计划、预算、实际与试点基准；不混币相加，不从零散备注猜测数据。")'>
-  <div class="report-toolbar"><el-button v-for="option in views" :key="option.key" :type="view===option.key?'primary':'default'" @click="switchView(option.key)">{{uiText(String((option.label) ?? ''))}}</el-button><el-button @click="load">{{ uiText("刷新") }}</el-button></div>
+  <div class="report-toolbar report-toolbar--views"><el-button v-for="option in views" :key="option.key" :type="view===option.key?'primary':'default'" @click="switchView(option.key)">{{uiText(String((option.label) ?? ''))}}</el-button><el-button @click="load">{{ uiText("刷新") }}</el-button></div>
   <el-alert v-if="error" :title="error" type="error" :closable="false"/>
   <section v-if="allowed" v-loading="loading" class="report-body">
    <template v-if="view==='schedule'">
-    <div class="report-toolbar"><el-input v-model="keyword" :placeholder='uiText("搜索款式 / 型号 / 模具")' @keyup.enter="search"/><el-checkbox v-model="overdue" @change="search">{{ uiText("只看逾期") }}</el-checkbox><el-button @click="search">{{ uiText("查询") }}</el-button><el-button :disabled="!tasks.length" @click="exportSchedule">{{ uiText("导出当前页 CSV") }}</el-button></div>
+    <div class="report-toolbar report-toolbar--schedule-desktop"><el-input v-model="keyword" :placeholder='uiText("搜索款式 / 型号 / 模具")' @keyup.enter="search"/><el-checkbox v-model="overdue" @change="search">{{ uiText("只看逾期") }}</el-checkbox><el-button @click="search">{{ uiText("查询") }}</el-button><el-button :disabled="!tasks.length" @click="exportSchedule">{{ uiText("导出当前页 CSV") }}</el-button></div>
+    <div class="report-toolbar report-toolbar--mobile-filters"><el-input v-model="keyword" :placeholder='uiText("搜索款式 / 型号 / 模具")' @keyup.enter="search"/><el-button type="primary" :icon="Search" :aria-label='uiText("查询")' :title='uiText("查询")' @click="search"/><el-button :type="mobileFiltersExpanded || overdue ? 'primary' : 'default'" :icon="Filter" :aria-label='uiText("更多筛选")' :title='uiText("更多筛选")' :aria-expanded="mobileFiltersExpanded" @click="mobileFiltersExpanded=!mobileFiltersExpanded"/><div v-if="mobileFiltersExpanded" class="report-toolbar__advanced"><el-checkbox v-model="overdue" @change="search">{{ uiText("只看逾期") }}</el-checkbox><el-button :disabled="!tasks.length" @click="exportSchedule">{{ uiText("导出当前页 CSV") }}</el-button></div></div>
     <p>{{ uiText("按计划任务查看推进与逾期；未完成任务是事实清单，不将流程确认时间当作实际交付。") }}</p>
-    <FixedTableViewport v-slot="{tableHeight}" :refresh-key="tasks"><el-table :data="tasks" :height="tableHeight" border :empty-text='uiText("当前条件没有待完成计划任务")'><el-table-column prop="assetNumber" :label='uiText("实物编号")' width="170" fixed="left"/><el-table-column prop="styleName" :label='uiText("款式")' min-width="180"/><el-table-column prop="compatibleModels" :label='uiText("兼容手机型号")' min-width="280"/><el-table-column prop="title" :label='uiText("计划任务")' min-width="200"/><el-table-column prop="dueDate" :label='uiText("计划日期")' width="140"/><el-table-column :label='uiText("推进状态")' width="130"><template #default="{row}">{{row.overdue?uiText('已逾期'):uiText('待完成')}}</template></el-table-column><el-table-column :label='uiText("操作")' width="110" fixed="right"><template #default="{row}"><el-button link @click="router.push({path:'/mold-schedules',query:{moldSetId:row.moldSetId}})">{{ uiText("查看源记录") }}</el-button></template></el-table-column></el-table></FixedTableViewport>
+    <FixedTableViewport v-slot="{tableHeight}" :refresh-key="tasks">
+     <div v-if="phoneLayout" class="report-cards report-cards--scroll" :style="{height:`${tableHeight}px`}">
+      <el-empty v-if="!tasks.length&&!loading" :description='uiText("当前条件没有待完成计划任务")'/>
+      <article v-for="task in tasks" :key="`${task.moldSetId}:${task.taskKey}`" class="report-card">
+       <header><strong>{{task.assetNumber}}</strong><el-tag size="small" :type="task.overdue?'danger':'info'">{{task.overdue?uiText('已逾期'):uiText('待完成')}}</el-tag></header>
+       <h4>{{task.styleName}}</h4><p>{{task.title}}</p><p class="report-card__muted">{{task.compatibleModels}}</p>
+       <footer><span>{{uiText("计划日期")}} · {{task.dueDate||'--'}}</span><el-button link type="primary" @click="router.push({path:'/mold-schedules',query:{moldSetId:task.moldSetId}})">{{uiText("查看源记录")}}</el-button></footer>
+      </article>
+     </div>
+     <el-table v-else :data="tasks" :height="tableHeight" border :empty-text='uiText("当前条件没有待完成计划任务")'><el-table-column prop="assetNumber" :label='uiText("实物编号")' width="170" fixed="left"/><el-table-column prop="styleName" :label='uiText("款式")' min-width="180"/><el-table-column prop="compatibleModels" :label='uiText("兼容手机型号")' min-width="280"/><el-table-column prop="title" :label='uiText("计划任务")' min-width="200"/><el-table-column prop="dueDate" :label='uiText("计划日期")' width="140"/><el-table-column :label='uiText("推进状态")' width="130"><template #default="{row}">{{row.overdue?uiText('已逾期'):uiText('待完成')}}</template></el-table-column><el-table-column :label='uiText("操作")' width="110" fixed="right"><template #default="{row}"><el-button link @click="router.push({path:'/mold-schedules',query:{moldSetId:row.moldSetId}})">{{ uiText("查看源记录") }}</el-button></template></el-table-column></el-table>
+    </FixedTableViewport>
     <el-pagination v-model:current-page="page" :page-size="50" :total="total" layout="total,prev,pager,next" @current-change="load"/>
    </template>
    <template v-else-if="view==='finance'">
-    <div class="report-toolbar"><el-input v-model="keyword" :placeholder='uiText("预算 / 款式 / 型号关键词")' @keyup.enter="search"/><el-select v-model="currency" clearable :placeholder='uiText("全部原币")'><el-option v-for="c in currencies" :key="c" :value="c" :label="c"/></el-select><el-button @click="search">{{ uiText("查询") }}</el-button><el-button v-if="user.hasPermission('finance:export')" @click="exportBudget">{{ uiText("导出预算明细 Excel") }}</el-button></div>
+    <div class="report-toolbar report-toolbar--finance-desktop"><el-input v-model="keyword" :placeholder='uiText("预算 / 款式 / 型号关键词")' @keyup.enter="search"/><el-select v-model="currency" clearable :placeholder='uiText("全部原币")'><el-option v-for="c in currencies" :key="c" :value="c" :label="c"/></el-select><el-button @click="search">{{ uiText("查询") }}</el-button><el-button v-if="user.hasPermission('finance:export')" @click="exportBudget">{{ uiText("导出预算明细 Excel") }}</el-button></div>
+    <div class="report-toolbar report-toolbar--mobile-filters"><el-input v-model="keyword" :placeholder='uiText("预算 / 款式 / 型号关键词")' @keyup.enter="search"/><el-button type="primary" :icon="Search" :aria-label='uiText("查询")' :title='uiText("查询")' @click="search"/><el-button :type="mobileFiltersExpanded || !!currency ? 'primary' : 'default'" :icon="Filter" :aria-label='uiText("更多筛选")' :title='uiText("更多筛选")' :aria-expanded="mobileFiltersExpanded" @click="mobileFiltersExpanded=!mobileFiltersExpanded"/><div v-if="mobileFiltersExpanded" class="report-toolbar__advanced"><el-select v-model="currency" clearable :placeholder='uiText("全部原币")'><el-option v-for="c in currencies" :key="c" :value="c" :label="c"/></el-select><el-button v-if="user.hasPermission('finance:export')" @click="exportBudget">{{ uiText("导出预算明细 Excel") }}</el-button></div></div>
     <el-alert v-for="rule in rules" :key="rule" :title="rule" type="info" :closable="false"/>
-    <h3>{{ uiText("预算结构（按层级与原币分组，不汇总混加）") }}</h3><el-table :data="budgets" border :empty-text='uiText("尚无符合条件的真实预算")'><el-table-column prop="currencyCode" :label='uiText("原币")' width="120"/><el-table-column :label='uiText("预算层级")' width="170"><template #default="{row}">{{row.budgetKind==='platform'?uiText('产品平台研发预算'):uiText('模具预算')}}</template></el-table-column><el-table-column prop="recordCount" :label='uiText("预算记录数")' width="150"/><el-table-column :label='uiText("已知预算金额")' min-width="170"><template #default="{row}">{{cell(row.budgetTotal)}}</template></el-table-column><el-table-column prop="unknownCount" :label='uiText("金额仍未知的记录")' min-width="180"/></el-table>
-    <h3>{{ uiText("开发费用事实（审批、申报、入账分开）") }}</h3><el-table :data="expenses" border :empty-text='uiText("尚无符合条件的真实费用")'><el-table-column prop="currencyCode" :label='uiText("原币")' width="110"/><el-table-column prop="recordCount" :label='uiText("记录数")' width="100"/><el-table-column :label='uiText("申请金额")' min-width="140"><template #default="{row}">{{cell(row.requestedTotal)}}</template></el-table-column><el-table-column :label='uiText("批准金额")' min-width="140"><template #default="{row}">{{cell(row.approvedTotal)}}</template></el-table-column><el-table-column :label='uiText("手工申报（已确认）")' min-width="180"><template #default="{row}">{{cell(row.declaredTotal)}}</template></el-table-column><el-table-column :label='uiText("ERP入账净额")' min-width="160"><template #default="{row}">{{cell(row.erpPostedNet)}}</template></el-table-column><el-table-column prop="unmappedCount" :label='uiText("待归属")' width="120"/></el-table>
+    <h3>{{ uiText("预算结构（按层级与原币分组，不汇总混加）") }}</h3>
+    <div v-if="phoneLayout" class="report-cards">
+     <el-empty v-if="!budgets.length" :description='uiText("尚无符合条件的真实预算")'/>
+     <article v-for="row in budgets" :key="`budget:${row.currencyCode}:${row.budgetKind}`" class="report-card">
+      <header><strong>{{row.currencyCode||'--'}}</strong><el-tag size="small">{{row.budgetKind==='platform'?uiText('产品平台研发预算'):uiText('模具预算')}}</el-tag></header>
+      <dl><div><dt>{{uiText("预算记录数")}}</dt><dd>{{cell(row.recordCount)}}</dd></div><div><dt>{{uiText("已知预算金额")}}</dt><dd>{{cell(row.budgetTotal)}}</dd></div><div><dt>{{uiText("金额仍未知的记录")}}</dt><dd>{{cell(row.unknownCount)}}</dd></div></dl>
+     </article>
+    </div>
+    <el-table v-else :data="budgets" border :empty-text='uiText("尚无符合条件的真实预算")'><el-table-column prop="currencyCode" :label='uiText("原币")' width="120"/><el-table-column :label='uiText("预算层级")' width="170"><template #default="{row}">{{row.budgetKind==='platform'?uiText('产品平台研发预算'):uiText('模具预算')}}</template></el-table-column><el-table-column prop="recordCount" :label='uiText("预算记录数")' width="150"/><el-table-column :label='uiText("已知预算金额")' min-width="170"><template #default="{row}">{{cell(row.budgetTotal)}}</template></el-table-column><el-table-column prop="unknownCount" :label='uiText("金额仍未知的记录")' min-width="180"/></el-table>
+    <h3>{{ uiText("开发费用事实（审批、申报、入账分开）") }}</h3>
+    <div v-if="phoneLayout" class="report-cards">
+     <el-empty v-if="!expenses.length" :description='uiText("尚无符合条件的真实费用")'/>
+     <article v-for="row in expenses" :key="`expense:${row.currencyCode}`" class="report-card">
+      <header><strong>{{row.currencyCode||'--'}}</strong><span>{{cell(row.recordCount)}}{{uiText(" 条记录")}}</span></header>
+      <dl><div><dt>{{uiText("申请金额")}}</dt><dd>{{cell(row.requestedTotal)}}</dd></div><div><dt>{{uiText("批准金额")}}</dt><dd>{{cell(row.approvedTotal)}}</dd></div><div><dt>{{uiText("手工申报（已确认）")}}</dt><dd>{{cell(row.declaredTotal)}}</dd></div><div><dt>{{uiText("ERP入账净额")}}</dt><dd>{{cell(row.erpPostedNet)}}</dd></div><div><dt>{{uiText("待归属")}}</dt><dd>{{cell(row.unmappedCount)}}</dd></div></dl>
+     </article>
+    </div>
+    <el-table v-else :data="expenses" border :empty-text='uiText("尚无符合条件的真实费用")'><el-table-column prop="currencyCode" :label='uiText("原币")' width="110"/><el-table-column prop="recordCount" :label='uiText("记录数")' width="100"/><el-table-column :label='uiText("申请金额")' min-width="140"><template #default="{row}">{{cell(row.requestedTotal)}}</template></el-table-column><el-table-column :label='uiText("批准金额")' min-width="140"><template #default="{row}">{{cell(row.approvedTotal)}}</template></el-table-column><el-table-column :label='uiText("手工申报（已确认）")' min-width="180"><template #default="{row}">{{cell(row.declaredTotal)}}</template></el-table-column><el-table-column :label='uiText("ERP入账净额")' min-width="160"><template #default="{row}">{{cell(row.erpPostedNet)}}</template></el-table-column><el-table-column prop="unmappedCount" :label='uiText("待归属")' width="120"/></el-table>
     <p>{{ uiText("本页不把两个独立层级预算相加，也不把批准金额或手工申报当作ERP已入账。") }}</p>
    </template>
    <template v-else>
-    <div class="report-toolbar"><el-select v-model="trialId" :placeholder='uiText("选择已配置的真实试点")' @change="load"><el-option v-for="trial in trials" :key="trial.trial_id" :value="trial.trial_id" :label="trial.name"/></el-select><el-button v-if="user.hasPermission('finance:export')" :disabled="!trialId" @click="exportPilot">{{ uiText("导出完整试点归档") }}</el-button><el-button v-if="user.hasPermission('pilot:admin')" @click="router.push('/system/trials')">{{ uiText("配置范围与手工基准") }}</el-button></div>
+    <div class="report-toolbar report-toolbar--pilot"><el-select v-model="trialId" :placeholder='uiText("选择已配置的真实试点")' @change="load"><el-option v-for="trial in trials" :key="trial.trial_id" :value="trial.trial_id" :label="trial.name"/></el-select><el-button v-if="user.hasPermission('finance:export')" :disabled="!trialId" @click="exportPilot">{{ uiText("导出完整试点归档") }}</el-button><el-button v-if="user.hasPermission('pilot:admin')" @click="router.push('/system/trials')">{{ uiText("配置范围与手工基准") }}</el-button></div>
     <el-empty v-if="!trialId" :description='uiText("尚未配置真实试点范围，不生成演示评估指标")'/>
-    <template v-else-if="metrics"><el-alert :title="cell(metrics.message)" type="info" :closable="false"/><h3>{{ uiText("已授权项目与资料") }}</h3><p>{{ uiText("当前试点授权文件数：") }}{{cell(metrics.fileCount)}}</p><el-table :data="projects" border><el-table-column prop="product_code" :label='uiText("项目编码")' width="180"/><el-table-column prop="product_name" :label='uiText("项目名称")' min-width="220"/><el-table-column prop="model" :label='uiText("手机型号")' min-width="220"/><el-table-column prop="status" :label='uiText("状态")' width="120"/><el-table-column prop="created_at" :label='uiText("建档时间")' min-width="190"/><el-table-column prop="updated_at" :label='uiText("最近更新时间")' min-width="190"/></el-table><h3>{{ uiText("手工模式基准（由负责人录入）") }}</h3><dl class="baseline"><template v-for="(name,key) in baselineNames" :key="key"><dt>{{name}}</dt><dd>{{cell(baseline[key])}}</dd></template></dl><p>{{ uiText("计划 / 实际日期、各原币费用和真实集成结果分别见源业务页面；不据本页自动宣称试点通过或缩短物理周期。") }}</p></template>
+    <template v-else-if="metrics">
+     <el-alert :title="cell(metrics.message)" type="info" :closable="false"/><h3>{{ uiText("已授权项目与资料") }}</h3><p>{{ uiText("当前试点授权文件数：") }}{{cell(metrics.fileCount)}}</p>
+     <div v-if="phoneLayout" class="report-cards">
+      <article v-for="project in projects" :key="String(project.product_code)" class="report-card">
+       <header><strong>{{cell(project.product_name)}}</strong><el-tag size="small">{{cell(project.status)}}</el-tag></header>
+       <p>{{cell(project.product_code)}} · {{cell(project.model)}}</p>
+       <dl><div><dt>{{uiText("建档时间")}}</dt><dd>{{cell(project.created_at)}}</dd></div><div><dt>{{uiText("最近更新时间")}}</dt><dd>{{cell(project.updated_at)}}</dd></div></dl>
+      </article>
+     </div>
+     <el-table v-else :data="projects" border><el-table-column prop="product_code" :label='uiText("项目编码")' width="180"/><el-table-column prop="product_name" :label='uiText("项目名称")' min-width="220"/><el-table-column prop="model" :label='uiText("手机型号")' min-width="220"/><el-table-column prop="status" :label='uiText("状态")' width="120"/><el-table-column prop="created_at" :label='uiText("建档时间")' min-width="190"/><el-table-column prop="updated_at" :label='uiText("最近更新时间")' min-width="190"/></el-table>
+     <h3>{{ uiText("手工模式基准（由负责人录入）") }}</h3><dl class="baseline"><template v-for="(name,key) in baselineNames" :key="key"><dt>{{name}}</dt><dd>{{cell(baseline[key])}}</dd></template></dl><p>{{ uiText("计划 / 实际日期、各原币费用和真实集成结果分别见源业务页面；不据本页自动宣称试点通过或缩短物理周期。") }}</p>
+    </template>
    </template>
   </section>
  </PageContainer>
 </template>
-<style scoped>.report-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}.report-toolbar .el-input{max-width:400px}.report-toolbar .el-select{min-width:200px}.report-body{width:100%;display:flex;flex-direction:column;gap:16px;min-width:0}p{color:#64748b;line-height:1.7}h3{margin:12px 0 0}.baseline{display:grid;grid-template-columns:minmax(220px,1fr) minmax(180px,1fr);gap:14px;border:1px solid #e2e8f0;padding:20px}.baseline dd{margin:0}.el-alert{margin-bottom:10px}</style>
+<style scoped>
+.report-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}.report-toolbar .el-input{max-width:400px}.report-toolbar .el-select{min-width:200px}.report-body{width:100%;display:flex;flex-direction:column;gap:16px;min-width:0}p{color:#64748b;line-height:1.7}h3{margin:12px 0 0}.baseline{display:grid;grid-template-columns:minmax(220px,1fr) minmax(180px,1fr);gap:14px;border:1px solid #e2e8f0;padding:20px}.baseline dd{margin:0}.el-alert{margin-bottom:10px}
+.report-cards{display:flex;flex-direction:column;gap:8px;min-width:0}.report-cards--scroll{overflow:auto}.report-card{min-width:0;padding:12px;border:1px solid var(--el-border-color-lighter);border-radius:6px;background:var(--el-bg-color)}.report-card header,.report-card footer{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex-wrap:wrap}.report-card h4{margin:8px 0 4px;font-size:14px}.report-card p{margin:5px 0;overflow-wrap:anywhere}.report-card__muted{color:var(--el-text-color-secondary);font-size:12px}.report-card dl{display:grid;gap:8px;margin:8px 0 0}.report-card dl>div{display:grid;grid-template-columns:minmax(110px,.8fr) minmax(0,1.2fr);gap:8px}.report-card dt{color:var(--el-text-color-secondary)}.report-card dd{margin:0;overflow-wrap:anywhere}.report-card footer{align-items:center;border-top:1px solid var(--el-border-color-lighter);margin-top:8px;padding-top:6px}
+@media(max-width:767px){.report-toolbar{gap:8px;margin-bottom:10px}.report-toolbar .el-input,.report-toolbar .el-select{width:100%;max-width:100%;min-width:0}.baseline{grid-template-columns:1fr;padding:12px;gap:8px}.baseline dt{font-weight:600}.baseline dd{margin:0 0 8px}}
+</style>
+
+<style scoped>
+.report-toolbar--mobile-filters{display:none}
+@media(max-width:767px){
+  .report-toolbar--views{display:flex;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .report-toolbar--views::-webkit-scrollbar{display:none}
+  .report-toolbar--views>.el-button{flex:0 0 auto}
+  .report-toolbar--schedule-desktop,.report-toolbar--finance-desktop{display:none}
+  .report-toolbar--mobile-filters{display:grid;grid-template-columns:minmax(0,1fr) 40px 40px;align-items:center;gap:6px}
+  .report-toolbar--mobile-filters>.el-input,.report-toolbar--mobile-filters>.el-button{min-width:0;margin:0}
+  .report-toolbar--mobile-filters>.el-input :deep(.el-input__wrapper){min-height:40px}
+  .report-toolbar--mobile-filters>.el-button{width:40px;height:40px;min-height:40px;padding:0}
+  .report-toolbar__advanced{display:flex;grid-column:1/-1;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding-top:8px;border-top:1px solid var(--el-border-color-lighter)}
+  .report-toolbar__advanced>.el-select{width:100%;min-width:0}
+  .report-toolbar--pilot{display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
+  .report-toolbar--pilot>.el-select,.report-toolbar--pilot>.el-button{width:100%;min-width:0;margin:0}
+}
+</style>

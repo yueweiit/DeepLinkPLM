@@ -1,0 +1,2 @@
+FROM yuewei-plm-web:local-supplier-photo-click-20261111
+COPY dist/ /usr/share/nginx/html/

@@ -1,0 +1,3 @@
+FROM yuewei-plm-web:local-mold-entity-spacing-20261111
+COPY dist /usr/share/nginx/html
+LABEL plm.local.release=existing-mold-share-20261112

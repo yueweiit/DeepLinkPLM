@@ -10,6 +10,7 @@ import {phoneMemberName} from '@/utils/phoneMembers'
 import type {MarketPhoneCoverage,MarketPhoneMold} from '@/types/marketWatch'
 import MasterDataLifecycleDialog from '@/components/MasterDataLifecycleDialog.vue'
 import { ElDialog,ElMessage } from 'element-plus'
+import { Plus, Search } from '@element-plus/icons-vue'
 import FixedTableViewport from '@/components/FixedTableViewport/index.vue'
 import * as api from '@/api/modules/phoneReference'
 import { useUserStore } from '@/stores/user'
@@ -72,7 +73,7 @@ async function lifecycleCompleted(){lifeRow.value=undefined;detailRow.value=unde
     <PhoneIdentityIssues v-else-if="tab==='issues'" :visible="active" :keyword="keyword" @changed="emit('changed')" @navigate="issueNavigate"/>
     <PhoneModelIntake v-else-if="tab==='intake'" :visible="active" :editable="editable" :keyword="keyword" @changed="emit('changed')"/>
     <section v-else ref="listCanvas" class="reference-list">
-    <div class="reference-tools"><el-input v-model="keyword" :placeholder='uiText("搜索品牌 / 手机名称 / 四位编码")' clearable @keyup.enter="search"/><el-button @click="search">{{ uiText("查询") }}</el-button><el-button v-if="editable" type="primary" @click="open()">{{tab==='brands'?uiText('新增品牌'):uiText('新增手机成员')}}</el-button></div>
+    <div class="reference-tools"><el-input v-model="keyword" :placeholder='uiText("搜索品牌 / 手机名称 / 四位编码")' clearable @keyup.enter="search"/><el-button class="reference-search-button" :icon="Search" :aria-label="uiText('查询')" :title="uiText('查询')" @click="search">{{ uiText("查询") }}</el-button><el-button v-if="editable" class="reference-add-button" :icon="Plus" type="primary" :aria-label="tab==='brands'?uiText('新增品牌'):uiText('新增手机成员')" :title="tab==='brands'?uiText('新增品牌'):uiText('新增手机成员')" @click="open()">{{tab==='brands'?uiText('新增品牌'):uiText('新增手机成员')}}</el-button></div>
     <el-alert v-if="error" :title="error" type="error" :closable="false"/>
     <FixedTableViewport fill :refresh-key="tab==='phones'?phones:brands" v-slot="{tableHeight}">
     <div v-if="compactRecords" class="reference-cards" v-loading="loading" :aria-label="tab==='phones'?uiText('标准手机成员记录'):uiText('品牌记录')">
@@ -115,4 +116,7 @@ async function lifecycleCompleted(){lifeRow.value=undefined;detailRow.value=unde
 .reference-manager--inline,.reference-list{display:flex;flex:1;min-width:0;min-height:0;flex-direction:column;gap:8px;overflow:hidden}.reference-manager--inline{font-size:12px;--el-font-size-base:12px;gap:4px}.reference-list{container-type:inline-size}.reference-manager--inline>:deep(.el-tabs){flex:none}.reference-manager--inline :deep(.code-groups){gap:4px}.reference-manager--inline :deep(.group-row){font-size:12px;box-sizing:border-box}.reference-manager--inline :deep(.group-record){min-height:40px;padding:5px 8px}.reference-manager--inline :deep(.group-heading){min-height:28px;padding:4px 8px}.reference-manager--inline :deep(.el-tabs__header){margin-bottom:0}
 .reference-list :deep(.el-table){font-size:12px}.reference-list :deep(.el-table .cell){line-height:18px;overflow-wrap:anywhere}.reference-list :deep(.el-table__row td){padding:5px 0}.reference-list :deep(.el-button),.reference-manager--inline :deep(.el-button){font-size:12px;height:28px}.reference-manager--inline :deep(.el-input__wrapper),.reference-manager--inline :deep(.el-select__wrapper){min-height:28px}.hint{font-size:12px;color:#718096;line-height:1.5;margin:0;flex:none}.reference-tools{display:flex;gap:8px;flex:none;flex-wrap:wrap}.reference-tools .el-input{flex:1;min-width:160px}.el-pagination{flex:none;margin-top:0;justify-content:flex-end}.el-select{width:100%}.reference-cards{height:100%;overflow-y:auto;overflow-x:hidden}.reference-cards article{display:flex;flex-direction:column;gap:4px;padding:8px;border-bottom:1px solid var(--el-border-color-lighter);overflow-wrap:anywhere}.reference-cards article>span{color:var(--el-text-color-secondary)}
 .phone-coverage{font-size:12px}.phone-coverage h3{font-size:16px}.phone-coverage h4{font-size:12px}.phone-coverage article{border-bottom:1px solid #e4eaf2;padding:8px 0}.phone-coverage p{line-height:1.6;overflow-wrap:anywhere}.phone-coverage :deep(.el-button){white-space:normal;text-align:left;height:auto;line-height:1.6}.prefixes{width:100%}.prefix-row{display:flex;gap:6px;align-items:center;margin-bottom:6px}.prefix-row .el-input{flex:1;min-width:0}
+@container (max-width:650px){
+ .reference-manager--inline :deep(.el-tabs__nav-wrap){overflow-x:auto}.reference-manager--inline :deep(.el-tabs__nav){white-space:nowrap}.reference-tools{display:grid;grid-template-columns:minmax(0,1fr) 40px 40px;gap:6px}.reference-tools .el-input{min-width:0}.reference-tools .el-button{width:40px;min-height:40px;padding:0}.reference-tools .el-button>span:not(.el-icon){font-size:0}.reference-tools .el-button .el-icon{margin:0;font-size:18px}.prefix-row{align-items:stretch}.prefix-row>span{display:flex;align-items:center}
+}
 </style>

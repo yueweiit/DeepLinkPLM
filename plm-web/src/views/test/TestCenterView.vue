@@ -134,7 +134,7 @@ onMounted(loadData)
           <el-button type="primary">{{ uiText("新增测试记录") }}</el-button>
         </div>
 
-        <FixedTableViewport v-slot="{ tableHeight }" :refresh-key="filteredRecords">
+        <FixedTableViewport class="test-record-table" v-slot="{ tableHeight }" :refresh-key="filteredRecords">
         <el-table :data="filteredRecords" :height="tableHeight" border stripe>
           <el-table-column prop="productName" :label='uiText("关联产品")' min-width="220" />
           <el-table-column prop="testCategory" :label='uiText("测试项")' min-width="140" />
@@ -157,6 +157,22 @@ onMounted(loadData)
           </el-table-column>
         </el-table>
         </FixedTableViewport>
+        <div class="test-record-cards">
+          <article v-for="item in filteredRecords" :key="item.recordId" class="test-record-card">
+            <header>
+              <strong>{{ item.productName }}</strong>
+              <el-tag :type="item.result === '通过' ? 'success' : item.result === '不通过' ? 'danger' : 'warning'" effect="light">{{ item.result }}</el-tag>
+            </header>
+            <dl>
+              <div><dt>{{ uiText("测试项") }}</dt><dd>{{ item.testCategory }}</dd></div>
+              <div><dt>{{ uiText("测试人") }}</dt><dd>{{ item.owner }}</dd></div>
+              <div><dt>{{ uiText("日期") }}</dt><dd>{{ formatDate(item.testedAt) }}</dd></div>
+            </dl>
+            <p v-if="item.note">{{ item.note }}</p>
+            <el-button link type="primary" @click="openProduct(item.productId)">{{ uiText("查看节点") }}</el-button>
+          </article>
+          <el-empty v-if="!loading && !filteredRecords.length" :description="uiText('暂无符合条件的测试记录')" />
+        </div>
       </article>
     </section>
   </PageContainer>
@@ -180,8 +196,66 @@ onMounted(loadData)
   background: #fff;
 }
 
+.test-record-cards {
+  display: none;
+}
+
+.test-record-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--plm-color-border-light);
+  border-radius: var(--plm-radius-base);
+  background: var(--plm-color-surface);
+  overflow-wrap: anywhere;
+}
+
+.test-record-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.test-record-card dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 12px 0;
+}
+
+.test-record-card dt {
+  color: var(--plm-color-text-secondary);
+  font-size: 12px;
+}
+
+.test-record-card dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.test-record-card p {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1200px) {
   .test-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .test-record-table {
+    display: none;
+  }
+
+  .test-record-cards {
+    display: grid;
+    gap: 10px;
+  }
+
+  .test-record-card dl {
     grid-template-columns: 1fr;
   }
 }

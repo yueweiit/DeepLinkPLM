@@ -1,0 +1,3 @@
+FROM yuewei-plm-web:local-batch-listing-20261112
+
+COPY dist/ /usr/share/nginx/html/

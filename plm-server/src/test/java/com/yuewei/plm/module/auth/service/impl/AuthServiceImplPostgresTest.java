@@ -71,7 +71,7 @@ class AuthServiceImplPostgresTest {
         users = new SqlSessionTemplate(factory.getObject()).getMapper(SysUserRepository.class);
         sessions = mock(TokenSessionService.class);
         when(sessions.createSession(any())).thenReturn("isolated-test-session");
-        when(sessions.getExpiresInSeconds()).thenReturn(28800L);
+        when(sessions.getExpiresInSeconds()).thenReturn(86400L);
         logs = mock(OperationLogService.class);
         service = new AuthServiceImpl(users, sessions, logs, encoder);
         angelId = save("angel");
@@ -90,7 +90,7 @@ class AuthServiceImplPostgresTest {
         assertThat(result.getUser().getUserId()).isEqualTo(angelId);
         assertThat(result.getUser().getUsername()).isEqualTo("angel");
         assertThat(users.selectById(angelId).getUsername()).isEqualTo("angel");
-        assertThat(result.getExpiresInSeconds()).isEqualTo(28800L);
+        assertThat(result.getExpiresInSeconds()).isEqualTo(86400L);
         assertThat(CurrentUserContext.get()).isEmpty();
     }
 

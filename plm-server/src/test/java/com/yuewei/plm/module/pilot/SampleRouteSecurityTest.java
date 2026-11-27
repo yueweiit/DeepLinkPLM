@@ -5,6 +5,7 @@ import com.yuewei.plm.common.config.AppProperties;
 import com.yuewei.plm.common.exception.GlobalExceptionHandler;
 import com.yuewei.plm.common.security.*;
 import com.yuewei.plm.module.auth.service.TokenSessionService;
+import java.time.Instant;
 import java.util.*;
 import org.junit.jupiter.api.*;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -25,7 +26,7 @@ class SampleRouteSecurityTest {
   CurrentUserContext.clear();jdbc=mock(JdbcTemplate.class);var json=new ObjectMapper().findAndRegisterModules();
   when(jdbc.queryForList(anyString(),eq(7L))).thenAnswer(i->{String sql=i.getArgument(0);if(sql.contains("from sys_user"))return active?List.of(Map.of("user_id",7L,"username","actual-sample-reader","display_name","实际样品账号","all_permissions",false)):List.of();return pilot?List.of(Map.of("role_code",role,"permissions",json.writeValueAsString(permissions),"all_objects",allObjects)):List.of();});
   when(jdbc.queryForObject(anyString(),eq(Long.class),anyLong())).thenAnswer(i->((Number)i.getArgument(2)).longValue()==1?1L:0L);
-  access=new PilotAccessService(jdbc,json);var tokens=mock(TokenSessionService.class);when(tokens.getCurrentUser(anyString())).thenAnswer(i->"valid".equals(i.getArgument(0))?Optional.of(new CurrentUser(7L,"forged-admin","冒用管理员声明",true)):Optional.empty());
+  access=new PilotAccessService(jdbc,json);var tokens=mock(TokenSessionService.class);when(tokens.getSession(anyString(),anyBoolean())).thenAnswer(i->"valid".equals(i.getArgument(0))?Optional.of(new TokenSessionService.Session(new CurrentUser(7L,"forged-admin","冒用管理员声明",true),Instant.now().plusSeconds(86400))):Optional.empty());
   var properties=new AppProperties();properties.getSecurity().setEnabled(true);var filter=new SimpleTokenAuthenticationFilter(properties,tokens,json);
   mvc=MockMvcBuilders.standaloneSetup(new Fixture(access)).addFilters(filter).addInterceptors(new PilotSecurityInterceptor(access)).setControllerAdvice(new GlobalExceptionHandler()).build();
  }

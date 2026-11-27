@@ -7,6 +7,8 @@ const api=vi.hoisted(()=>Object.fromEntries(['startResearchMoldApplication','get
 vi.mock('@/api/modules/moldApplications',()=>({...api,moldBusinessStatusNames:{draft:'草稿',submitting:'提交中',submission_unknown:'提交待核对',awaiting_approval:'待 Tiffany 审核',approved:'Tiffany 已同意',rejected:'已拒绝',withdrawn:'已撤回',terminated:'已终止',approval_unknown:'审批待核对'}}))
 const reference=vi.hoisted(()=>({getPhoneCompatibleMolds:vi.fn(),getPhoneModelOptions:vi.fn(),getPhoneApplicationOptions:vi.fn(),getPhoneSelectionBrands:vi.fn().mockResolvedValue([{id:1,brandId:1,name:"Apple",status:"enabled"}]),getPhoneModels:vi.fn(),getPhoneBrands:vi.fn()}))
 vi.mock('@/api/modules/phoneReference',()=>reference)
+const sharing=vi.hoisted(()=>({getMoldShareMappings:vi.fn(),resolveMoldSharing:vi.fn(),confirmMoldSharing:vi.fn()}))
+vi.mock('@/api/modules/moldSharing',()=>sharing)
 import MoldApplicationEditor from '../components/MoldApplicationEditor.vue'
 import EngineeringPlanEditor from '../components/EngineeringPlanEditor.vue'
 import MoldScopeEditor from '../components/MoldScopeEditor.vue'
@@ -28,6 +30,38 @@ beforeEach(()=>{vi.clearAllMocks();localStorage.clear();api.getMoldTargetOptions
 afterEach(()=>{editorHost?.unmount();editorHost=undefined;wrapper=undefined;document.body.innerHTML='';vi.restoreAllMocks()})
 async function start(row?:unknown,research=false){const pinia=createPinia();setActivePinia(pinia);useUserStore().token='editor-test';const router=createRouter({history:createMemoryHistory(),routes:[{path:'/',component:MoldApplicationEditor},{path:'/mold-applications',component:{template:'<div />'}},{path:'/products/:id/edit',component:{template:'<div />'}}]});await router.push('/');await router.isReady();const host=mount({template:'<router-view />'},{global:{plugins:[ElementPlus,pinia,router],stubs:{Teleport:true,ElSelect:{props:['modelValue'],emits:['update:modelValue','change'],template:'<select :value="modelValue" @change="$emit(\'update:modelValue\',isNaN(Number($event.target.value))?$event.target.value:Number($event.target.value));$emit(\'change\',$event.target.value)"><slot /></select>'},ElOption:{props:['value','label','disabled'],template:'<option :value="value" :disabled="disabled">{{label}}</option>'}}},attachTo:document.body});editorHost=host;wrapper=host.getComponent(MoldApplicationEditor) as unknown as VueWrapper;const editor=wrapper!.vm as unknown as {open:(row?:unknown)=>Promise<void>;openResearch:(row:unknown)=>Promise<void>};if(research)await editor.openResearch(row);else await editor.open(row);await flushPromises();return router}
 describe('shared application editor on the application homepage',()=>{
+  const mappedPlan=()=>({codeRuleVersion:2 as const,identityMode:'mold_only' as const,handling:'reuse' as const,specifications:[{key:'own-18',holeType:'precision' as const,structureDescription:'',phoneModelIds:[72],moldSharing:{referencePhoneModelId:71,mappings:[{mappingId:1,version:3,materialCode:'10'},{mappingId:2,version:3,materialCode:'20'}]}}]})
+  it('persists ordinary mold-only adoption, keeps the same key after timeout and replaces it when the basis changes',async()=>{
+    const engineeringPlan=mappedPlan();await start({...draft(),engineeringPlan});
+    const reason=()=>wrapper!.findAllComponents(ElInput).find(input=>input.props('placeholder')==='新增实物套或另建模具时填写原因')!;
+    await reason().setValue('试装确认18精孔共用17原模具');sharing.confirmMoldSharing.mockRejectedValueOnce(Error('确认超时')).mockResolvedValue({confirmationId:10,moldSetId:67,itemId:45});
+    await button('确认沿用，不发起新审批').trigger('click');await flushPromises();
+    const first=sharing.confirmMoldSharing.mock.calls[0]![0];expect(first).toMatchObject({productLineId:50,engineeringPlan,reason:'试装确认18精孔共用17原模具'});
+    await button('确认沿用，不发起新审批').trigger('click');await flushPromises();expect(sharing.confirmMoldSharing.mock.calls[1]![0].requestId).toBe(first.requestId);expect(button('确认沿用，不发起新审批').attributes('disabled')).toBeDefined();
+    await reason().setValue('补充图纸V2确认');await button('确认沿用，不发起新审批').trigger('click');await flushPromises();expect(sharing.confirmMoldSharing.mock.calls[2]![0].requestId).not.toBe(first.requestId);
+    expect(api.submitMoldApplication).not.toHaveBeenCalled();expect(api.saveMoldApplication).not.toHaveBeenCalled();
+  })
+  it('retains a v2 research expansion target and own-phone identity when reopening and saving',async()=>{
+    await researchOptions();const engineeringPlan={...mappedPlan(),handling:'new_set' as const,codePhoneModelId:72};
+    const saved={...source(),applicationId:7,version:1,phoneModelId:72,phoneCodeItemId:317,targetItemId:45,targetMoldSetId:67,targetProjectId:null,executionReason:'增加产能',engineeringPlan};api.getMoldApplication.mockResolvedValue(saved);
+    await start(saved);await button('保存草稿').trigger('click');await flushPromises();
+    expect(api.saveMoldApplication).toHaveBeenCalledWith(7,expect.objectContaining({phoneModelId:72,phoneCodeItemId:317,targetItemId:45,targetMoldSetId:67,targetProjectId:null,engineeringPlan}));
+  })
+  it.each(['proposed','invalid_held'])('uses the project proposal state %s when the formal code is still empty',async(state)=>{
+    const options=await api.getMoldOptions();
+    api.getMoldOptions.mockResolvedValue({...options,configs:[{tipo:'幻影Fantasía Case',productLineId:42}],productLines:[{productId:42,productName:'亮甲3.0',productSpecificCode:null,canMaintainProductIdentity:true,researchStepNo:5,salesStatus:'unconfirmed',moldApplicationEligibility:{eligible:true,kind:'research',reason:null},productIdentity:{mode:'reserved_v1',state,productCode:'NAB',specificCode:'AB',moldPrefix:'MAB',pinned:true}}]});
+    await start(source(),true);
+    await wrapper!.get('select[aria-label="tipo"]').setValue('幻影Fantasía Case');
+    if(state==='proposed'){
+      expect(button('生成 / 预留编码').attributes('disabled')).toBeUndefined();
+      expect(wrapper!.text()).not.toContain('尚未维护本产品的两位产品特定编码');
+    }else{
+      expect(button('生成 / 预留编码').attributes('disabled')).toBeDefined();expect(wrapper!.text()).toContain('前往原项目拟定或重新确认');
+      const open=vi.spyOn(window,'open').mockReturnValue(null);await button('维护产品特定编码').trigger('click');await flushPromises();
+      expect(open).toHaveBeenCalledWith('/product-research?productId=42&step=mold-design','_blank','noopener,noreferrer');
+    }
+    expect(api.reserveMoldCodes).not.toHaveBeenCalled();expect(api.submitMoldApplication).not.toHaveBeenCalled();
+  })
   it('saves unfinished scope as a draft but keeps formal submission blocked until its hole type is explicit',async()=>{
     await uncodedResearchOptions();const saved={...readyUncodedResearch(),engineeringPlan:{handling:'pending',specifications:[{key:'a',holeType:'',structureDescription:'',phoneModelIds:[]}]},form:{...readyUncodedResearch().form,holeType:null}};api.getMoldApplication.mockResolvedValue(saved);await start(saved);expect(button('提交钉钉审批').attributes('disabled')).toBeDefined();expect(wrapper!.text()).toContain('规格1：请明确孔型');await button('保存草稿').trigger('click');await flushPromises();expect(api.saveMoldApplication).toHaveBeenCalledWith(7,expect.objectContaining({executionIntent:'new',engineeringPlan:saved.engineeringPlan}));expect(api.submitMoldApplication).not.toHaveBeenCalled();
   })

@@ -54,16 +54,16 @@ class RedisTokenSessionServiceLocalIntegrationTest {
     }
 
     @Test
-    void normalSessionUsesOpaqueRandomTokenAndOriginalFixedEightHourExpiry() {
+    void normalSessionUsesOpaqueRandomTokenAndTwentyFourHourIdleExpiry() {
         String token = service.createSession(actor);
         assertThat(Base64.getUrlDecoder().decode(token)).hasSize(32);
         assertThat(service.getCurrentUser(token)).contains(actor);
-        assertThat(service.getExpiresInSeconds()).isEqualTo(28800L);
-        assertThat(redis.getExpire(onlyKey(), TimeUnit.SECONDS)).isBetween(28795L, 28800L);
+        assertThat(service.getExpiresInSeconds()).isEqualTo(86400L);
+        assertThat(redis.getExpire(onlyKey(), TimeUnit.SECONDS)).isBetween(86395L, 86400L);
     }
 
     @Test
-    void anotherServiceAfterConnectionShutdownRetainsSessionWithoutRenewingItsRemainingTtl() {
+    void authenticatedActivityRenewsIdleTtlAcrossServiceInstances() {
         String token = service.createSession(actor);
         String key = onlyKey();
         redis.expire(key, Duration.ofSeconds(120));
@@ -71,8 +71,33 @@ class RedisTokenSessionServiceLocalIntegrationTest {
         redis = connect(Integer.parseInt(System.getProperty("plm.auth.redis.test-port")));
         var restarted = new RedisTokenSessionService(redis, json);
         assertThat(restarted.getCurrentUser(token)).contains(actor);
-        assertThat(redis.getExpire(key, TimeUnit.SECONDS)).isBetween(115L, 120L);
+        assertThat(redis.getExpire(key, TimeUnit.SECONDS)).isBetween(86395L, 86400L);
         assertThat(restarted.getCurrentUser(token)).contains(actor);
+        assertThat(redis.getExpire(key, TimeUnit.SECONDS)).isBetween(86395L, 86400L);
+    }
+
+    @Test
+    void renewalNeverExtendsPastSevenDayAbsoluteLifetime() throws Exception {
+        String token = service.createSession(actor);
+        Instant createdAt = Instant.now().minusSeconds(7 * 24 * 60 * 60L).plusSeconds(120);
+        redis.opsForValue().set(onlyKey(), json.writeValueAsString(new StoredSessionFixture(actor, createdAt)), Duration.ofMinutes(10));
+
+        var session = service.getSession(token).orElseThrow();
+
+        assertThat(session.expiresAt()).isBetween(Instant.now().plusSeconds(100), Instant.now().plusSeconds(120));
+        assertThat(redis.getExpire(onlyKey(), TimeUnit.SECONDS)).isBetween(100L, 120L);
+    }
+
+    @Test
+    void preUpgradeRawUserSessionsKeepTheirOriginalRemainingTtl() throws Exception {
+        String token = service.createSession(actor);
+        String key = onlyKey();
+        redis.opsForValue().set(key, json.writeValueAsString(actor), Duration.ofSeconds(120));
+
+        var session = service.getSession(token).orElseThrow();
+
+        assertThat(session.user()).isEqualTo(actor);
+        assertThat(Duration.between(Instant.now(), session.expiresAt()).toSeconds()).isBetween(115L, 120L);
         assertThat(redis.getExpire(key, TimeUnit.SECONDS)).isBetween(115L, 120L);
     }
 
@@ -97,11 +122,11 @@ class RedisTokenSessionServiceLocalIntegrationTest {
     }
 
     @Test
-    void redisKeyDoesNotExposeTheBearerAndValueContainsOnlyExistingCurrentUserFields() throws Exception {
+    void redisKeyDoesNotExposeTheBearerAndStoredSessionContainsNoSecrets() throws Exception {
         String token = service.createSession(actor);
         assertThat(onlyKey()).matches("plm:auth:session:[0-9a-f]{64}").doesNotContain(token);
         var value = json.readTree(redis.opsForValue().get(onlyKey()));
-        assertThat(value.fieldNames()).toIterable().containsExactlyInAnyOrder("userId", "username", "displayName", "allPermissions");
+        assertThat(value.fieldNames()).toIterable().containsExactlyInAnyOrder("user", "createdAt");
         assertThat(value.toString()).doesNotContain(token, "password", "passwordHash");
     }
 
@@ -145,6 +170,8 @@ class RedisTokenSessionServiceLocalIntegrationTest {
         assertThat(keys).hasSize(1);
         return keys.iterator().next();
     }
+
+    private record StoredSessionFixture(CurrentUser user, Instant createdAt) {}
 
     private StringRedisTemplate connect(int port) {
         var options = ClientOptions.builder().socketOptions(SocketOptions.builder().connectTimeout(Duration.ofMillis(300)).build()).build();

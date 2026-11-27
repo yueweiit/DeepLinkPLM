@@ -6,6 +6,7 @@ import type { PhoneObjectOption } from '@/components/PhoneObjectSelect/types'
 import { computed, onActivated, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Filter, Search } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { useFinanceWorkspace } from '@/stores/financeWorkspace'
 import { useCachedRequest } from '@/composables/useCachedRequest'
@@ -20,6 +21,7 @@ const currentProjectId=computed(()=>props.projectId||Number(route.query.projectI
 const user = useUserStore()
 const query = reactive<FinanceQuery>({ page: 1, size: 50, kind: props.entity === 'budget' ? (route.query.kind==='platform'?'platform':'mold') : undefined, productId: props.projectId,projectId:props.projectId?undefined:Number(route.query.projectId)||undefined, budgetId:Number(route.query.budgetId)||undefined,expenseId:Number(route.query.expenseId)||undefined })
 const keyword = ref(''), loadingAction = ref(false), importOpen = ref(false), createOpen = ref(false), saveOpen = ref(false), historyOpen = ref(false), conflictOpen = ref(false)
+const mobileFiltersOpen = ref(false)
 const workspace = useFinanceWorkspace()
 const ledger = workspace.forEntity(props.entity)
 const { drafts, overrides } = ledger
@@ -31,6 +33,7 @@ const cache = useCachedRequest((q: FinanceQuery) => getFinanceRows(props.entity,
 const rows = computed(() => user.token && cache.hasCurrentData.value ? (cache.data.value?.content || []).map(r => overrides.get(id(r)) || r) : [])
 const title = computed(() => props.entity === 'budget' ? '模具成本预算' : '开发费用归集')
 const changedCount = computed(() => [...drafts.values()].reduce((count, d) => count + d.changes.size, 0))
+const activeMobileFilterCount = computed(() => Number(!!query.productLineId) + Number(!!query.currency) + Number(props.entity === 'expense' && !!query.state))
 const itemObjects=computed<PhoneObjectOption[]>(()=>options.value.items.map(i=>({type:'item',id:i.itemId,name:i.compatibleModels,code:`#${i.itemId}`,productLineId:i.productLineId||undefined,productLineName:i.styleName,phoneModels:i.phoneModels||[]})))
 const form = reactive({ name: '', productLineId: null as number | null, itemId: null as number | null, moldSetId: null as number | null, parentBudgetId: null as number | null, budgetId: null as number | null, currency: 'CNY' })
 const moneyFields = computed(() => props.entity === 'budget' ? [
@@ -82,7 +85,18 @@ const groupLabel = (g:Record<string,FinanceValue>) => `${g.currencyCode || ''}${
     <el-tabs v-if="entity==='budget'" v-model="query.kind"><el-tab-pane :label='uiText("模具预算（档案 / 明确套次）")' name="mold"/><el-tab-pane :label='uiText("平台预算（款式投资计划）")' name="platform"/></el-tabs>
     <div class="summary" v-if="summary.currencyGroups.length"><div v-for="g in summary.currencyGroups" :key="groupLabel(g)"><strong>{{ uiText(String((groupLabel(g)) ?? '')) }}</strong><span v-if="entity==='budget'">{{ uiText("预算 ") }}{{ display(g.budgetTotal) }}{{ uiText(" · 未知 ") }}{{ g.unknownCount }}{{ uiText(" 条") }}</span><span v-else>{{ uiText("申请 ") }}{{ display(g.requestedTotal) }}{{ uiText(" · 通过 ") }}{{ display(g.approvedTotal) }}{{ uiText(" · 申报 ") }}{{ display(g.declaredTotal) }}{{ uiText(" · ERP净额 ") }}{{ display(g.erpPostedNet) }}</span></div></div>
     <el-alert :closable="false" type="info" :title="summary.rule || uiText('空值表示未知，0表示已确认零值。预算修改保留版本与原因；刷新不会覆盖草稿。')" />
-    <div class="filters"><el-input v-model="keyword" :placeholder='uiText("搜索预算 / 款式 / 手机型号 / ERP单据")' clearable class="search"/><el-select v-model="query.productLineId" filterable clearable :placeholder='uiText("全部产品平台")'><el-option v-for="p in options.productLines" :key="p.productId" :label="p.productName" :value="p.productId"/></el-select><el-select v-model="query.currency" clearable :placeholder='uiText("全部原币")'><el-option v-for="c in ['CNY','MXN','USD','EUR']" :key="c" :value="c" :label="c"/></el-select><el-select v-if="entity==='expense'" v-model="query.state" clearable :placeholder='uiText("全部状态")'><el-option value="draft" :label='uiText("草稿")'/><el-option value="confirmed" :label='uiText("已确认")'/><el-option value="void" :label='uiText("已作废")'/></el-select><span class="draft-count">{{ changedCount }}{{ uiText(" 个待保存单元格") }}</span><el-button :disabled="!drafts.size" @click="undo">{{ uiText("撤销未保存") }}</el-button><el-button type="primary" :disabled="!drafts.size" @click="reason='';saveOpen=true">{{ uiText("批量保存") }}</el-button></div>
+    <div class="filters filters--desktop"><el-input v-model="keyword" :placeholder='uiText("搜索预算 / 款式 / 手机型号 / ERP单据")' clearable class="search"/><el-select v-model="query.productLineId" filterable clearable :placeholder='uiText("全部产品平台")'><el-option v-for="p in options.productLines" :key="p.productId" :label="p.productName" :value="p.productId"/></el-select><el-select v-model="query.currency" clearable :placeholder='uiText("全部原币")'><el-option v-for="c in ['CNY','MXN','USD','EUR']" :key="c" :value="c" :label="c"/></el-select><el-select v-if="entity==='expense'" v-model="query.state" clearable :placeholder='uiText("全部状态")'><el-option value="draft" :label='uiText("草稿")'/><el-option value="confirmed" :label='uiText("已确认")'/><el-option value="void" :label='uiText("已作废")'/></el-select><span class="draft-count">{{ changedCount }}{{ uiText(" 个待保存单元格") }}</span><el-button :disabled="!drafts.size" @click="undo">{{ uiText("撤销未保存") }}</el-button><el-button type="primary" :disabled="!drafts.size" @click="reason='';saveOpen=true">{{ uiText("批量保存") }}</el-button></div>
+    <div class="filters filters--mobile">
+      <el-input v-model="keyword" :placeholder='uiText("搜索预算 / 款式 / 手机型号 / ERP单据")' clearable @keyup.enter="load"/>
+      <el-button type="primary" :icon="Search" :aria-label="uiText('搜索')" :title="uiText('搜索')" @click="load"/>
+      <el-button :type="mobileFiltersOpen || activeMobileFilterCount ? 'primary' : 'default'" :icon="Filter" :aria-label="uiText('更多筛选')" :title="uiText('更多筛选')" :aria-expanded="mobileFiltersOpen" @click="mobileFiltersOpen=!mobileFiltersOpen"><span v-if="activeMobileFilterCount" class="filter-count">{{activeMobileFilterCount}}</span></el-button>
+      <div v-if="mobileFiltersOpen" class="filters-advanced">
+        <el-select v-model="query.productLineId" filterable clearable :placeholder='uiText("全部产品平台")'><el-option v-for="p in options.productLines" :key="p.productId" :label="p.productName" :value="p.productId"/></el-select>
+        <el-select v-model="query.currency" clearable :placeholder='uiText("全部原币")'><el-option v-for="c in ['CNY','MXN','USD','EUR']" :key="c" :value="c" :label="c"/></el-select>
+        <el-select v-if="entity==='expense'" v-model="query.state" clearable :placeholder='uiText("全部状态")'><el-option value="draft" :label='uiText("草稿")'/><el-option value="confirmed" :label='uiText("已确认")'/><el-option value="void" :label='uiText("已作废")'/></el-select>
+        <div class="filters-actions"><span class="draft-count">{{ changedCount }}{{ uiText(" 个待保存单元格") }}</span><el-button :disabled="!drafts.size" @click="undo">{{ uiText("撤销未保存") }}</el-button><el-button type="primary" :disabled="!drafts.size" @click="reason='';saveOpen=true">{{ uiText("批量保存") }}</el-button></div>
+      </div>
+    </div>
     <p v-if="cache.error.value" class="error">{{ cache.error.value }}</p>
     <FixedTableViewport v-slot="{tableHeight}" :fill="!props.projectId"><el-table :data="rows" :row-key="id" border stripe :height="tableHeight" class="wide-table" v-loading="cache.loading.value">
       <el-table-column :label='uiText("核算对象 / 名称")' fixed min-width="280"><template #default="{ row }"><strong>{{ row.styleName || row.productLineName || uiText('历史项目费用（归属待核对）') }}</strong><div>{{ row.compatibleModels || uiText('平台级，不推断手机型号或实物套') }}</div><el-input :model-value="value(row,entity==='budget'?'budgetName':'description')" :disabled="!editable(row,entity==='budget'?'budgetName':'description')" @update:model-value="edit(row,entity==='budget'?'budgetName':'description',$event)"/><small>#{{ id(row) }} · {{ row.moldSetId ? uiText('模具套 {value0}',{value0:(row.moldSetId)}) : uiText('共享档案/平台') }}<span v-if="entity==='budget'">{{ uiText(" · 版本 ") }}{{ row.versionNo }}</span></small><p v-if="drafts.get(id(row))?.error" class="error">{{ drafts.get(id(row))?.error }}</p></template></el-table-column>
@@ -117,9 +131,10 @@ const groupLabel = (g:Record<string,FinanceValue>) => `${g.currencyCode || ''}${
 header { display:flex; justify-content:space-between; align-items:flex-start; gap:20px; }
 h2 { margin:0 0 8px; font-size:23px; }
 header p { margin:0; color:var(--el-text-color-secondary); max-width:1000px; line-height:1.5; }
-.actions,.filters { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .actions,.filters { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .actions { justify-content:flex-end; }
-.filters { margin:16px 0; }
+  .filters { margin:16px 0; }
+  .filters--mobile { display:none; }
 .filters .search { width:340px; }
 .filters .el-select { width:200px; }
 .draft-count { margin-left:auto; color:var(--el-color-warning); }
@@ -132,10 +147,14 @@ header p { margin:0; color:var(--el-text-color-secondary); max-width:1000px; lin
 .dirty :deep(.el-input__wrapper) { box-shadow:0 0 0 1px var(--el-color-warning) inset; background:#fff9e8; }
 small { color:var(--el-text-color-secondary); font-size:12px; }
 footer { display:flex; justify-content:space-between; align-items:center; margin-top:14px; gap:12px; }
-.error { color:var(--el-color-danger); margin:6px 0; }
+  .error { color:var(--el-color-danger); margin:6px 0; }
+  .filter-count { position:absolute; top:-5px; right:-5px; display:grid; min-width:16px; height:16px; place-items:center; padding:0 3px; border-radius:9px; background:var(--el-color-danger); color:#fff; font-size:10px; line-height:1; }
+  .filters-advanced { grid-column:1/-1; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; padding-top:8px; border-top:1px solid var(--el-border-color-lighter); }
+  .filters-advanced>.el-select { width:100%; min-width:0; }
+  .filters-actions { grid-column:1/-1; display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; }
 .create-grid { display:grid; grid-template-columns:1fr 1fr; gap:0 24px; }
 .create-grid .el-select { width:100%; }
-@media(max-width:900px) {
+  @media(max-width:900px) {
   header { flex-direction:column; }
   .actions { justify-content:flex-start; }
   .filters .search { width:100%; }
@@ -144,4 +163,22 @@ footer { display:flex; justify-content:space-between; align-items:center; margin
   .create-grid { grid-template-columns:1fr; }
   .finance-ledger { padding:14px; }
 }
+  @media(max-width:767px) {
+    .finance-ledger { padding:10px; gap:8px; }
+    header h2 { font-size:18px; }
+    .finance-ledger>header { gap:8px; }
+    .finance-ledger>header>div:first-child p { display:none; }
+    .actions { width:100%; justify-content:flex-start; gap:6px; }
+    .actions .el-button { min-height:36px; }
+    .filters--desktop { display:none; }
+    .filters--mobile { display:grid; grid-template-columns:minmax(0,1fr) 40px 40px; align-items:center; gap:6px; margin:0; }
+    .filters--mobile>.el-input,.filters--mobile>.el-button { min-width:0; margin:0; }
+    .filters--mobile>.el-input :deep(.el-input__wrapper) { min-height:40px; }
+    .filters--mobile>.el-button { position:relative; width:40px; height:40px; min-height:40px; padding:0; }
+    .filters-advanced { grid-template-columns:1fr; gap:6px; }
+    .filters-actions { justify-content:flex-end; }
+    .summary { gap:6px; margin:4px 0; }
+    .summary>div { min-width:0; flex:1 1 145px; padding:9px 10px; }
+    .finance-ledger footer { margin-top:6px; }
+  }
 </style>

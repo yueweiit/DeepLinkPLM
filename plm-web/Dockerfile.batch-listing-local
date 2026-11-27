@@ -1,0 +1,2 @@
+FROM yuewei-plm-web:local-existing-mold-share-20261112
+COPY dist-batch-listing-20261112/ /usr/share/nginx/html/

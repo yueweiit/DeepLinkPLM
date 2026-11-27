@@ -16,6 +16,7 @@ public class PartnerListingService {
  @org.springframework.beans.factory.annotation.Autowired private PartnerCatalogStyles catalogStyles;
  @org.springframework.beans.factory.annotation.Autowired private PartnerProductService products;
  @org.springframework.beans.factory.annotation.Autowired private PartnerMaterialService materials;
+ @org.springframework.beans.factory.annotation.Autowired private PartnerCatalogPhoneResolver phoneResolver;
 
  public Map<String,Object> catalogOptions(long selectionId,String rowId){
   permissions.sales("listing");var snapshot=listingSnapshot(selectionId,rowId);var out=new LinkedHashMap<>(snapshot);out.put("photos",catalogPhotos(snapshot,null));
@@ -23,7 +24,7 @@ public class PartnerListingService {
  }
  /** Late colour choices become listing candidates only after an actual receipt; QC/signing stays mandatory. */
  private Map<String,Object> listingSnapshot(long selection,String rowId){
-  var snapshot=catalogStyles.selectedSnapshot(selection,rowId);if(!"at_receipt".equals(text(snapshot.get("receiptColorMode"))))return snapshot;
+  var snapshot=catalogStyles.listingSnapshot(selection,rowId,phoneResolver==null?null:phoneResolver.newScope());if(!"at_receipt".equals(text(snapshot.get("receiptColorMode"))))return snapshot;
   var pairs=new LinkedHashMap<String,Map<String,Object>>();var rows=store.jdbc.queryForList("select r.record_id,r.data::text from plm_partner_record r where r.kind='sample' and r.data->>'sourceType'='catalog' and r.data->>'selectionId'=? and r.data->>'selectionRowId'=? and r.data->>'catalogStyleId'=? and r.supplier_code=? and r.deleted_flag=0 and ("+store.access.visibleSqlClause("partner","r.record_id")+") order by r.record_id desc",Long.toString(selection),rowId,text(snapshot.get("catalogStyleId")),text(snapshot.get("supplierCode")));
   for(var row:rows){var sample=decode(store.json,row.get("data"));if(!PartnerCatalogSampleRules.configurationKey(snapshot).equals(text(sample.get("catalogConfigurationKey"))))continue;var received=map(map(sample.get("sourceSnapshot")).get("receivedPair"));long phone=number(received.get("phoneModelId")),color=number(received.get("colorId"));if(!PartnerSelectionService.scopeIds(snapshot.get("phoneModelIds")).contains(phone)||color<=0||phone!=number(sample.get("phoneModelId"))||color!=number(sample.get("colorId")))continue;String name=text(received.get("colorName"));if(name.isEmpty())continue;var pair=Map.<String,Object>of("phoneModelId",phone,"colorId",color,"colorName",name);pairs.putIfAbsent(phone+":"+color,pair);}
   var actual=new LinkedHashMap<>(snapshot);actual.put("selectedPairs",new ArrayList<>(pairs.values()));actual.put("receiptColorMode","selected_pairs");actual.remove("receiptColors");return actual;
@@ -85,6 +86,30 @@ public class PartnerListingService {
   return Map.of("content",rows,"page",page,"size",size,"totalElements",total,"totalPages",(total+size-1)/size,"externalListingConnected",false);
  }
  private static String phoneKeywordSql(String array){return "exists(select 1 from jsonb_array_elements(case when jsonb_typeof("+array+")='array' then "+array+" else '[]'::jsonb end) phone where coalesce(phone->>'modelName','') ilike ? or coalesce(phone->>'displayName','') ilike ? or coalesce(nullif(phone->>'phoneModelCode',''),phone->>'code','') ilike ?)";}
+
+ /** New CRM branch reuses the current signed-QC rules; it never changes a saved confirmation. */
+ public void validateCrmPushEvidence(Map<String,Object> listing,Map<String,Object> link,Map<String,Object> spec){
+  String supplier=text(listing.get("supplierCode"));long sid=number(link.get("specId"));
+  require(maps(spec.get("sources")).stream().anyMatch(s->supplier.equals(text(s.get("supplierCode")))),"经营规格已不再关联本次供方");
+  if(number(listing.get("catalogStyleId"))>0){
+   var current=listingSnapshot(number(listing.get("selectionId")),text(listing.get("selectionRowId")));
+   require(supplier.equals(text(current.get("supplierCode"))),"来源供方已变化");
+   var pair=PartnerCatalogSampleRules.pair(current,number(link.get("phoneModelId")),number(link.get("colorId")));
+   require(text(pair.get("catalogSpecKey")).equals(text(link.get("catalogSpecKey"))),"来源配置已变化，请重新确认上架依据");
+   require(text(spec.get("catalogSpecKey")).isEmpty()||text(spec.get("catalogSpecKey")).equals(text(link.get("catalogSpecKey"))),"经营规格配置已变化");
+   require(phoneIds(spec.get("phoneModelIds")).contains(number(link.get("phoneModelId")))&&maps(spec.get("supplierColors")).stream().anyMatch(c->supplier.equals(text(c.get("supplierCode")))&&number(c.get("colorId"))==number(link.get("colorId"))),"经营规格手机或供方原色已变化");
+   var evidence=catalogEvidence(current,pair);require(Boolean.TRUE.equals(evidence.get("eligible")),text(evidence.get("reason")));
+   require(number(evidence.get("inspectionId"))==number(link.get("inspectionId"))&&text(evidence.get("inspectionHash")).equals(text(link.get("inspectionHash"))),"质检依据已变化，请重新确认上架");
+  }else{
+   var rows=store.jdbc.queryForList("select record_id,data::text,status from plm_partner_record where kind='inspection' and data->>'sourceKind'='sample' and data->>'productId'=? and supplier_code=? and status in ('pending_signature','signed') and deleted_flag=0 order by record_id desc",text(listing.get("productId")),supplier);
+   Map<String,Object> latest=null;for(var row:rows){var qc=decode(store.json,row.get("data"));qc.put("status",row.get("status"));qc.put("id",row.get("record_id"));if(maps(map(qc.get("resultSnapshot")).get("scope")).stream().anyMatch(s->number(s.get("specId"))==sid)){latest=qc;break;}}
+   require(latest!=null&&PartnerQualityRules.passed(latest,sid)&&latest.containsKey("referenceSample"),"缺少最新已签字通过的样品质检及对照样品");
+   store.access.requirePartner(number(latest.get("id")));store.access.requirePartner(number(latest.get("parentId")));
+   require(number(latest.get("id"))==number(link.get("inspectionId"))&&text(latest.get("basisHash")).equals(text(link.get("inspectionHash"))),"质检依据已变化，请重新确认上架");
+   var scope=maps(map(latest.get("resultSnapshot")).get("scope")).stream().filter(s->number(s.get("specId"))==sid).findFirst().orElseThrow();
+   require(operations.qualityBasis(sid,supplier).equals(text(scope.get("qualityBasis"))),"经营规格质量依据已变化");
+  }
+ }
 
  @Transactional public Map<String,Object> confirm(long productId,Map<String,Object> input){
   permissions.sales("listing");var product=store.load(productId,"product",true);String request=required(input.get("requestId"),"提交标识");Long repeated=store.created("listing",request);if(repeated!=null)return operations.detail("listing",repeated);

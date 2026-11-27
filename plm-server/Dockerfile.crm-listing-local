@@ -1,0 +1,4 @@
+FROM yuewei-plm-server:local-existing-mold-share-20261112
+USER root
+COPY --chown=plm:plm target-crm-listing-patch6-20261112/app.jar /app/app.jar
+USER plm

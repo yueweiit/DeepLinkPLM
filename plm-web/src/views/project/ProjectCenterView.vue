@@ -3134,6 +3134,16 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
 </style>
 
 <style scoped>
+@media(max-width:767px){
+ .project-filter-bar{align-items:stretch;flex-direction:column;gap:6px}
+ .project-tag-bar{width:100%;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+ .project-tag-bar::-webkit-scrollbar{display:none}
+ .project-tag-bar__item{flex:0 0 auto;white-space:nowrap}
+ .project-filter-search{flex:1 1 auto;min-width:0}
+}
+</style>
+
+<style scoped>
 .production-project-page :deep(>header.page-panel){display:none}
 .production-project-page .sku-list-panel__head>div:first-child{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .production-project-page .sku-list-panel__head .section-title{margin:0;font-size:14px}
@@ -3150,4 +3160,14 @@ onMounted(()=>{void productionPermissions.ensure();void loadData()})
 
 <style scoped>
 .foundation-maintenance-toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;flex:none;padding:0 0 6px}.foundation-maintenance-toolbar .el-button{font-size:12px;height:28px}
+</style>
+
+<style scoped>
+@container(max-width:767px){
+ .production-project-page .project-filter-bar{align-items:stretch;flex-direction:column;flex-wrap:nowrap;gap:6px}
+ .production-project-page .project-tag-bar{width:100%;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+ .production-project-page .project-tag-bar::-webkit-scrollbar{display:none}
+ .production-project-page .project-tag-bar__item{flex:0 0 auto;white-space:nowrap}
+ .production-project-page .project-filter-search{flex:1 1 auto;min-width:0;width:100%;max-width:none}
+}
 </style>

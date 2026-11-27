@@ -6,6 +6,7 @@
 @use './tokens/breakpoints.scss';
 @use './element-overrides.scss';
 @use './compact-ledger.scss';
+@use './mobile.scss';
 
 * {
   box-sizing: border-box;

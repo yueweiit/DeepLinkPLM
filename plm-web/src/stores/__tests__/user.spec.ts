@@ -85,7 +85,14 @@ describe('one real Pinia session invalidation', () => {
     let rejectLogout!:(error:Error)=>void
     auth.logout.mockReturnValue(new Promise((_resolve,reject)=>{rejectLogout=reject}));const loggingOut=user.logout()
     auth.loginByPassword.mockResolvedValue(session('newest'));await user.login({username:'test',password:'test-only'})
-    rejectLogout(new Error('old logout expired'));await expect(loggingOut).rejects.toThrow()
+    rejectLogout(new Error('old logout expired'));await expect(loggingOut).resolves.toEqual({serverRevoked:false})
     expect(user.token).toBe('newest');expect(user.profile?.userName).toBe('newest');expect(localStorage.getItem('plm_token')).toBe('newest')
+  })
+  it('clears the local session before server logout and reports an unconfirmed revocation cleanly',async()=>{
+    const user=useUserStore();await user.login({username:'test',password:'test-only'})
+    auth.logout.mockRejectedValue(new Error('Network Error'))
+    await expect(user.logout()).resolves.toEqual({serverRevoked:false})
+    expect(auth.logout).toHaveBeenCalledWith('old')
+    expect(user.token).toBe('');expect(user.profile).toBeNull();expect(localStorage.getItem('plm_token')).toBeNull()
   })
 })

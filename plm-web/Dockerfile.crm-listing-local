@@ -1,0 +1,4 @@
+FROM yuewei-plm-web:local-existing-mold-share-20261112
+USER root
+RUN rm -rf /usr/share/nginx/html/*
+COPY dist-crm-listing-r2-20261112/ /usr/share/nginx/html/

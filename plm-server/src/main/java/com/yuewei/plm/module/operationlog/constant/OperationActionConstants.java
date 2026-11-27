@@ -4,6 +4,7 @@ public final class OperationActionConstants {
 
     public static final String AUTH_LOGIN = "AUTH_LOGIN";
     public static final String AUTH_LOGOUT = "AUTH_LOGOUT";
+    public static final String AUTH_PASSWORD_CHANGE = "AUTH_PASSWORD_CHANGE";
     public static final String TEST_WRITE = "TEST_WRITE";
     public static final String PRODUCT_CREATE = "PRODUCT_CREATE";
     public static final String PRODUCT_UPDATE = "PRODUCT_UPDATE";

@@ -3,6 +3,7 @@ import { t as uiText } from '@/locales'
 
 import { ArrowRight, Refresh, Search, Upload } from '@element-plus/icons-vue'
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useResizeObserver } from '@vueuse/core'
 import { getBomProductPage, getProductBomPage, getBomSkus, getBomWorkbench } from '@/api/modules/bom'
 import { useCachedRequest } from '@/composables/useCachedRequest'
 import type { BomLedgerRow, BomProductRow, BomSkuRow, BomWorkbench } from '@/types/bom'
@@ -14,6 +15,8 @@ defineOptions({ name: 'BomCenterView' })
 const masterDataStatus=ref<MasterDataStatus>(),legacy=ref(false)
 const catalogChecked=ref(false)
 const root = ref<HTMLElement>()
+const compact = ref(false)
+useResizeObserver(root, entries => { compact.value = (entries[0]?.contentRect.width || 1500) < 760 })
 const selectedProduct = ref<BomProductRow | null>(null)
 const productKeyword = ref('')
 const productPage = ref(1)
@@ -174,36 +177,72 @@ onUnmounted(() => clearTimeout(searchTimer))
 
     <el-alert v-if="error" type="error" :title="error" show-icon :closable="false" />
     <el-alert v-if="operationError" type="error" :title="operationError" show-icon :closable="false" />
-    <div v-if="!selectedProduct" class="table-shell">
-      <table>
-        <thead><tr><th>{{ uiText("产品编码") }}</th><th>{{ uiText("产品名称") }}</th><th>{{ uiText("正式 BOM 数量") }}</th><th>{{ uiText("最近更新时间") }}</th><th>{{ uiText("操作") }}</th></tr></thead>
-        <tbody><tr v-for="product in products" :key="product.productId">
-          <td><code>{{ product.productCode }}</code></td>
-          <td><el-button link type="primary" @click="openProduct(product)">{{ product.productName }}</el-button></td>
-          <td>{{ product.bomCount }}</td>
-          <td>{{ product.updatedAt ? product.updatedAt.slice(0, 16).replace('T', ' ') : '--' }}</td>
-          <td><el-button data-test="bom-product" link type="primary" @click="openProduct(product)">{{ uiText("查看 BOM") }}</el-button></td>
-        </tr></tbody>
-      </table>
-      <el-empty v-if="!products.length && !loading" :description='uiText("暂无匹配产品")' />
-    </div>
-    <div v-else class="table-shell">
-      <table>
-        <thead><tr><th>{{ uiText("BOM 编码") }}</th><th>{{ uiText("产品 / 型号") }}</th><th>{{ uiText("版本") }}</th><th>{{ uiText("路线数") }}</th><th>{{ uiText("关联 SKU") }}</th><th>{{ uiText("状态") }}</th><th>{{ uiText("来源") }}</th><th>{{ uiText("更新时间") }}</th><th>{{ uiText("操作") }}</th></tr></thead>
-        <tbody>
-          <tr v-for="row in filteredRows" :key="row.productBomId">
-            <td><code>{{ row.bomCode }}</code></td>
-            <td><strong>{{ row.productName }}</strong><small>{{ row.productCode }}{{ row.model ? ` · ${row.model}` : '' }}</small></td>
-            <td>{{ row.versionNo }}</td><td>{{ row.routeCount }}</td>
-            <td><el-button data-test="bom-skus" :loading="skuLoading === row.productBomId" link type="primary" @click="openSkus(row)">{{ row.skuCount }}{{ uiText(" 个关联 SKU") }}</el-button></td>
-            <td><el-tag size="small" effect="light">{{ row.status }}</el-tag></td><td>{{ row.sourceType }}</td>
-            <td>{{ row.updatedAt ? row.updatedAt.slice(0, 16).replace('T', ' ') : '--' }}</td>
-            <td class="row-actions"><el-button data-test="bom-detail" :loading="detailLoading === row.productBomId" link type="primary" @click="openDetail(row)">{{ uiText("详情") }}</el-button><el-button link :icon="ArrowRight" @click="goWorkbench(row)">{{ uiText("工作台") }}</el-button></td>
-          </tr>
-        </tbody>
-      </table>
-      <el-empty v-if="!filteredRows.length && !loading" :description='uiText("暂无正式 BOM")' />
-    </div>
+    <template v-if="!selectedProduct">
+      <div v-if="compact" class="bom-cards">
+        <article v-for="product in products" :key="product.productId" class="bom-card">
+          <h3>{{ product.productName }}</h3>
+          <code>{{ product.productCode }}</code>
+          <dl>
+            <div><dt>{{ uiText("正式 BOM 数量") }}</dt><dd>{{ product.bomCount }}</dd></div>
+            <div><dt>{{ uiText("最近更新时间") }}</dt><dd>{{ product.updatedAt ? product.updatedAt.slice(0, 16).replace('T', ' ') : '--' }}</dd></div>
+          </dl>
+          <footer><el-button data-test="bom-product" type="primary" plain @click="openProduct(product)">{{ uiText("查看 BOM") }}</el-button></footer>
+        </article>
+        <el-empty v-if="!products.length && !loading" :description='uiText("暂无匹配产品")' />
+      </div>
+      <div v-else class="table-shell">
+        <table>
+          <thead><tr><th>{{ uiText("产品编码") }}</th><th>{{ uiText("产品名称") }}</th><th>{{ uiText("正式 BOM 数量") }}</th><th>{{ uiText("最近更新时间") }}</th><th>{{ uiText("操作") }}</th></tr></thead>
+          <tbody><tr v-for="product in products" :key="product.productId">
+            <td><code>{{ product.productCode }}</code></td>
+            <td><el-button link type="primary" @click="openProduct(product)">{{ product.productName }}</el-button></td>
+            <td>{{ product.bomCount }}</td>
+            <td>{{ product.updatedAt ? product.updatedAt.slice(0, 16).replace('T', ' ') : '--' }}</td>
+            <td><el-button data-test="bom-product" link type="primary" @click="openProduct(product)">{{ uiText("查看 BOM") }}</el-button></td>
+          </tr></tbody>
+        </table>
+        <el-empty v-if="!products.length && !loading" :description='uiText("暂无匹配产品")' />
+      </div>
+    </template>
+    <template v-else>
+      <div v-if="compact" class="bom-cards">
+        <article v-for="row in filteredRows" :key="row.productBomId" class="bom-card">
+          <header><strong>{{ row.bomCode }}</strong><el-tag size="small" effect="light">{{ row.status }}</el-tag></header>
+          <h3>{{ row.productName }}</h3>
+          <p>{{ row.productCode }}{{ row.model ? ` · ${row.model}` : '' }}</p>
+          <dl>
+            <div><dt>{{ uiText("版本") }}</dt><dd>{{ row.versionNo }}</dd></div>
+            <div><dt>{{ uiText("路线数") }}</dt><dd>{{ row.routeCount }}</dd></div>
+            <div><dt>{{ uiText("关联 SKU") }}</dt><dd>{{ row.skuCount }}</dd></div>
+            <div><dt>{{ uiText("来源") }}</dt><dd>{{ row.sourceType }}</dd></div>
+            <div class="bom-card__wide"><dt>{{ uiText("更新时间") }}</dt><dd>{{ row.updatedAt ? row.updatedAt.slice(0, 16).replace('T', ' ') : '--' }}</dd></div>
+          </dl>
+          <footer>
+            <el-button data-test="bom-skus" :loading="skuLoading === row.productBomId" @click="openSkus(row)">{{ uiText("关联 SKU") }}</el-button>
+            <el-button data-test="bom-detail" type="primary" plain :loading="detailLoading === row.productBomId" @click="openDetail(row)">{{ uiText("详情") }}</el-button>
+            <el-button :icon="ArrowRight" :title='uiText("工作台")' :aria-label='uiText("工作台")' @click="goWorkbench(row)" />
+          </footer>
+        </article>
+        <el-empty v-if="!filteredRows.length && !loading" :description='uiText("暂无正式 BOM")' />
+      </div>
+      <div v-else class="table-shell">
+        <table>
+          <thead><tr><th>{{ uiText("BOM 编码") }}</th><th>{{ uiText("产品 / 型号") }}</th><th>{{ uiText("版本") }}</th><th>{{ uiText("路线数") }}</th><th>{{ uiText("关联 SKU") }}</th><th>{{ uiText("状态") }}</th><th>{{ uiText("来源") }}</th><th>{{ uiText("更新时间") }}</th><th>{{ uiText("操作") }}</th></tr></thead>
+          <tbody>
+            <tr v-for="row in filteredRows" :key="row.productBomId">
+              <td><code>{{ row.bomCode }}</code></td>
+              <td><strong>{{ row.productName }}</strong><small>{{ row.productCode }}{{ row.model ? ` · ${row.model}` : '' }}</small></td>
+              <td>{{ row.versionNo }}</td><td>{{ row.routeCount }}</td>
+              <td><el-button data-test="bom-skus" :loading="skuLoading === row.productBomId" link type="primary" @click="openSkus(row)">{{ row.skuCount }}{{ uiText(" 个关联 SKU") }}</el-button></td>
+              <td><el-tag size="small" effect="light">{{ row.status }}</el-tag></td><td>{{ row.sourceType }}</td>
+              <td>{{ row.updatedAt ? row.updatedAt.slice(0, 16).replace('T', ' ') : '--' }}</td>
+              <td class="row-actions"><el-button data-test="bom-detail" :loading="detailLoading === row.productBomId" link type="primary" @click="openDetail(row)">{{ uiText("详情") }}</el-button><el-button link :icon="ArrowRight" @click="goWorkbench(row)">{{ uiText("工作台") }}</el-button></td>
+            </tr>
+          </tbody>
+        </table>
+        <el-empty v-if="!filteredRows.length && !loading" :description='uiText("暂无正式 BOM")' />
+      </div>
+    </template>
 
     <el-pagination v-model:page-size="size" :current-page="page" :page-sizes="[20, 50, 100]"
       :total="total" layout="total, sizes, prev, pager, next, jumper" @current-change="changePage" />
@@ -211,7 +250,7 @@ onUnmounted(() => clearTimeout(searchTimer))
     <el-drawer v-model="detailVisible" :title="uiText('BOM 详情：{value0}',{value0:(detail?.bomCode || '')})" size="min(980px, 96vw)">
       <el-tabs v-if="detail" v-model="activeTab">
         <el-tab-pane :label='uiText("基本信息")' name="basic"><dl class="facts"><div><dt>{{ uiText("名称") }}</dt><dd>{{ detail.bomName }}</dd></div><div><dt>{{ uiText("版本") }}</dt><dd>{{ detail.versionNo }}</dd></div><div><dt>{{ uiText("状态") }}</dt><dd>{{ detail.status }}</dd></div><div><dt>{{ uiText("路线数") }}</dt><dd>{{ detail.routes.length }}</dd></div></dl></el-tab-pane>
-        <el-tab-pane :label='uiText("BOM 明细")' name="items"><div class="route-selector"><el-select v-model="selectedRouteId"><el-option v-for="route in detail.routes" :key="route.productBomRouteId" :label="route.routeName" :value="route.productBomRouteId" /></el-select></div><table class="inner-table"><thead><tr><th>{{ uiText("行号") }}</th><th>{{ uiText("物料编码") }}</th><th>{{ uiText("物料名称") }}</th><th>{{ uiText("用量") }}</th><th>{{ uiText("单位") }}</th><th>{{ uiText("损耗率") }}</th></tr></thead><tbody><tr v-for="item in selectedRoute?.items || []" :key="item.productBomItemId || item.lineNo"><td>{{ item.lineNo }}</td><td>{{ item.itemCode || '--' }}</td><td>{{ item.itemName }}</td><td>{{ item.quantity }}</td><td>{{ item.unit }}</td><td>{{ item.lossRate || 0 }}</td></tr></tbody></table></el-tab-pane>
+        <el-tab-pane :label='uiText("BOM 明细")' name="items"><div class="route-selector"><el-select v-model="selectedRouteId"><el-option v-for="route in detail.routes" :key="route.productBomRouteId" :label="route.routeName" :value="route.productBomRouteId" /></el-select></div><div class="table-shell inner-table-shell"><table class="inner-table"><thead><tr><th>{{ uiText("行号") }}</th><th>{{ uiText("物料编码") }}</th><th>{{ uiText("物料名称") }}</th><th>{{ uiText("用量") }}</th><th>{{ uiText("单位") }}</th><th>{{ uiText("损耗率") }}</th></tr></thead><tbody><tr v-for="item in selectedRoute?.items || []" :key="item.productBomItemId || item.lineNo"><td>{{ item.lineNo }}</td><td>{{ item.itemCode || '--' }}</td><td>{{ item.itemName }}</td><td>{{ item.quantity }}</td><td>{{ item.unit }}</td><td>{{ item.lossRate || 0 }}</td></tr></tbody></table></div></el-tab-pane>
         <el-tab-pane :label='uiText("工艺路线")' name="routes"><div class="route-detail" v-for="route in detail.routes" :key="route.routeCode"><div><strong>{{ route.routeName }}</strong><code>{{ route.routeCode }}</code></div><div class="tags"><el-tag v-for="color in route.colors" :key="color" size="small">{{ color }}</el-tag></div><span>{{ route.items.length }}{{ uiText(" 项物料") }}</span></div></el-tab-pane>
         <el-tab-pane :label='uiText("路线成本")' name="cost"><div v-if="selectedRoute?.costSnapshot" class="cost-grid"><div><span>{{ uiText("物料") }}</span><strong>{{ selectedRoute.costSnapshot.materialCost }}</strong></div><div><span>{{ uiText("损耗") }}</span><strong>{{ selectedRoute.costSnapshot.lossCost }}</strong></div><div><span>{{ uiText("工艺") }}</span><strong>{{ selectedRoute.costSnapshot.processCost }}</strong></div><div><span>{{ uiText("路线总成本") }}</span><strong>{{ selectedRoute.costSnapshot.currencyCode }} {{ selectedRoute.costSnapshot.totalCost }}</strong></div></div><el-empty v-else :description='uiText("当前路线尚无成本快照")' /></el-tab-pane>
         <el-tab-pane :label='uiText("版本记录")' name="versions"><el-empty :description='uiText("当前显示所选正式版本，其他版本请从主列表查看")' /></el-tab-pane>
@@ -219,7 +258,7 @@ onUnmounted(() => clearTimeout(searchTimer))
     </el-drawer>
 
     <el-dialog v-model="skuVisible" :title='uiText("关联 SKU")' width="min(860px, 94vw)">
-      <table class="inner-table"><thead><tr><th>{{ uiText("SKU 编码") }}</th><th>{{ uiText("产品") }}</th><th>{{ uiText("手机型号") }}</th><th>{{ uiText("颜色") }}</th><th>{{ uiText("状态") }}</th><th>{{ uiText("路线") }}</th></tr></thead><tbody><tr v-for="sku in pagedSkus" :key="sku.productId"><td><code>{{ sku.skuCode }}</code></td><td>{{ sku.productName }}</td><td>{{ sku.phoneModel }}</td><td>{{ sku.color }}</td><td>{{ sku.status }}</td><td>{{ sku.routeCode || uiText('暂无适用路线') }}</td></tr></tbody></table>
+      <div class="table-shell inner-table-shell"><table class="inner-table"><thead><tr><th>{{ uiText("SKU 编码") }}</th><th>{{ uiText("产品") }}</th><th>{{ uiText("手机型号") }}</th><th>{{ uiText("颜色") }}</th><th>{{ uiText("状态") }}</th><th>{{ uiText("路线") }}</th></tr></thead><tbody><tr v-for="sku in pagedSkus" :key="sku.productId"><td><code>{{ sku.skuCode }}</code></td><td>{{ sku.productName }}</td><td>{{ sku.phoneModel }}</td><td>{{ sku.color }}</td><td>{{ sku.status }}</td><td>{{ sku.routeCode || uiText('暂无适用路线') }}</td></tr></tbody></table></div>
       <el-pagination v-if="skus.length > skuPageSize" v-model:current-page="skuPage" :page-size="skuPageSize" :total="skus.length" layout="prev, pager, next" />
     </el-dialog>
     <HistoricalBomImportDialog v-model="historicalImportVisible" @committed="importCommitted" />
@@ -227,15 +266,28 @@ onUnmounted(() => clearTimeout(searchTimer))
 </template>
 
 <style scoped>
-.product-context { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.product-context { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; min-width: 0; }
 .bom-ledger > .el-pagination { margin-top: 14px; }
 .bom-ledger { padding: 20px; min-width: 0; }
-.page-head, .filter-bar, .page-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.page-head, .filter-bar, .page-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.page-actions { flex-wrap: wrap; }
 .page-head h2, .page-head p { margin: 0; }.page-head p, small, .filter-bar span { color: var(--plm-color-text-secondary); font-size: 12px; }
 .filter-bar { margin: 16px 0 10px; }.filter-bar :deep(.el-input) { max-width: 420px; }
-.table-shell { overflow-x: auto; border: 1px solid var(--el-border-color-lighter); border-radius: 6px; }
+.table-shell { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--el-border-color-lighter); border-radius: 6px; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; } th { background: var(--el-fill-color-lighter); text-align: left; font-weight: 600; } th, td { padding: 11px 12px; border-bottom: 1px solid var(--el-border-color-lighter); white-space: nowrap; } td strong, td small { display: block; } code { font-size: 12px; }.row-actions { min-width: 150px; }
+.bom-cards { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.bom-card { min-width: 0; padding: 12px; border: 1px solid var(--el-border-color-lighter); border-radius: 6px; background: var(--el-bg-color); }
+.bom-card header, .bom-card footer { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.bom-card h3 { margin: 8px 0 3px; font-size: 14px; overflow-wrap: anywhere; }
+.bom-card p { margin: 0; color: var(--el-text-color-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.bom-card dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+.bom-card dl > div { min-width: 0; }
+.bom-card dt { color: var(--el-text-color-secondary); font-size: 12px; }
+.bom-card dd { margin: 2px 0 0; overflow-wrap: anywhere; }
+.bom-card__wide { grid-column: 1 / -1; }
+.bom-card footer { align-items: center; justify-content: flex-start; }
+.bom-card footer .el-button { margin-left: 0; }
 .facts, .cost-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }.facts div, .cost-grid div { padding: 12px 0; border-bottom: 1px solid var(--el-border-color-lighter); }.facts dt, .cost-grid span { color: var(--plm-color-text-secondary); font-size: 12px; }.facts dd, .cost-grid strong { display: block; margin: 5px 0 0; }
-.route-selector { margin-bottom: 10px; }.route-detail { display: grid; grid-template-columns: 1.2fr 1fr 100px; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--el-border-color-lighter); }.route-detail div:first-child { display: grid; }.tags { display: flex; flex-wrap: wrap; gap: 4px; }.inner-table { margin-bottom: 12px; }
-@media (max-width: 760px) { .bom-ledger { padding: 12px; }.page-head, .filter-bar { align-items: flex-start; flex-direction: column; }.facts, .cost-grid { grid-template-columns: 1fr 1fr; }.route-detail { grid-template-columns: 1fr; } }
+.route-selector { margin-bottom: 10px; }.route-selector .el-select { width: 100%; max-width: 420px; }.route-detail { display: grid; grid-template-columns: 1.2fr 1fr 100px; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--el-border-color-lighter); }.route-detail div:first-child { display: grid; }.tags { display: flex; flex-wrap: wrap; gap: 4px; }.inner-table { margin-bottom: 12px; }.inner-table-shell { width: 100%; }
+@media (max-width: 760px) { .bom-ledger { padding: 12px; }.page-head { align-items: flex-start; flex-direction: column; }.page-actions { width: 100%; justify-content: flex-start; }.filter-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; margin: 8px 0; }.filter-bar :deep(.el-input) { width: 100%; max-width: none; min-width: 0; }.filter-bar span { white-space: nowrap; }.facts, .cost-grid { grid-template-columns: 1fr 1fr; }.route-detail { grid-template-columns: 1fr; } }
 </style>

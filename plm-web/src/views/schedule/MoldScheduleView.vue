@@ -2,12 +2,12 @@
 import { t as uiText } from '@/locales'
 
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
-import { useResizeObserver } from '@vueuse/core'
+import { useMediaQuery, useResizeObserver } from '@vueuse/core'
 import { moldBusinessStatusNames } from '@/api/modules/moldApplications'
 import type { MoldApplication } from '@/api/modules/moldApplications'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { MoreFilled } from '@element-plus/icons-vue'
+import { Filter, InfoFilled, MoreFilled } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import * as api from '@/api/modules/schedule'
 import type { ScheduleOptions, ScheduleQuery, ScheduleRow, ScheduleTask } from '@/api/modules/schedule'
@@ -28,7 +28,8 @@ import ScheduleTaskEditor from './components/ScheduleTaskEditor.vue'
 import MoldSheetSyncControls from './components/MoldSheetSyncControls.vue'
 defineOptions({ name: 'MoldScheduleView' })
 const user = useUserStore(), workspace = useCollaborationWorkspace(), router = useRouter(), route = useRoute(), drafts = workspace.drafts
-const options = ref<ScheduleOptions>(), error = ref(''), keyword = ref(''), productLineId = ref<number>(), status = ref(''), mineOnly = ref(false), overdueOnly = ref(false), page = ref(1), size = ref(50), group = ref(''), layer = ref('overview'), expanded = ref(false), saving = ref(false)
+const options = ref<ScheduleOptions>(), error = ref(''), keyword = ref(''), productLineId = ref<number>(), status = ref(''), mineOnly = ref(false), overdueOnly = ref(false), page = ref(1), size = ref(50), group = ref(''), layer = ref('overview'), expanded = ref(false), saving = ref(false), mobileFiltersExpanded = ref(false)
+const phoneLayout = useMediaQuery('(max-width: 767px)')
 const presentation = ref('table'), expandedParts = ref(new Set<number>())
 const tabFromRoute=()=>route.query.tab==='tasks'?'tasks':route.query.tab==='applications'?'applications':'sets'
 const canvas=ref<HTMLElement>(),containerWidth=ref(1500),scheduleTab=ref(tabFromRoute()),applicationStatus=ref('')
@@ -211,22 +212,23 @@ const display = (v: unknown) => v == null || v === '' ? '未填写' : String(v)
       <el-radio-group v-model="scheduleTab" size="small" class="schedule-tabs" :aria-label='uiText("开模进度范围")'><el-radio-button value="sets" data-test="schedule-sets-tab">{{ uiText("实物排程") }}<span v-if="scheduleTab==='sets'"> · {{total}}{{ uiText(" 套") }}</span></el-radio-button><el-radio-button value="applications" data-test="schedule-applications-tab">{{ uiText("申请进度") }}<span v-if="scheduleTab==='applications' && applicationRequest.hasCurrentData.value"> · {{applicationTotal}}{{ uiText(" 份") }}</span></el-radio-button><el-radio-button value="tasks" data-test="schedule-tasks-tab">{{ uiText("待办处理") }}<span v-if="scheduleTab==='tasks' && taskRequest.hasCurrentData.value"> · {{taskTotal}}{{ uiText(" 项") }}</span></el-radio-button></el-radio-group>
       <div class="actions heading-actions">
         <MoldSheetSyncControls v-if="options?.administrator && user.hasPermission('schedule:write')" :dirty="moduleDirtyCount>0" :fields="options.moldFields" @updated="refresh"/>
-        <el-popover placement="bottom-end" trigger="click" :width="370"><template #reference><el-button text size="small" :aria-label='uiText("排程填写说明")'>{{ uiText("填写说明") }}</el-button></template><div class="schedule-help"><p>{{ uiText("一行一套 PC＋TPU，点击单元格填写；支持 Excel 区域粘贴，修改后批量保存。黄色表示待保存，刷新不覆盖草稿。") }}</p><p>{{ uiText("制作周期按款式 12 / 13 / 14 自然日，加人工确认的假期与额外天数；运输 ") }}{{ options?.transportDays ?? 7 }}{{ uiText("、验收 ") }}{{ options?.acceptanceDays ?? 1 }}{{ uiText("、试模量产 ") }}{{ options?.productionDays ?? 3 }}{{ uiText(" 天仅作建议。点击日期旁的小标记查看依据并确认采用。") }}</p><p>{{ uiText("抵墨、到港、签收、到厂和验收分别记录；PC／TPU 均到厂且验收通过才完成交付。研发归档不终止交付任务。") }}</p></div></el-popover>
-        <el-button size="small" @click="expanded=!expanded">{{ expanded?uiText('退出宽屏'):uiText('宽屏录入') }}</el-button><el-button size="small" @click="refresh">{{ uiText("刷新") }}</el-button><el-button size="small" @click="router.push('/molds')">{{ uiText("模具台账") }}</el-button>
-        <el-dropdown trigger="click"><el-button size="small" :aria-label='uiText("排程更多操作")'>{{ uiText("更多") }}</el-button><template #dropdown><el-dropdown-menu><el-dropdown-item @click="api.downloadScheduleTemplate(query())">{{ uiText("下载本页模板（含 ID）") }}</el-dropdown-item><el-dropdown-item @click="openImport">{{ uiText("Excel 导入预览") }}</el-dropdown-item><el-dropdown-item v-if="options?.administrator" @click="remind">{{ uiText("生成逾期站内提醒") }}</el-dropdown-item></el-dropdown-menu></template></el-dropdown>
+        <el-popover placement="bottom-end" trigger="click" :width="370"><template #reference><el-button class="schedule-help-trigger" text size="small" :icon="InfoFilled" :aria-label='uiText("排程填写说明")' :title='uiText("填写说明")'>{{ uiText("填写说明") }}</el-button></template><div class="schedule-help"><p>{{ uiText("一行一套 PC＋TPU，点击单元格填写；支持 Excel 区域粘贴，修改后批量保存。黄色表示待保存，刷新不覆盖草稿。") }}</p><p>{{ uiText("制作周期按款式 12 / 13 / 14 自然日，加人工确认的假期与额外天数；运输 ") }}{{ options?.transportDays ?? 7 }}{{ uiText("、验收 ") }}{{ options?.acceptanceDays ?? 1 }}{{ uiText("、试模量产 ") }}{{ options?.productionDays ?? 3 }}{{ uiText(" 天仅作建议。点击日期旁的小标记查看依据并确认采用。") }}</p><p>{{ uiText("抵墨、到港、签收、到厂和验收分别记录；PC／TPU 均到厂且验收通过才完成交付。研发归档不终止交付任务。") }}</p></div></el-popover>
+        <el-button class="schedule-secondary-action" size="small" @click="expanded=!expanded">{{ expanded?uiText('退出宽屏'):uiText('宽屏录入') }}</el-button><el-button class="schedule-secondary-action" size="small" @click="refresh">{{ uiText("刷新") }}</el-button><el-button class="schedule-secondary-action" size="small" @click="router.push('/molds')">{{ uiText("模具台账") }}</el-button>
+        <el-dropdown class="schedule-more" trigger="click"><el-button class="schedule-more-trigger" size="small" :icon="MoreFilled" :aria-label='uiText("排程更多操作")' :title='uiText("更多操作")'>{{ uiText("更多") }}</el-button><template #dropdown><el-dropdown-menu><el-dropdown-item v-if="phoneLayout" @click="expanded=!expanded">{{ expanded?uiText('退出宽屏'):uiText('宽屏录入') }}</el-dropdown-item><el-dropdown-item v-if="phoneLayout" @click="refresh">{{ uiText("刷新") }}</el-dropdown-item><el-dropdown-item v-if="phoneLayout" @click="router.push('/molds')">{{ uiText("模具台账") }}</el-dropdown-item><el-dropdown-item @click="api.downloadScheduleTemplate(query())">{{ uiText("下载本页模板（含 ID）") }}</el-dropdown-item><el-dropdown-item @click="openImport">{{ uiText("Excel 导入预览") }}</el-dropdown-item><el-dropdown-item v-if="options?.administrator" @click="remind">{{ uiText("生成逾期站内提醒") }}</el-dropdown-item></el-dropdown-menu></template></el-dropdown>
       </div>
     </header>
     <section class="schedule-panel">
-      <div class="schedule-filters ledger-filters">
-        <el-input v-model="keyword" size="small" clearable :placeholder='uiText("搜索实物编号 / 款式 / 兼容型号 / 厂家")' />
-        <el-select v-model="productLineId" size="small" clearable :placeholder='uiText("全部产品线")'><el-option v-for="l in options?.productLines" :key="l.productLineId" :value="l.productLineId" :label="l.productName" /></el-select>
-        <el-select v-if="scheduleTab!=='applications'" v-model="status" size="small" clearable :placeholder='uiText("全部进度")'><el-option v-for="key in moldStatuses" :key="key" :value="key" :label="statusNames[key]" /><el-option v-if="scheduleTab==='sets'" value="market_ready" :label='uiText("已确认上市")' /></el-select>
-        <el-select v-if="scheduleTab==='sets' && presentation==='table'" v-model="group" size="small" clearable :placeholder='uiText("全部职责")'><el-option v-for="g in ['engineering','logistics','mexico']" :key="g" :value="g" :label="groupNames[g as keyof typeof groupNames]" /></el-select>
-        <el-select v-if="scheduleTab==='applications'" v-model="applicationStatus" clearable size="small" :placeholder='uiText("全部申请状态")'><el-option v-for="(label,key) in progressStatusOptions" :key="key" :value="key" :label="label"/></el-select>
-        <el-select v-if="scheduleTab==='tasks'" v-model="taskCategory" size="small" :aria-label='uiText("待办类别")'><el-option value="all" :label='uiText("全部待办类别")' /><el-option value="milestone" :label='uiText("进度节点")' /><el-option value="missing" :label='uiText("资料补填")' /><el-option value="review" :label='uiText("计划核对")' /></el-select>
-        <el-checkbox v-if="scheduleTab==='sets'" v-model="mineOnly" size="small">{{ uiText("待我填写") }}</el-checkbox>
-        <template v-if="scheduleTab==='tasks'"><el-checkbox v-if="options?.administrator" v-model="taskMineOnly" size="small">{{ uiText("仅本人待办") }}</el-checkbox><span v-else class="hint">{{ uiText("本人及职责分配任务") }}</span></template>
-        <el-checkbox v-if="scheduleTab!=='applications'" v-model="overdueOnly" size="small">{{ uiText("仅逾期") }}</el-checkbox>
+      <div class="schedule-filters ledger-filters" :class="{'mobile-filters-open':mobileFiltersExpanded}">
+        <el-input class="schedule-filter-keyword" v-model="keyword" size="small" clearable :placeholder='uiText("搜索实物编号 / 款式 / 兼容型号 / 厂家")' />
+        <el-button class="schedule-filter-toggle" :icon="Filter" :aria-label='uiText("更多筛选")' :title='uiText("更多筛选")' :aria-expanded="mobileFiltersExpanded" @click="mobileFiltersExpanded=!mobileFiltersExpanded" />
+        <el-select class="schedule-filter-secondary" v-model="productLineId" size="small" clearable :placeholder='uiText("全部产品线")'><el-option v-for="l in options?.productLines" :key="l.productLineId" :value="l.productLineId" :label="l.productName" /></el-select>
+        <el-select class="schedule-filter-secondary" v-if="scheduleTab!=='applications'" v-model="status" size="small" clearable :placeholder='uiText("全部进度")'><el-option v-for="key in moldStatuses" :key="key" :value="key" :label="statusNames[key]" /><el-option v-if="scheduleTab==='sets'" value="market_ready" :label='uiText("已确认上市")' /></el-select>
+        <el-select class="schedule-filter-secondary" v-if="scheduleTab==='sets' && presentation==='table'" v-model="group" size="small" clearable :placeholder='uiText("全部职责")'><el-option v-for="g in ['engineering','logistics','mexico']" :key="g" :value="g" :label="groupNames[g as keyof typeof groupNames]" /></el-select>
+        <el-select class="schedule-filter-secondary" v-if="scheduleTab==='applications'" v-model="applicationStatus" clearable size="small" :placeholder='uiText("全部申请状态")'><el-option v-for="(label,key) in progressStatusOptions" :key="key" :value="key" :label="label"/></el-select>
+        <el-select class="schedule-filter-secondary" v-if="scheduleTab==='tasks'" v-model="taskCategory" size="small" :aria-label='uiText("待办类别")'><el-option value="all" :label='uiText("全部待办类别")' /><el-option value="milestone" :label='uiText("进度节点")' /><el-option value="missing" :label='uiText("资料补填")' /><el-option value="review" :label='uiText("计划核对")' /></el-select>
+        <el-checkbox class="schedule-filter-secondary" v-if="scheduleTab==='sets'" v-model="mineOnly" size="small">{{ uiText("待我填写") }}</el-checkbox>
+        <template v-if="scheduleTab==='tasks'"><el-checkbox class="schedule-filter-secondary" v-if="options?.administrator" v-model="taskMineOnly" size="small">{{ uiText("仅本人待办") }}</el-checkbox><span v-else class="hint schedule-filter-secondary">{{ uiText("本人及职责分配任务") }}</span></template>
+        <el-checkbox class="schedule-filter-secondary" v-if="scheduleTab!=='applications'" v-model="overdueOnly" size="small">{{ uiText("仅逾期") }}</el-checkbox>
         <span class="record-count">{{scheduleTab==='tasks'?uiText('共 {value0} 项',{value0:(taskTotal)}):scheduleTab==='sets'?uiText('共 {value0} 套',{value0:(total)}):uiText('共 {value0} 份',{value0:(applicationTotal)})}}</span>
       </div>
       <el-alert v-if="error || activeRequest.error.value" :title="error || activeRequest.error.value" type="error" :closable="false" />
@@ -322,4 +324,33 @@ const display = (v: unknown) => v == null || v === '' ? '未填写' : String(v)
 :global(.mold-task-drawer .el-drawer__header){margin-bottom:0;padding:20px 24px;border-bottom:1px solid #e8edf3;font-size:16px;color:#263b53}
 :global(.mold-task-drawer .el-drawer__body){padding:24px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
 @media(max-width:650px){:global(.mold-task-drawer .el-drawer__header){padding:16px}:global(.mold-task-drawer .el-drawer__body){padding:16px}}
+</style>
+
+<style scoped>
+.schedule-filter-toggle{display:none}
+@media(max-width:767px){
+  .schedule-heading{display:flex;flex-direction:column;align-items:stretch;gap:4px}
+  .schedule-heading>h2{display:none}
+  .schedule-heading>.el-radio-group{display:flex;flex:0 0 auto;width:100%;max-width:100%;flex-wrap:nowrap;overflow-x:auto;white-space:nowrap;scrollbar-width:none}
+  .schedule-heading>.el-radio-group::-webkit-scrollbar,.schedule-heading .heading-actions::-webkit-scrollbar{display:none}
+  .schedule-heading>.el-radio-group :deep(.el-radio-button){flex:none}
+  .schedule-heading>.el-radio-group :deep(.el-radio-button__inner){white-space:nowrap}
+  .schedule-heading .heading-actions{width:100%;min-width:0;margin:0;flex-wrap:nowrap;gap:4px;overflow-x:auto;scrollbar-width:none}
+  .schedule-heading .heading-actions>:deep(.sheet-sync-controls),.schedule-heading .heading-actions>:deep(.el-button),.schedule-heading .heading-actions>:deep(.el-dropdown){flex:none}
+  .schedule-heading .heading-actions>.schedule-secondary-action{display:none}
+  .schedule-help-trigger{width:40px;height:40px;min-height:40px;padding:0}
+  .schedule-help-trigger :deep(.el-icon+span),.schedule-more-trigger :deep(.el-icon+span){display:none}
+  .schedule-more-trigger{width:40px;height:40px;min-height:40px;padding:0}
+  .schedule-more{height:40px;flex:none}
+  .schedule-filters{display:grid;grid-template-columns:minmax(0,1fr) 40px;align-items:center;gap:6px}
+  .schedule-filters{grid-template-columns:minmax(0,1fr) 40px max-content}
+  .schedule-filters>.schedule-filter-keyword{grid-column:1;min-width:0;width:100%;max-width:none}
+  .schedule-filters>.schedule-filter-toggle{display:inline-flex;grid-column:2;width:40px;height:40px;min-height:40px;padding:0}
+  .schedule-filters>.schedule-filter-secondary{display:none}
+  .schedule-filters.mobile-filters-open>.schedule-filter-secondary{display:block;grid-column:1/-1;width:100%;min-width:0}
+  .schedule-filters.mobile-filters-open>.schedule-filter-secondary.el-select :deep(.el-select__wrapper){width:100%;min-width:0}
+  .schedule-filters.mobile-filters-open>.schedule-filter-secondary.el-checkbox{display:flex;align-items:center}
+  .schedule-filters>.record-count{grid-column:3;margin:0;white-space:nowrap;font-size:11px}
+  .schedule-filters.mobile-filters-open>.record-count{grid-column:1/-1;justify-self:start}
+}
 </style>

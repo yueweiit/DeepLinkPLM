@@ -32,6 +32,14 @@ public class DevelopmentWorkflowStore {
     public boolean repeated(long id,String request) {
         return request!=null&&!request.isBlank()&&Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from plm_product_development_event where product_id=? and request_id=?)",Boolean.class,id,request));
     }
+    public boolean repeatedIdentity(long id,String request,String action,Map<String,Object> data){
+        if(request==null||!request.matches("[A-Za-z0-9:_-]{8,128}"))throw invalid("请提供有效请求ID");
+        var rows=jdbc.queryForList("select kind,data::text from plm_product_development_event where product_id=? and request_id=?",id,request);
+        if(rows.isEmpty())return false;
+        var previous=map(read(rows.get(0).get("data")));
+        if(!action.equals(rows.get(0).get("kind"))||!data.equals(map(previous.get("requestPayload"))))throw invalid("请求ID已对应另一份编码申请，请刷新后重新提交");
+        return true;
+    }
     public long event(long id,String kind,Object data,String request,String actor) {
         return jdbc.queryForObject("insert into plm_product_development_event(product_id,kind,data,request_id,created_by) values(?,?,?::jsonb,?,?) returning event_id",Long.class,id,kind,encode(data),request,actor);
     }

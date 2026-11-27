@@ -77,6 +77,7 @@ vi.mock("@/api/modules/productResearch", async (original) => ({
   deleteProductResearchDraft: vi.fn(),
   researchAction: vi.fn(),
   getResearchOwnerOptions: vi.fn(),
+  getProductCodeAvailability: vi.fn(),
 }));
 vi.mock("@/api/modules/project", () => ({
   getProjectTimeline: vi.fn(),
@@ -289,6 +290,75 @@ async function launch(d=current(),shown=d.currentStepNo){
 const nextButton=(step:number)=>step===1?'确认立项，开始画图':step===8?'完成本项目发模':`完成本步，进入${PRODUCT_RESEARCH_STAGES[step]!.name}`;
 const fields=(name:string)=>wrapper.findAll('.el-form-item').find(f=>f.find('.el-form-item__label').exists()&&f.get('.el-form-item__label').text()===name)!;
 const missing=(target:string,title:string)=>({code:target.toUpperCase(),title,target,complete:false,message:`请补齐${title}`});
+
+describe('project-scoped proposed product identity',()=>{
+ const managed=(step=2)=>({...current(step),canMaintainProductIdentity:true,productIdentity:{mode:'reserved_v1',state:'unassigned',productCode:'',specificCode:'',moldPrefix:'',pinned:false}});
+ const dialog=()=>wrapper.get('.test-dialog[data-title="拟定产品编码"]');
+ it('shows the proposal entry for an eligible existing project and opens its input without creating a new project',async()=>{
+  const d=managed();d.productIdentity.mode='legacy';await launch(d);
+  const section=wrapper.get('[data-readiness-target="product-identity"]');expect(section.text()).toContain('待拟定');
+  await button('填写／维护拟定编码',section).trigger('click');await flushPromises();
+  expect(dialog().get('input').element).toHaveProperty('value','');
+  await dialog().get('input').setValue('NAB');
+  await button('检查是否可用',dialog()).trigger('click');await flushPromises();
+  expect(researchApi.getProductCodeAvailability).toHaveBeenCalledWith(42,'NAB');expect(researchAction).not.toHaveBeenCalled();
+ });
+ it('saves a normalized proposal separately, retaining the retry request and unsaved design input',async()=>{
+  const d=managed();await launch(d);
+  const design=wrapper.findAllComponents(ElInput).find(input=>input.props('type')==='textarea');
+  if(design)await design.setValue('尚未保存的设计输入');
+  await button('填写／维护拟定编码').trigger('click');await flushPromises();
+  await dialog().get('input').setValue('nab');
+  vi.mocked(researchAction).mockRejectedValueOnce(new Error('网络响应丢失'));
+  await button('保存并占号',dialog()).trigger('click');await flushPromises();
+  const first=vi.mocked(researchAction).mock.calls.at(-1)!;
+  expect(first).toEqual([42,'propose_product_code',2,{productCode:'NAB',reason:''},expect.any(String)]);
+  const updated={...d,workflow:{...d.workflow,version:3},productIdentity:{...d.productIdentity,state:'proposed',productCode:'NAB',specificCode:'AB',moldPrefix:'MAB'}};
+  vi.mocked(researchAction).mockResolvedValueOnce(updated);
+  await button('保存并占号',dialog()).trigger('click');await flushPromises();
+  expect(vi.mocked(researchAction).mock.calls.at(-1)).toEqual(first);
+  expect(wrapper.text()).toContain('NAB');expect(saveResearchDesignDraft).not.toHaveBeenCalled();
+  if(design)expect(design.props('modelValue')).toBe('尚未保存的设计输入');
+  expect(confirmTimelineNode).not.toHaveBeenCalled();
+  // A later intentional proposal must not replay the already successful command.
+  await button('填写／维护拟定编码').trigger('click');await flushPromises();
+  await button('保存并占号',dialog()).trigger('click');await flushPromises();
+  const later=vi.mocked(researchAction).mock.calls.at(-1)!;
+  expect(later[3]).toEqual(first[3]);expect(later[4]).not.toBe(first[4]);
+ });
+ it('starts a new proposal request after the login changes, even for the same failed payload',async()=>{
+  await launch(managed());await button('填写／维护拟定编码').trigger('click');await flushPromises();
+  await dialog().get('input').setValue('NAB');
+  vi.mocked(researchAction).mockRejectedValue(new Error('网络响应丢失'));
+  await button('保存并占号',dialog()).trigger('click');await flushPromises();
+  const first=vi.mocked(researchAction).mock.calls.at(-1)!;
+  useUserStore().token='replacement-login';await flushPromises();
+  await button('填写／维护拟定编码').trigger('click');await flushPromises();
+  await dialog().get('input').setValue('NAB');
+  await button('保存并占号',dialog()).trigger('click');await flushPromises();
+  const next=vi.mocked(researchAction).mock.calls.at(-1)!;
+  expect(next[3]).toEqual(first[3]);expect(next[4]).not.toBe(first[4]);
+ });
+ it('discards an availability response when the input changes while checking',async()=>{
+  await launch(managed());await button('填写／维护拟定编码').trigger('click');await flushPromises();
+  await dialog().get('input').setValue('NAB');
+  let finish!:(value:any)=>void;
+  vi.mocked(researchApi.getProductCodeAvailability).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+  void button('检查是否可用',dialog()).trigger('click');await flushPromises();
+  // The form is disabled during the request; model changes can still come from a context refresh.
+  dialog().getComponent(ElInput).vm.$emit('update:modelValue','NAC');await flushPromises();
+  finish({productCode:'NAB',moldPrefix:'MAB',available:true});await flushPromises();
+  expect(dialog().text()).not.toContain('当前可用，保存时将再次校验');expect(researchAction).not.toHaveBeenCalled();
+ });
+ it('requires a reason to reactivate a held original code and blocks premature publication',async()=>{
+  const d=managed(8);d.productIdentity={...d.productIdentity,state:'invalid_held',productCode:'NAB',specificCode:'AB',moldPrefix:'MAB',pinned:true};d.workflow.finalized={};d.canPublish=true;
+  await launch(d);expect(wrapper.text()).toContain('请先完成本项目发模并确认编码');expect(wrapper.findAll('button').some(b=>b.text()==='形成正式包')).toBe(false);
+  await button('重新确认原拟定码').trigger('click');await flushPromises();expect(dialog().get('input').attributes('readonly')).toBeDefined();
+  await button('重新确认原码',dialog()).trigger('click');await flushPromises();expect(researchAction).not.toHaveBeenCalled();
+  await dialog().get('textarea').setValue('恢复原工程方案');await button('重新确认原码',dialog()).trigger('click');await flushPromises();
+  expect(researchAction).toHaveBeenCalledWith(42,'reconfirm_product_code',2,{productCode:'NAB',reason:'恢复原工程方案'},expect.any(String));
+ });
+});
 
 describe('whole-page development stages and current product name',()=>{
  it('uses one page scroll layout across all eight stages and keeps ordinary project lists unchanged',async()=>{

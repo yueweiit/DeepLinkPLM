@@ -6,7 +6,7 @@ defineProps<{
 </script>
 
 <template>
-  <section class="page-stack">
+  <section class="page-stack page-container">
     <header class="page-panel">
       <div class="page-panel-header">
         <div>

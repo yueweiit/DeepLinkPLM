@@ -3,6 +3,7 @@ package com.yuewei.plm.module.auth.controller;
 import com.yuewei.plm.common.constant.ApiConstants;
 import com.yuewei.plm.common.util.RequestIdUtil;
 import com.yuewei.plm.common.vo.ResponseVO;
+import com.yuewei.plm.module.auth.dto.ChangePasswordDTO;
 import com.yuewei.plm.module.auth.dto.LoginDTO;
 import com.yuewei.plm.module.auth.service.AuthService;
 import com.yuewei.plm.module.auth.service.UserLanguageService;
@@ -32,6 +33,12 @@ public class AuthController {
     public ResponseVO<UserLanguageService.Result> language(@Valid @RequestBody UserLanguageService.Input input,
                                                           HttpServletRequest request) {
         return ResponseVO.success(languages.save(null, input, request), RequestIdUtil.getRequestId(request), OffsetDateTime.now());
+    }
+
+    @PatchMapping("/password")
+    public ResponseVO<Void> password(@Valid @RequestBody ChangePasswordDTO input, HttpServletRequest request) {
+        authService.changePassword(input, request);
+        return ResponseVO.success(RequestIdUtil.getRequestId(request), OffsetDateTime.now());
     }
 
     @PostMapping("/login")

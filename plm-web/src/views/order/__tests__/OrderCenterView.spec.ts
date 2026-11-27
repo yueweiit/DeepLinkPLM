@@ -22,4 +22,18 @@ describe('OrderCenterView', () => {
     expect(text.indexOf('订单号')).toBeLessThan(text.indexOf('手机型号'))
     expect(text).toContain('DT-001'); expect(text).toContain('iPhone 18'); expect(text).toContain('--')
   })
+
+  it('uses readable order cards at phone widths', async () => {
+    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn()
+    }))
+    const wrapper = mount(OrderCenterView, { global: { plugins: [ElementPlus] } }); await flushPromises()
+    expect(wrapper.findAll('.order-card')).toHaveLength(2)
+    expect(wrapper.text()).toContain('DT-001')
+    expect(wrapper.text()).toContain('iPhone 18')
+    expect(wrapper.find('.el-table').exists()).toBe(false)
+    vi.unstubAllGlobals()
+  })
 })

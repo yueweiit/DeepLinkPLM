@@ -4,7 +4,7 @@ import { computed, onScopeDispose, ref } from 'vue'
 import { getProfileByToken, loginByPassword, loginByDingTalkCode, logout as logoutApi, saveOwnLanguage } from '@/api/modules/auth'
 import { normalizeLanguage, setLanguage, type Language } from '@/locales/language'
 import type { UserProfile } from '@/types/common'
-import { registerSessionInvalidation } from '@/api/request'
+import { clearSessionExpiry, registerSessionInvalidation, setSessionExpiry, SESSION_EXPIRY_STORAGE_KEY } from '@/api/request'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref(localStorage.getItem('plm_token') || '')
@@ -15,19 +15,30 @@ export const useUserStore = defineStore('user', () => {
 
   function clearSession(expectedToken?: string | null) {
     if (expectedToken !== undefined && token.value !== (expectedToken || '')) return
+    const storedToken = localStorage.getItem('plm_token')
+    if (expectedToken && storedToken && storedToken !== expectedToken) return
     token.value = ''
     profile.value = null
     permissions.value = []
-    localStorage.removeItem('plm_token')
+    if (!expectedToken || !storedToken || storedToken === expectedToken) {
+      clearSessionExpiry(expectedToken)
+      localStorage.removeItem('plm_token')
+    }
   }
-  onScopeDispose(registerSessionInvalidation(clearSession))
+  const unregisterSessionInvalidation = registerSessionInvalidation(clearSession)
+  onScopeDispose(() => {
+    unregisterSessionInvalidation()
+    clearSessionExpiry(token.value)
+  })
 
-  function setSession(payload: { token: string; profile: UserProfile; permissions: string[] }) {
+  function setSession(payload: { token: string; profile: UserProfile; permissions: string[]; expiresInSeconds?: number }) {
     token.value = payload.token
     profile.value = payload.profile
     permissions.value = payload.permissions
     setLanguage(normalizeLanguage(payload.profile.preferredLanguage))
     localStorage.setItem('plm_token', payload.token)
+    const expiresInSeconds = payload.expiresInSeconds || 24 * 60 * 60
+    setSessionExpiry(payload.token, Date.now() + expiresInSeconds * 1000)
   }
 
   async function login(payload: { username: string; password: string }) {
@@ -54,16 +65,20 @@ export const useUserStore = defineStore('user', () => {
     profile.value = session.profile
     permissions.value = session.permissions
     setLanguage(normalizeLanguage(session.profile.preferredLanguage))
+    if (!localStorage.getItem(SESSION_EXPIRY_STORAGE_KEY)) setSessionExpiry(restoringToken, Date.now() + 24 * 60 * 60 * 1000)
   }
 
-  async function logout() {
+  async function logout(): Promise<{ serverRevoked: boolean }> {
     const loggingOutToken = token.value
+    clearSession(loggingOutToken)
+    if (!loggingOutToken) return { serverRevoked: true }
     try {
-      if (token.value) {
-        await logoutApi()
-      }
-    } finally {
-      clearSession(loggingOutToken)
+      await logoutApi(loggingOutToken)
+      return { serverRevoked: true }
+    } catch (error) {
+      const failure = error as { response?: { status?: number; data?: { code?: number } } }
+      if (failure.response?.status === 401 || failure.response?.data?.code === 40101) return { serverRevoked: true }
+      return { serverRevoked: false }
     }
   }
 

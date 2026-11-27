@@ -46,13 +46,16 @@ public class SimpleTokenAuthenticationFilter extends OncePerRequestFilter {
 
         try {
             String token = parseBearerToken(request.getHeader("Authorization"));
-            CurrentUser user = tokenSessionService.getCurrentUser(token).orElse(null);
-            if (user == null) {
+            boolean sessionCheckOnly = "true".equalsIgnoreCase(request.getHeader("X-PLM-Session-Check"));
+            TokenSessionService.Session session = tokenSessionService.getSession(token, !sessionCheckOnly).orElse(null);
+            if (session == null) {
                 // M1 直接在过滤器返回统一 JSON，避免 Spring Security 默认跳转或 HTML 错误页影响 Apifox 验收。
                 writeUnauthorized(response, request);
                 return;
             }
 
+            CurrentUser user = session.user();
+            response.setHeader("X-PLM-Session-Expires-At", Long.toString(session.expiresAt().toEpochMilli()));
             CurrentUserContext.set(user);
             UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                 user,

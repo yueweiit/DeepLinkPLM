@@ -5,10 +5,11 @@ export interface MoldFile { sourceAttachmentId?:number|null;versionNo?:string; a
 export interface MoldActivity { activityId:number; type:string; occurredAt:string|null; actorId:string|null; actorName:string|null; taskId:string|null; payload:Record<string,string> }
 export type MoldBusinessStatus = 'draft'|'submitting'|'submission_unknown'|'awaiting_approval'|'approved'|'rejected'|'withdrawn'|'terminated'|'approval_unknown'
 export const moldBusinessStatusNames:Record<MoldBusinessStatus,string>={draft:'草稿',submitting:'提交中',submission_unknown:'提交待核对',awaiting_approval:'待 Tiffany 审核',approved:'Tiffany 已同意',rejected:'已拒绝',withdrawn:'已撤回',terminated:'已终止',approval_unknown:'审批待核对'}
-export type MoldExecutionIntent='new'|'new_set'|'reuse'
-export type HoleType='large'|'precision'|'other'
-export interface EngineeringSpecification {key:string;holeType:HoleType|'';structureDescription:string;phoneModelIds:number[];manufacturingRelationId?:number;manufacturingRelationVersion?:number}
-export interface EngineeringPlan {handling:'pending'|'new'|'new_set'|'reuse';specifications:EngineeringSpecification[];codePhoneModelId?:number}
+export type MoldExecutionIntent='new'|'new_set'|'reuse'|'shared_existing'
+export type HoleType='large'|'precision'|'mixed'|'other'
+export interface MoldSharingSelection {referencePhoneModelId:number;mappings:{materialCode:string;mappingId:number;version:number}[]}
+export interface EngineeringSpecification {key:string;holeType:HoleType|'';structureDescription:string;phoneModelIds:number[];manufacturingRelationId?:number;manufacturingRelationVersion?:number;moldSharing?:MoldSharingSelection}
+export interface EngineeringPlan {handling:'pending'|'new'|'new_set'|'reuse'|'shared_existing';specifications:EngineeringSpecification[];codePhoneModelId?:number;codeRuleVersion?:2;identityMode?:'mold_only'}
 /** Server-derived policy from the real product and persisted application provenance. */
 export interface MoldSubmissionPolicy {mode:'research'|'model';requiresCodes:boolean;requiresStandardPhone:boolean;requiresTipoMapping:boolean;allowedTipos:string[];filingMissing:string[]}
 export interface MoldTargetOptions{projects:{projectId:number;productName:string}[];items:{itemId:number;moldName:string;compatibleModels:string}[];existingApplications?:{applicationId:number;approvalNo?:string|null;status:string;businessStatus?:MoldBusinessStatus;executionIntent:MoldExecutionIntent}[]}
@@ -16,7 +17,7 @@ export interface MoldDraftInput {form:Record<string,string|null>;productLineId:n
 export interface StartMoldApplication {phoneModelId:number;sourceModelKey?:string;sourceKind?:string;sourceId?:number;productLineId?:number|null;executionIntent?:'new'|'new_set';targetItemId?:number|null;targetProjectId?:number|null;executionReason?:string;requestId?:string;newApplication?:boolean}
 export interface MoldHistoricalAssociation {associationOnly:true;reason:string;actorId:number;actorName:string;associatedAt:string;before:Record<string,number|null>;after:Record<string,number|null>}
 export interface MoldResearchSource {
-  projectId:number;productName:string;productCode:string;phoneModelId:number|null;phoneModelName:string|null;phoneModelIds?:number[];missingFields?:string[];canMaintainProductIdentity?:boolean;currentStepNo?:number;productSpecificCode?:string|null
+  productIdentity?:import('./productResearch').ProductIdentity;projectId:number;productName:string;productCode:string;phoneModelId:number|null;phoneModelName:string|null;phoneModelIds?:number[];missingFields?:string[];canMaintainProductIdentity?:boolean;currentStepNo?:number;productSpecificCode?:string|null
   ownerUserId?:number|null;ownerName?:string|null;requirements?:string|null;workflowVersion:number;capturedAt:string
   restricted?:boolean;supplierPlanConfirmed?:boolean;suppliersRestricted?:boolean;referencesRestricted?:boolean
   suppliers:{role:string;mode:string;supplierId?:number;supplierCode?:string;supplierName?:string;internalName?:string;scope?:string;basis?:string;reason?:string}[]
@@ -43,13 +44,14 @@ export interface MoldApplication {
   provisioningStatus?:'not_requested'|'pending'|'ready'|'blocked';provisioningError?:string|null;executionStatus?:'pending'|'active'|'paused'|'terminated'
   authorization?:{approverUserId:string;approverName:string;taskId?:string|null;activityId?:string|null;approvedAt?:string|null}|null
   executionException?:{state:string;reason:string;key:string}|null
-  executionResolution?:{action?:string;reason?:string;actorName?:string;resolvedAt?:string;historicalAssociation?:MoldHistoricalAssociation}|null;historicalAssociation?:MoldHistoricalAssociation;updatedAt?:string;progressStatus?:MoldBusinessStatus
+  executionResolution?:{action?:string;reason?:string;actorName?:string;resolvedAt?:string;historicalAssociation?:MoldHistoricalAssociation;sharedMoldMappingStatus?:string;sharedMoldMappings?:{mappingCode:string;primaryCode:string;phoneModelId:number;materialCode:string;moldSetId:number}[]}|null;historicalAssociation?:MoldHistoricalAssociation;updatedAt?:string;progressStatus?:MoldBusinessStatus
   applicationLinks?:{applicationId:number;phoneModelId?:number|null;projectId:number|null;itemId:number|null;moldSetId:number|null};alreadyExists?:boolean
   approvalGranted:boolean; originatorName:string|null; departmentName:string|null; sourceCreatedAt:string|null; sourceFinishedAt:string|null
   productLineId:number|null; phoneCodeItemId:number|null; projectId:number|null; itemId:number|null; moldSetId:number|null
   lastError:string|null; createdAt:string; activities?:MoldActivity[]; files?:MoldFile[]; previousApplicationId?:number|null
   processCode?:string;submissionProcessCode?:string;processName?:string;processMigrationRequired?:boolean;submissionControls?:MoldControl[]
   submissionPolicy?:MoldSubmissionPolicy;reservedCompatibility?:PhoneCompatibleMold|null
+  moldSharingSnapshots?:import('./moldSharing').MoldShareResolution[]
   researchCoding?:ResearchCoding|null;canMaintainResearchCoding?:boolean
 }
 export type SafeResearchApplication=Partial<MoldApplication>&Pick<MoldApplication,'applicationId'|'status'|'version'>
@@ -60,7 +62,7 @@ export interface MoldConfig { tipo:string; productLineId:number; productSpecific
 /** Filling eligibility; server submission policy separately governs research approval and model coding. */
 export interface MoldApplicationEligibility {eligible:boolean;kind:'catalog'|'research'|'blocked';reason:string|null}
 export interface MoldOptions {
-  controls:MoldControl[]; configs:MoldConfig[]; productLines:{productId:number;productName:string;productSpecificCode:string|null;canMaintainProductIdentity?:boolean;researchStepNo?:number;salesStatus:import('./productionMetadata').SalesProduct['salesStatus'];moldApplicationEligibility:MoldApplicationEligibility;submissionPolicy?:MoldSubmissionPolicy}[]
+  controls:MoldControl[]; configs:MoldConfig[]; productLines:{productIdentity?:import('./productResearch').ProductIdentity;productId:number;productName:string;productSpecificCode:string|null;canMaintainProductIdentity?:boolean;researchStepNo?:number;salesStatus:import('./productionMetadata').SalesProduct['salesStatus'];moldApplicationEligibility:MoldApplicationEligibility;submissionPolicy?:MoldSubmissionPolicy}[]
   canCreate:boolean; canConvert:boolean; administrator:boolean; writeEnabled:boolean; centralCodeEnabled:boolean; canSubmit:boolean
   originators:{id:string;name:string}[]; processCode:string;processName?:string; syncRunning:boolean
   submitter?:{name:string;dingtalkUserId:string|null;departments:{id:number;name:string}[]};submissionBlockReason?:string|null

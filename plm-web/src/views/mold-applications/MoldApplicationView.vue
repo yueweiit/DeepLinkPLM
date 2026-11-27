@@ -137,5 +137,14 @@ small{display:block;color:var(--el-text-color-secondary);font-size:12px;line-hei
   .application-row{grid-template-columns:minmax(0,1fr);grid-template-areas:"identity" "status" "tipo" "codes" "person" "date" "project"}
   .record-status,.record-project{justify-self:start}
 }
+@media(max-width:767px){
+  .mold-applications{padding:8px;gap:6px}
+  .page-head h2{display:none}
+  .page-head{align-items:flex-start}
+  .page-head .tools{margin-left:auto;max-width:100%;flex-wrap:wrap;justify-content:flex-end}
+  .status-tabs{overflow-x:auto;overscroll-behavior-x:contain;padding-bottom:2px;scrollbar-width:none}
+  .status-tabs::-webkit-scrollbar{display:none}
+  .status-tabs button{flex:0 0 auto;min-width:74px;padding-inline:8px}
+}
 </style>
 

@@ -43,6 +43,12 @@ const routes: RouteRecordRaw[] = [
     component: Layout,
     redirect: '/dashboard',
     children: [
+      {
+        path: 'mobile',
+        name: 'MobileHome',
+        component: () => import('@/views/mobile/MobileHomeView.vue'),
+        meta: { title: '移动工作台', breadcrumb: ['移动工作台'] } satisfies RouteMetaConfig
+      },
       ...(['partner-products','partner-sales','samples'] as const).map(path => ({path,name:'Partner-'+path,component:path==='partner-products'?()=>import('@/views/partner/ProductCatalogEntry.vue'):path==='samples'?()=>import('@/views/partner/samples/SampleManagementEntry.vue'):()=>import('@/views/partner/PartnerWorkspace.vue'),meta:{title:({'partner-products':'供应商产品目录','partner-sales':'销售跟进','samples':'样品管理'})[path],permission:'partner:view',partnerKind:path,breadcrumb:[path==='samples'?'工作台':'合作产品',({'partner-products':'供应商产品目录','partner-sales':'销售跟进','samples':'样品管理'})[path]]}})),
       ...(['model','research','partner'] as const).map(domain=>({path:domain==='model'?'model-samples':domain==='research'?'research-samples':'partner-samples',name:'Samples-'+domain,component:()=>import('@/views/partner/samples/SampleManagementEntry.vue'),meta:{title:({model:'型号研发',research:'新品研发',partner:'合作选品'})[domain]+'样品管理',permission:'partner:view',partnerKind:'samples',sampleDomain:domain,breadcrumb:[({model:'型号研发',research:'新品研发',partner:'合作产品'})[domain],'样品管理']}})),
       {path:'sample-scan',name:'SampleScan',component:()=>import('@/views/partner/samples/SampleScanPage.vue'),meta:{title:'样品扫码',breadcrumb:['样品管理','扫码']}},

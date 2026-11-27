@@ -24,6 +24,16 @@ describe('existing server operation log viewer',()=>{
     expect(view.findAll('.el-table__body tbody tr')).toHaveLength(50);expect(view.findComponent(ElPagination).props('pageSizes')).toEqual([20,50,100])
     expect(view.text()).toContain('Tony');expect(view.text()).toContain('2026-10-12 12:30:45');expect(view.text()).toContain('系统日志')
     const selector=view.findComponent(ElSelect);expect(selector.findAllComponents({name:'ElOption'}).map(option=>option.props('label'))).toEqual(expect.arrayContaining(['Tony · tony','Tony Granillo · tony.granillo']))
+    const mobileCards=view.get('[data-test="operation-log-mobile-list"]')
+    expect(mobileCards.text()).toContain('PILOT_USER_GRANTS_SAVE')
+    expect(mobileCards.text()).toContain('Tiffany')
+  })
+
+  it('opens the same stored detail from the narrow-screen log card',async()=>{
+    api.getOperationLogs.mockResolvedValue({content:[{...log(),detailJson:JSON.stringify({reason:'审核修改'})}],page:1,size:50,totalElements:1,totalPages:1})
+    const view=await start()
+    await view.get('[data-test="operation-log-mobile-list"] button').trigger('click');await flushPromises()
+    expect(view.get('[data-test="operation-log-detail"]').text()).toContain('审核修改')
   })
   it('submits actor, exact action and ISO local time to server filtering and resets pagination',async()=>{
     const view=await start(),pagination=view.findComponent(ElPagination)

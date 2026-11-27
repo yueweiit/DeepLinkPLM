@@ -93,7 +93,15 @@ export interface ProductResearchRow {
   targetCost?: number;
   roundCount: number;
 }
+export interface ProductIdentity {
+  mode:'reserved_v1'|'legacy'; state:'unassigned'|'proposed'|'confirmed'|'released'|'invalid_held';
+  productCode:string; specificCode:string; moldPrefix:string; pinned:boolean;
+  reservationId?:number|null; confirmedAt?:string|null; reason?:string|null;
+}
+export const productIdentityStateName=(state:ProductIdentity['state'])=>({unassigned:'待拟定',proposed:'拟定中',confirmed:'正式编码',released:'已失效，已释放',invalid_held:'已失效，保留占号'}[state]);
+export const getProductCodeAvailability=async(id:number,productCode:string)=>unwrapResponse<{productCode:string;moldPrefix:string;available:boolean}>(await request.get(`/product-research/${id}/product-code/availability`,{params:{productCode}}));
 export interface ProductResearchDetail extends DevelopmentProfileInput {
+  productIdentity?:ProductIdentity;
   productId: number;
   productCode: string;
   versionNo: string;
@@ -344,13 +352,14 @@ export interface ResearchEvent {
   createdBy: string;
 }
 export type WorkflowAction =
+  | "propose_product_code" | "reconfirm_product_code"
   | "rename"
   | "shipment_confirm"
   | "supplier_change"
   | "supplier_feedback"
   | "engineering_confirm"
   | "review_setup" | "review_save" | "review_delete" | "review_void" | "round_void"
-  | "confirm_design_basis" | "mold_unlink"
+  | "confirm_design_basis" | "mold_unlink" | "mold_share_coding"
   | "unit_cost_save" | "unit_cost_confirm" | "unit_cost_delete" | "unit_cost_void" | "unit_cost_from_bom"
   | "plan_draft" | "launch_draft" | "mold_link" | "mold_node" | "mold_restart" | "no_mold" | "cost" | "promotion" | "presale" | "launch"
   | "revision_handover"

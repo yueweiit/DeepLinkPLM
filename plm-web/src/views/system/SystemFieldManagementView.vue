@@ -2,6 +2,7 @@
 import { t as uiText } from '@/locales'
 
 import { computed, reactive, ref } from 'vue'
+import { Filter } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
 import FixedTableViewport from '@/components/FixedTableViewport/index.vue'
@@ -46,6 +47,10 @@ const query = reactive({
   inputType: '' as SystemFieldInputType | '',
   status: '' as SystemFieldStatus | ''
 })
+const mobileFiltersOpen = ref(false)
+const activeMobileFilterCount = computed(() =>
+  Number(Boolean(query.scope)) + Number(Boolean(query.inputType)) + Number(Boolean(query.status))
+)
 
 const activeScope = ref<SystemFieldScope | 'all'>('all')
 
@@ -96,6 +101,7 @@ function handleReset() {
   query.inputType = ''
   query.status = ''
   activeScope.value = 'all'
+  mobileFiltersOpen.value = false
 }
 
 /* ========== 详情抽屉 ========== */
@@ -185,9 +191,22 @@ function getInputTypeLabel(type: SystemFieldInputType) {
     :description='uiText("维护前端字段展示、枚举选项、显示规则与使用范围。本页面不修改数据库字段和后端接口。")'
   >
     <!-- 筛选区 -->
-    <section class="page-panel field-toolbar">
+    <section class="page-panel field-toolbar" :class="{ 'mobile-filters-open': mobileFiltersOpen }">
+      <div class="field-toolbar__primary">
+        <el-input v-model="query.keyword" :placeholder='uiText("搜索字段编码、名称或说明")' clearable />
+        <el-button
+          class="field-toolbar__filter-toggle"
+          :type="mobileFiltersOpen || activeMobileFilterCount ? 'primary' : 'default'"
+          :icon="Filter"
+          :aria-label='uiText("更多筛选")'
+          :title='uiText("更多筛选")'
+          :aria-expanded="mobileFiltersOpen"
+          @click="mobileFiltersOpen = !mobileFiltersOpen"
+        >
+          <span v-if="activeMobileFilterCount" class="field-toolbar__filter-count">{{ activeMobileFilterCount }}</span>
+        </el-button>
+      </div>
       <div class="field-toolbar__filters">
-        <el-input v-model="query.keyword" :placeholder='uiText("搜索字段编码、名称或说明")' clearable style="width: 240px" />
         <el-select v-model="query.scope" :placeholder='uiText("所属模块")' clearable style="width: 140px">
           <el-option
             v-for="(label, value) in systemFieldScopeLabels"
@@ -208,10 +227,9 @@ function getInputTypeLabel(type: SystemFieldInputType) {
           <el-option :label='uiText("启用")' value="active" />
           <el-option :label='uiText("停用")' value="inactive" />
         </el-select>
-        <el-button type="primary" @click="() => {}">{{ uiText("查询") }}</el-button>
         <el-button @click="handleReset">{{ uiText("重置") }}</el-button>
       </div>
-      <el-button type="primary" @click="openCreateDrawer">{{ uiText("新增字段配置") }}</el-button>
+      <el-button class="field-toolbar__create" type="primary" @click="openCreateDrawer">{{ uiText("新增字段配置") }}</el-button>
     </section>
 
     <!-- 主体：左侧分类 + 右侧列表 -->
@@ -465,6 +483,39 @@ function getInputTypeLabel(type: SystemFieldInputType) {
   padding: 14px;
 }
 
+.field-toolbar__primary {
+  display: flex;
+  flex: 1 1 240px;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-toolbar__primary > .el-input {
+  width: 240px;
+  max-width: 100%;
+}
+
+.field-toolbar__filter-toggle {
+  display: none;
+}
+
+.field-toolbar__filter-count {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: grid;
+  min-width: 16px;
+  height: 16px;
+  place-items: center;
+  padding: 0 3px;
+  border-radius: 9px;
+  background: var(--el-color-danger);
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
+}
+
 .field-toolbar__filters {
   display: flex;
   flex-wrap: wrap;
@@ -592,6 +643,64 @@ function getInputTypeLabel(type: SystemFieldInputType) {
   .field-scope-item {
     width: auto;
     flex: 0 0 auto;
+  }
+}
+
+@media (max-width: 767px) {
+  .field-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .field-toolbar__primary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 40px;
+    width: 100%;
+  }
+
+  .field-toolbar__primary > .el-input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .field-toolbar__filter-toggle {
+    position: relative;
+    display: inline-flex;
+    width: 40px;
+    height: 40px;
+    min-height: 40px;
+    margin: 0;
+    padding: 0;
+  }
+
+  .field-toolbar__filters {
+    display: none;
+  }
+
+  .field-toolbar.mobile-filters-open .field-toolbar__filters {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .field-toolbar__filters > .el-select {
+    width: 100% !important;
+  }
+
+  .field-toolbar__create {
+    justify-self: end;
+  }
+
+  .field-layout__nav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .field-layout__nav::-webkit-scrollbar {
+    display: none;
   }
 }
 </style>

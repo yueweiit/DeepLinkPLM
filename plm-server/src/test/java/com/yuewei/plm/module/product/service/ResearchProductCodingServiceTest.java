@@ -65,4 +65,15 @@ class ResearchProductCodingServiceTest {
         assertThat(service.requireOperationCode("4020")).isEqualTo("4020");
         assertThatThrownBy(() -> service.requireOperationCode("9999")).hasMessageContaining("已启用主数据");
     }
+
+    @Test void finishedOperationCodesAreScopedToTheSelectedProductRoute() {
+        var jdbc=mock(JdbcTemplate.class);
+        when(jdbc.queryForList(anyString(),any(Object[].class))).thenReturn(List.of(
+            Map.of("code","4020","productCode","NBA4020","productSpecificCode","BA","finishedProductFlag",false,"materialStatusCode","","metadata","{}","masterFinishedProductFlag",false,"masterMaterialStatusCode","","masterMetadata","{}"),
+            Map.of("code","4030","productCode","NBA4020","productSpecificCode","BA","finishedProductFlag",false,"materialStatusCode","","metadata","{}","masterFinishedProductFlag",false,"masterMaterialStatusCode","","masterMetadata","{}"),
+            Map.of("code","4050","productCode","NBA4020","productSpecificCode","BA","finishedProductFlag",false,"materialStatusCode","40","metadata","{}","masterFinishedProductFlag",false,"masterMaterialStatusCode","","masterMetadata","{}")));
+        var service=new ResearchProductCodingService(jdbc,new ObjectMapper(),mock(ProductRepository.class),mock(ProductService.class),mock(CodeItemService.class),mock(ProductionConfirmationService.class),mock(ProductCodeGenerator.class),mock(PilotAccessService.class));
+        assertThat(service.finishedOperationCodes(5)).containsExactlyInAnyOrder("4020","4050");
+        verify(jdbc).queryForList(anyString(),any(Object[].class));
+    }
 }

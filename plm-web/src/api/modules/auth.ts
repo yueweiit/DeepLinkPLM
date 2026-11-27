@@ -7,6 +7,11 @@ export interface LoginRequest {
   password: string
 }
 
+export interface ChangePasswordRequest {
+  currentPassword: string
+  newPassword: string
+}
+
 interface BackendCurrentUser {
   preferredLanguage?: string
   userId: number
@@ -62,7 +67,7 @@ function toSession(data: BackendLoginResponse): LoginResponse {
   return {
     token: data.token,
     tokenType: data.tokenType,
-    expiresInSeconds: data.expiresInSeconds,
+    expiresInSeconds: data.expiresInSeconds || 24 * 60 * 60,
     profile: toProfile(data.user),
     permissions: toPermissions(data.user),
     allPermissions: data.user.allPermissions
@@ -78,6 +83,10 @@ export const loginByPassword = login
 
 export async function saveOwnLanguage(language: Language, originalLanguage: Language): Promise<{preferredLanguage: Language}> {
   return unwrapResponse(await request.patch('/auth/language', {language, originalLanguage}))
+}
+
+export async function changeOwnPassword(input: ChangePasswordRequest): Promise<void> {
+  unwrapResponse<void>(await request.patch('/auth/password', input))
 }
 
 export async function loginByDingTalkCode(code: string): Promise<LoginResponse> {
@@ -105,6 +114,13 @@ export async function getProfileByToken(_token: string): Promise<{
   }
 }
 
-export async function logout(): Promise<void> {
-  await request.post('/auth/logout')
+export async function logout(token: string): Promise<void> {
+  const response = await request.post('/auth/logout', {}, {
+    headers: { Authorization: `Bearer ${token}` },
+    suppressErrorToast: true,
+    suppressSessionExpiredNotice: true,
+    isLogoutRequest: true
+  })
+  if (response.data?.code === 40101) return
+  unwrapResponse<void>(response)
 }

@@ -1,12 +1,13 @@
-import { AxiosHeaders, CanceledError, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios'
+import { AxiosError, AxiosHeaders, CanceledError, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ElMessage } from 'element-plus'
 
-import request, { authorizedPreviewOptions, prepareRequestContentType, registerSessionInvalidation, unwrapResponse, type ApiResponse } from '../request'
-vi.mock('element-plus', () => ({ ElMessage: { error: vi.fn() } }))
+import request, { authorizedPreviewOptions, clearSessionExpiry, prepareRequestContentType, registerSessionInvalidation, setSessionExpiry, SESSION_EXPIRY_STORAGE_KEY, unwrapResponse, type ApiResponse } from '../request'
+const originalAdapter = request.defaults.adapter
+vi.mock('element-plus', () => ({ ElMessage: { error: vi.fn(), info: vi.fn() } }))
 let unregister: (() => void) | undefined
 beforeEach(() => vi.clearAllMocks())
-afterEach(() => { unregister?.(); unregister = undefined; localStorage.clear(); window.location.hash = '' })
+afterEach(() => { unregister?.(); unregister = undefined; request.defaults.adapter = originalAdapter; vi.useRealTimers(); localStorage.clear(); window.location.hash = '' })
 function expired(token: string): AxiosResponse<ApiResponse<null>> {
   return { data: { code: 40101, message: '会话失效', data: null }, status: 200, statusText: 'OK', headers: new AxiosHeaders(), config: { headers: new AxiosHeaders({ Authorization: `Bearer ${token}` }) } }
 }
@@ -41,6 +42,7 @@ describe('request session invalidation', () => {
     localStorage.setItem('plm_token','expired'); window.location.hash = '/molds'
     await expect(request.get('/expired', { adapter: async config => { throw { config, response: { status:401, data:{message:'会话失效'} } } } })).rejects.toBeDefined()
     expect(handler).toHaveBeenCalledWith('expired'); expect(localStorage.getItem('plm_token')).toBeNull(); expect(window.location.hash).toBe('#/login?redirect=%2Fmolds')
+    expect(ElMessage.info).toHaveBeenCalledTimes(1); expect(ElMessage.error).not.toHaveBeenCalled()
     localStorage.setItem('plm_token','expired-again'); window.location.hash = '/development-budgets'
     expect(() => unwrapResponse(expired('expired-again'))).toThrow('会话失效'); expect(handler).toHaveBeenCalledTimes(2)
     expect(window.location.hash).toBe('#/login?redirect=%2Fdevelopment-budgets')
@@ -53,6 +55,66 @@ describe('request session invalidation', () => {
     await expect(request.get('/late', { adapter: async config => { localStorage.setItem('plm_token','new'); throw { config, response: { status:401, data:{code:40101,message:'旧会话失效'} } } } })).rejects.toBeDefined()
     expect(() => unwrapResponse(expired('old'))).toThrow()
     expect(localStorage.getItem('plm_token')).toBe('new'); expect(handler).not.toHaveBeenCalled(); expect(window.location.hash).toBe('#/dashboard')
+    expect(ElMessage.error).not.toHaveBeenCalled(); expect(ElMessage.info).not.toHaveBeenCalled()
+  })
+  it('refreshes the local expiry deadline from the authenticated response header', async () => {
+    const token='active-session',expiresAt=Date.now()+6*60*60*1000
+    localStorage.setItem('plm_token',token)
+    await request.get('/renewal-check',{adapter:async config=>({status:200,statusText:'OK',config,headers:{'x-plm-session-expires-at':String(expiresAt)},data:{code:0,data:null}})})
+    expect(Number(localStorage.getItem(SESSION_EXPIRY_STORAGE_KEY))).toBe(expiresAt)
+  })
+  it('redirects once when the local session deadline passes', async () => {
+    vi.useFakeTimers()
+    const handler=vi.fn();unregister=registerSessionInvalidation(handler)
+    localStorage.setItem('plm_token','expiring-session');window.location.hash='/projects?productId=17'
+    request.defaults.adapter=async config=>{throw {config,response:{status:401,data:{code:40101,message:'会话失效'},headers:{},config}}}
+    setSessionExpiry('expiring-session',Date.now()+1000)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(handler).toHaveBeenCalledWith('expiring-session')
+    expect(localStorage.getItem('plm_token')).toBeNull();expect(localStorage.getItem(SESSION_EXPIRY_STORAGE_KEY)).toBeNull()
+    expect(window.location.hash).toBe('#/login?redirect=%2Fprojects%3FproductId%3D17')
+    expect(ElMessage.info).toHaveBeenCalledTimes(1);expect(ElMessage.error).not.toHaveBeenCalled()
+  })
+  it('checks the server before expiring locally when an earlier request renewed the session', async () => {
+    vi.useFakeTimers()
+    localStorage.setItem('plm_token','in-flight-session')
+    const renewedUntil=Date.now()+60_000
+    request.defaults.adapter=async config=>{
+      expect(config.headers.get('X-PLM-Session-Check')).toBe('true')
+      return {status:200,statusText:'OK',config,headers:{'x-plm-session-expires-at':String(renewedUntil)},data:{code:0,data:{userId:1}}}
+    }
+    setSessionExpiry('in-flight-session',Date.now()+1000)
+
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(localStorage.getItem('plm_token')).toBe('in-flight-session')
+    expect(Number(localStorage.getItem(SESSION_EXPIRY_STORAGE_KEY))).toBe(renewedUntil)
+    expect(ElMessage.info).not.toHaveBeenCalled()
+    clearSessionExpiry('in-flight-session')
+  })
+  it('keeps the local session during a network outage and retries the passive check', async () => {
+    vi.useFakeTimers()
+    localStorage.setItem('plm_token','offline-at-expiry-session')
+    let checks=0
+    const renewedUntil=Date.now()+60_000
+    request.defaults.adapter=async config=>{
+      checks++
+      if(checks===1) throw new AxiosError('Network Error','ERR_NETWORK',config)
+      return {status:200,statusText:'OK',config,headers:{'x-plm-session-expires-at':String(renewedUntil)},data:{code:0,data:{userId:1}}}
+    }
+    setSessionExpiry('offline-at-expiry-session',Date.now()+1000)
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(checks).toBe(1)
+    expect(localStorage.getItem('plm_token')).toBe('offline-at-expiry-session')
+    expect(ElMessage.info).not.toHaveBeenCalled()
+    expect(ElMessage.error).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(checks).toBe(2)
+    expect(Number(localStorage.getItem(SESSION_EXPIRY_STORAGE_KEY))).toBe(renewedUntil)
+    expect(ElMessage.info).not.toHaveBeenCalled()
+    clearSessionExpiry('offline-at-expiry-session')
   })
 })
 describe('inline media errors', () => {

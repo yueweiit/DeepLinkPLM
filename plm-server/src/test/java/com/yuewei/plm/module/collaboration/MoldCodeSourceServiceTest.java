@@ -36,7 +36,7 @@ class MoldCodeSourceServiceTest {
     }
     @Test void newSourceAndReceiveRoutesAreNotPublicAuthenticationBypasses() throws Exception {
         for(String path:List.of("/api/v1/integrations/dingtalk/mold-codes","/api/v1/molds/source-codes","/api/v1/molds/source-codes/erp-previews")) {
-            var sessions=mock(TokenSessionService.class);when(sessions.getCurrentUser(null)).thenReturn(Optional.empty());
+            var sessions=mock(TokenSessionService.class);when(sessions.getSession(null)).thenReturn(Optional.empty());
             var filter=new SimpleTokenAuthenticationFilter(new AppProperties(),sessions,new ObjectMapper().findAndRegisterModules());
             var request=new MockHttpServletRequest("POST",path);var response=new MockHttpServletResponse();var chain=mock(FilterChain.class);
             filter.doFilter(request,response,chain);

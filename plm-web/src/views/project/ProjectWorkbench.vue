@@ -14,11 +14,12 @@ import { phoneCoverageNames } from '@/utils/phoneCoverage'
 import { moldSetPhones } from '@/utils/moldPresentation'
 import {toArchivedSkuRoute,toArchivedProductRoute} from '@/utils/projectRoute'
 import { useUserStore } from '@/stores/user'
+import { Filter, MoreFilled, Search } from '@element-plus/icons-vue'
 const getErrorMessage=(e:unknown)=>e instanceof Error?e.message:'项目读取失败，请重试'
 const historyReview=ref(false)
 const route=useRoute(),router=useRouter(),workspace=useCollaborationWorkspace(),finance=useFinanceWorkspace(),user=useUserStore()
 const view=ref<ProjectView|'unlinked'>(route.query.tab==='archived'?'completed':route.query.tab==='abandoned'?'stopped':route.query.tab==='all_projects'?'all':'active'),kind=ref<'all'|ProjectKind>('all'),keyword=ref(''),page=ref(1),size=ref(50),loading=ref(false),error=ref('')
-const data=ref<WorkbenchPage>(),unlinked=ref<MoldApplication[]>([]),unlinkedTotal=ref(0),overview=ref<ProjectOverview>(),drawer=ref(false),detailLoading=ref(false)
+const data=ref<WorkbenchPage>(),unlinked=ref<MoldApplication[]>([]),unlinkedTotal=ref(0),overview=ref<ProjectOverview>(),drawer=ref(false),detailLoading=ref(false),mobileFiltersExpanded=ref(false)
 const rows=computed(()=>data.value?.content||[]),total=computed(()=>view.value==='unlinked'?unlinkedTotal.value:data.value?.totalElements||0)
 const kindName=(kind:string|null)=>kind==='product_research'?'新品研发':kind==='model_extension'?'型号研发':'历史产品资料'
 const date=(value:string|null|undefined)=>value?.slice(0,10)||'未填写'
@@ -42,6 +43,12 @@ function scoped(path:string){if(overview.value)go(path,{projectId:overview.value
 function tabCount(value:ProjectView|'unlinked'){return value==='unlinked'?data.value?.unlinkedApplications?.total:data.value?.stats[value]}
 function reset(){page.value=1;void load()}
 function refresh(){void load();if(drawer.value&&overview.value)void open(overview.value.projectId)}
+function runHeaderAction(command: string) {
+  if (command === 'history') historyReview.value = true
+  if (command === 'archive') go('/projects', { tab: 'archived', archiveView: 'product' })
+  if (command === 'refresh') refresh()
+  if (command === 'application') go('/market-watch')
+}
 watch([view,kind,size],reset)
 watch(page,()=>void load())
 watch(()=>[route.query.productId,route.query.section],()=>{const id=Number(route.query.productId);if(id&&!route.query.section)void open(id);else {detailEpoch++;drawer.value=false;overview.value=undefined}},{immediate:true})
@@ -51,8 +58,9 @@ onMounted(()=>void load())
 </script>
 <template>
   <section class="project-workbench" :aria-label='uiText("项目中心")'>
-    <header class="workbench-header"><h1>{{ uiText("项目中心") }}</h1><span>{{ uiText("正式开发项目 · 新品研发 / 型号研发") }}</span><div class="spacer"/><el-button v-if="user.hasPermission('mold-application:convert')" @click="historyReview=true">{{ uiText("历史补链与缺项") }}</el-button><el-button @click="go('/projects',{tab:'archived',archiveView:'product'})">{{ uiText("产品与 SKU 资料") }}</el-button><el-button @click="refresh">{{ uiText("刷新") }}</el-button></header>
-    <div class="filters"><el-input v-model="keyword" clearable :placeholder='uiText("搜索项目 / 产品 / 手机 / 编码 / 负责人")' @keyup.enter="reset"/><el-select v-model="kind" :aria-label='uiText("项目类型")'><el-option :label='uiText("全部类型")' value="all"/><el-option :label='uiText("新品研发")' value="product_research"/><el-option :label='uiText("型号研发")' value="model_extension"/></el-select><el-button type="primary" @click="reset">{{ uiText("查询") }}</el-button><el-button v-if="data?.capabilities.applications" @click="go('/market-watch')">{{ uiText("发起开模申请") }}</el-button></div>
+    <header class="workbench-header"><h1>{{ uiText("项目中心") }}</h1><span>{{ uiText("正式开发项目 · 新品研发 / 型号研发") }}</span><div class="spacer"/><div class="workbench-header__desktop-actions"><el-button v-if="user.hasPermission('mold-application:convert')" @click="historyReview=true">{{ uiText("历史补链与缺项") }}</el-button><el-button @click="go('/projects',{tab:'archived',archiveView:'product'})">{{ uiText("产品与 SKU 资料") }}</el-button><el-button @click="refresh">{{ uiText("刷新") }}</el-button></div></header>
+    <div class="filters filters--desktop"><el-input v-model="keyword" clearable :placeholder='uiText("搜索项目 / 产品 / 手机 / 编码 / 负责人")' @keyup.enter="reset"/><el-select v-model="kind" :aria-label='uiText("项目类型")'><el-option :label='uiText("全部类型")' value="all"/><el-option :label='uiText("新品研发")' value="product_research"/><el-option :label='uiText("型号研发")' value="model_extension"/></el-select><el-button type="primary" @click="reset">{{ uiText("查询") }}</el-button><el-button v-if="data?.capabilities.applications" @click="go('/market-watch')">{{ uiText("发起开模申请") }}</el-button></div>
+    <div class="filters filters--mobile"><el-input v-model="keyword" clearable :placeholder='uiText("搜索项目 / 产品 / 手机 / 编码 / 负责人")' @keyup.enter="reset"/><el-button class="filters__mobile-icon" type="primary" :icon="Search" :aria-label="uiText('查询')" :title="uiText('查询')" @click="reset"/><el-button class="filters__mobile-icon" :type="kind !== 'all' ? 'primary' : 'default'" :icon="Filter" :aria-label="uiText('更多筛选')" :title="uiText('更多筛选')" :aria-expanded="mobileFiltersExpanded" @click="mobileFiltersExpanded = !mobileFiltersExpanded"/><el-dropdown class="filters__mobile-actions" trigger="click" placement="bottom-end" @command="runHeaderAction"><el-button class="filters__mobile-icon" text :icon="MoreFilled" :aria-label="uiText('更多操作')" :title="uiText('更多操作')"/><template #dropdown><el-dropdown-menu><el-dropdown-item v-if="user.hasPermission('mold-application:convert')" command="history">{{ uiText('历史补链与缺项') }}</el-dropdown-item><el-dropdown-item command="archive">{{ uiText('产品与 SKU 资料') }}</el-dropdown-item><el-dropdown-item v-if="data?.capabilities.applications" command="application">{{ uiText('发起开模申请') }}</el-dropdown-item><el-dropdown-item command="refresh">{{ uiText('刷新') }}</el-dropdown-item></el-dropdown-menu></template></el-dropdown><div v-if="mobileFiltersExpanded" class="filters__mobile-advanced"><el-select v-model="kind" :aria-label='uiText("项目类型")'><el-option :label='uiText("全部类型")' value="all"/><el-option :label='uiText("新品研发")' value="product_research"/><el-option :label='uiText("型号研发")' value="model_extension"/></el-select><el-button @click="kind='all';keyword='';reset()">{{ uiText("重置") }}</el-button></div></div>
     <nav class="views" :aria-label='uiText("项目视图")'><button v-for="tab in tabs.filter(t=>t.value!=='unlinked'||data?.capabilities.applications)" :key="tab.value" :class="{active:view===tab.value}" @click="view=tab.value">{{uiText(String((tab.label) ?? ''))}} <span v-if="tabCount(tab.value)!==undefined">{{tabCount(tab.value)}}</span></button></nav>
     <el-alert v-if="error" type="error" :title="error" :closable="false"/>
     <div class="project-list" v-loading="loading">
@@ -97,4 +105,100 @@ onMounted(()=>void load())
 <style scoped>
 .project-workbench{display:flex;flex-direction:column;height:100%;min-height:0;min-width:0;gap:8px;font-size:12px;container-type:inline-size}.workbench-header,.filters,.views,.pagination,.business-links{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.workbench-header h1{font-size:16px;margin:0}.workbench-header>span,small,dt{color:#64748b}.spacer{flex:1}.filters .el-input{flex:1;min-width:150px}.filters .el-select{width:140px}.views button{border:0;background:#edf1f6;padding:5px 9px;border-radius:4px;color:#475569;cursor:pointer}.views button.active{background:#e5edff;color:#2563eb}.project-list{flex:1;min-height:0;overflow:auto}.record{display:grid;grid-template-columns:1.2fr 1.15fr 1.05fr .9fr .7fr 1.2fr 80px;gap:8px;align-items:center;padding:4px 8px;border-bottom:1px solid #e5eaf2;min-height:42px;line-height:16px;background:white;box-sizing:border-box}.record>div{min-width:0;overflow-wrap:anywhere}.record-head{min-height:32px;background:#f2f5fa;color:#64748b;position:sticky;top:0;z-index:1}.record:nth-child(odd){background:#f8faff}.record small,.business-row small,.application-record small{display:block;font-size:12px;line-height:16px}.text-link{padding:0;border:0;background:none;color:#2563eb;text-align:left;font:inherit;cursor:pointer}.risk{color:#b45309}.project-record .risk{display:block}.pagination{justify-content:space-between;flex-shrink:0;min-height:32px}.empty-projects{padding:50px 20px;text-align:center;color:#64748b}.empty-projects h2{font-size:16px;color:#334155}.overview{font-size:12px}.overview h2{font-size:16px}.overview h3{font-size:14px;margin-top:22px}.overview dl{display:grid;grid-template-columns:1fr 1fr;gap:12px}.overview dd{margin:3px 0;overflow-wrap:anywhere}.business-row{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e5eaf2}.business-row>span{flex:1;min-width:0;overflow-wrap:anywhere}.unlinked-note{margin:4px 0 8px;color:#64748b}.application-record{display:grid;grid-template-columns:1.2fr .8fr 1.5fr 110px;gap:8px;padding:4px 8px;min-height:42px;border-bottom:1px solid #e5eaf2;background:white;align-items:center;box-sizing:border-box}.application-record>div{min-width:0;overflow-wrap:anywhere}:deep(.el-button),:deep(.el-input__wrapper),:deep(.el-select__wrapper){min-height:28px;height:28px;font-size:12px}:deep(.el-pagination){--el-pagination-font-size:12px}:deep(.el-drawer__body){padding:12px}
 @container(max-width:1100px){.record-head{display:none}.project-record{grid-template-columns:1fr 1fr;gap:6px;padding:10px;align-items:start}.project-record>div:last-child{grid-column:2;justify-self:end}.application-record{grid-template-columns:1fr 1fr;gap:6px;padding:8px}.workbench-header>span{display:none}.filters .el-select{width:115px}}
+</style>
+
+<style scoped>
+.filters--mobile {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .project-workbench {
+    gap: 6px;
+  }
+
+  .workbench-header {
+    min-height: 32px;
+    flex-wrap: nowrap;
+  }
+
+  .workbench-header h1,
+  .workbench-header > span,
+  .workbench-header__desktop-actions {
+    display: none;
+  }
+
+  .workbench-header {
+    display: none;
+  }
+
+  .filters--desktop {
+    display: none;
+  }
+
+  .filters--mobile {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 40px 40px 40px;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    flex-wrap: nowrap;
+  }
+
+  .filters--mobile > .el-input,
+  .filters--mobile > .el-button {
+    min-width: 0;
+    margin: 0;
+  }
+
+  .filters--mobile > .el-input :deep(.el-input__wrapper) {
+    min-height: 40px;
+  }
+
+  .filters__mobile-icon {
+    width: 40px;
+    min-height: 40px;
+    height: 40px;
+    padding: 0;
+  }
+
+  .filters__mobile-actions {
+    display: flex;
+    width: 40px;
+    height: 40px;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .filters__mobile-advanced {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px;
+    padding-top: 6px;
+    border-top: 1px solid #e5eaf2;
+  }
+
+  .filters__mobile-advanced .el-select,
+  .filters__mobile-advanced .el-button {
+    min-width: 0;
+    margin: 0;
+  }
+
+  .views {
+    flex-wrap: nowrap;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .views::-webkit-scrollbar {
+    display: none;
+  }
+
+  .views button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+}
 </style>

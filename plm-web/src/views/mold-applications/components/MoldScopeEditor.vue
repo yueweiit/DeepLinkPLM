@@ -6,8 +6,8 @@ import {emptyEngineeringSpecification,holeTypeNames} from '@/utils/engineeringPl
 const props=withDefaults(defineProps<{modelValue:EngineeringPlan;disabled?:boolean;multiplePhones?:boolean;manageSpecifications?:boolean;allowCreate?:boolean;phoneHint?:string}>(),{multiplePhones:true})
 const emit=defineEmits<{'update:modelValue':[EngineeringPlan]}>()
 function specifications(rows:EngineeringSpecification[]){emit('update:modelValue',{...props.modelValue,specifications:rows})}
-function change(key:string,patch:Partial<EngineeringSpecification>){specifications(props.modelValue.specifications.map(row=>row.key===key?{...row,...patch,manufacturingRelationId:undefined,manufacturingRelationVersion:undefined}:row))}
-function add(source?:EngineeringSpecification){specifications([...props.modelValue.specifications,source?{...source,key:crypto.randomUUID(),phoneModelIds:[],manufacturingRelationId:undefined,manufacturingRelationVersion:undefined}:emptyEngineeringSpecification()])}
+function change(key:string,patch:Partial<EngineeringSpecification>){specifications(props.modelValue.specifications.map(row=>row.key===key?{...row,...patch,manufacturingRelationId:undefined,manufacturingRelationVersion:undefined,moldSharing:undefined}:row))}
+function add(source?:EngineeringSpecification){specifications([...props.modelValue.specifications,source?{...source,key:crypto.randomUUID(),phoneModelIds:[],manufacturingRelationId:undefined,manufacturingRelationVersion:undefined,moldSharing:undefined}:emptyEngineeringSpecification()])}
 </script>
 <template>
   <div class="mold-scope">

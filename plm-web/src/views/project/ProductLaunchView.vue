@@ -17,11 +17,14 @@ import { ArrowDown, ArrowLeft, Coin } from "@element-plus/icons-vue";
 import { useUserStore } from "@/stores/user";
 import { useCollaborationWorkspace } from "@/stores/collaborationWorkspace";
 import { createProductResearch } from "@/api/modules/product";
+import {resolveMoldSharing} from '@/api/modules/moldSharing'
 import {
   getProductResearch,
   deleteProductResearchDraft,
   deleteDevelopmentDraft,
   getProductResearchDetail,
+  getProductCodeAvailability,
+  productIdentityStateName,
   saveResearchDesignDraft,
   saveDevelopmentRound,
   researchAction,
@@ -273,6 +276,7 @@ const workflow = computed(() => detail.value?.workflow || { version: 0 }),
   actualStage = computed(
     () => workflow.value.revision?.stage || detail.value?.currentStepNo || 1,
   );
+const moldShareAdoptions=computed(()=>((workflow.value.moldLinks as Form[])||[]).flatMap(link=>[link,...(link.additionalMoldShareAdoptions||[])]).filter(link=>link.moldShareConfirmation?.confirmationId))
 const blocked = computed(
   () =>
     !detail.value?.canWrite ||
@@ -361,8 +365,40 @@ function openSupplierMaterials(){
 }
 function openProductIdentity(){
   if(!detail.value?.canMaintainProductIdentity)return;
+  if(detail.value.productIdentity){
+    identityInput.value=detail.value.productIdentity.productCode;identityReason.value='';identityAvailability.value=null;identityOpen.value=true;return;
+  }
   const destination=router.resolve({path:`/products/${id.value}/edit`,query:{source:'research',step:stage.value.key}});
   window.open(destination.href,'_blank','noopener,noreferrer');
+}
+const identityOpen=ref(false),identityInput=ref(''),identityReason=ref(''),identityAvailability=ref<boolean|null>(null);
+let identityCheckEpoch=0;
+// Retain the request only while its outcome is uncertain, within one login/project.
+let identityAttempt='',identityRequest:WorkflowRequestId|undefined;
+watch(identityInput,()=>{++identityCheckEpoch;identityAvailability.value=null;});
+watch(()=>[id.value,user.token],()=>{identityOpen.value=false;++identityCheckEpoch;identityAttempt='';identityRequest=undefined;});
+const identity=computed(()=>detail.value?.productIdentity);
+const identityConfirmed=computed(()=>!identity.value||identity.value.state==='confirmed');
+const canProposeIdentity=computed(()=>!!detail.value?.canMaintainProductIdentity&&!blocked.value&&detail.value.status!=='released'&&actualStage.value>=2);
+async function checkIdentity(){
+  await action(async()=>{
+    const code=identityInput.value.trim().toUpperCase(),project=id.value,token=user.token,epoch=++identityCheckEpoch;
+    const result=await getProductCodeAvailability(project,code);
+    if(epoch===identityCheckEpoch&&project===id.value&&token===user.token)identityAvailability.value=result.available;
+  });
+}
+async function saveIdentity(){
+  await action(async()=>{
+    const productCode=identityInput.value.trim().toUpperCase(),reason=identityReason.value.trim();
+    if(!/^N[A-Z]{2}$/.test(productCode))throw Error('产品编码须为 N 加两位英文字母，例如 NAB');
+    const name=identity.value?.state==='invalid_held'?'reconfirm_product_code':'propose_product_code';
+    if(name==='reconfirm_product_code'&&!reason)throw Error('请填写重新确认原拟定码的原因');
+    const signature=JSON.stringify({id:id.value,token:user.token,name,productCode,reason});
+    if(signature!==identityAttempt){identityAttempt=signature;identityRequest=crypto.randomUUID();}
+    await command(name,{productCode,reason},identityRequest);
+    identityAttempt='';identityRequest=undefined;
+    identityOpen.value=false;ElMessage.success('拟定编码已保存，完成最终发模后正式生效');
+  });
 }
 async function locateEngineeringGap(target:string){
   if(target==='product-identity'){openProductIdentity();return;}
@@ -401,6 +437,7 @@ const eventNames: Record<string, string> = {
   mold_node: "模具节点办理",
   mold_restart: "重新验模",
   mold_link: "关联模具／申请",
+  mold_share_coding: "续办自身机型编码",
   no_mold: "确认无需开模",
   release_draft: "保存定型清单",
   finalize: "确认定型",
@@ -979,15 +1016,16 @@ async function completionErrors(handover=false) {
 async function confirmShipmentBatch(){await action(async()=>{await save();await command('shipment_confirm',{});dirty.value=false;ElMessage.success(uiText('本批发模已确认，未发套继续保留待办'));});}
 async function complete() {
  await action(async()=>{
+  if(identityOpen.value)throw Error('请先保存或关闭拟定编码输入');
   if(currentMold.value)throw Error('请先完成当前模具节点并返回列表');
   if(workKind.value==='sample'){if(!sampleReadOnly.value)await save(true);}else if(stage.value.step!==4)await save();
   const errors=await completionErrors(true);if(errors.length){await ElMessageBox.alert(uiText('请补齐：')+errors.join('、'),uiText('本步缺项'));return;}
   const next=PRODUCT_RESEARCH_STAGES.find(s=>s.step===stage.value.step+1);
-  await ElMessageBox.confirm(stage.value.step===1?uiText('负责人确认本次立项，开始画3D产品图？'):next?uiText('完成{value0}，进入{value1}？',{value0:(stage.value.name),value1:(next.name)}):uiText('确认本批模具已经实际发出？'),uiText('确认本步完成'));
+  await ElMessageBox.confirm(stage.value.step===1?uiText('负责人确认本次立项，开始画3D产品图？'):next?uiText('完成{value0}，进入{value1}？',{value0:(stage.value.name),value1:(next.name)}):identity.value&&identity.value.state!=='confirmed'?`完成本项目发模，并将 ${identity.value.productCode} 确认为正式产品编码？`:uiText('确认本批模具已经实际发出？'),uiText('确认本步完成'));
   if(workflow.value.revision)await command('revision_handover',{stage:stage.value.step});
   else await confirmTimelineNode(id.value,timeline.value!.nodes.find(n=>n.stepNo===stage.value.step)!.nodeKey,`完成${stage.value.name}`,version.value);
   dirty.value=false;drafts.delete(draftKey());
-  if(next)routeTo(next.step);else{await refresh();ElMessage.success(uiText('本批已发模'));}
+  if(next)routeTo(next.step);else{await refresh();ElMessage.success(uiText(identity.value?'本项目发模完成，产品编码已转正':'本批已发模'));}
  });
 }
 async function returnPrevious(targetStep?:number) {
@@ -1071,6 +1109,11 @@ async function closeTask(){
 }
 async function beforeTaskClose(done:()=>void){if(await closeTask())done();}
 async function canLeaveSupplierEntries(){
+  if(identityOpen.value){
+    const changed=identityInput.value!==identity.value?.productCode||identityReason.value.trim()!=='';
+    if(changed){try{await ElMessageBox.confirm(uiText('拟定编码尚未保存，放弃本次输入？'),uiText('未保存拟定编码'),{confirmButtonText:uiText('放弃输入'),cancelButtonText:uiText('继续填写')});}catch{return false;}}
+    identityOpen.value=false;
+  }
   if(supplierFeedbackPanel.value&&!(await supplierFeedbackPanel.value.leave()))return false;
   return !taskOpen.value||task.value!=='supplier_change'||await closeTask();
 }
@@ -1176,11 +1219,11 @@ async function openOtherPhone(projectId=id.value){
     await moldApplicationEditor.value?.openResearch(source,{projectInputUnsaved:context.project===id.value&&dirty.value});
   }catch(e){if(currentMoldApplication(context))ElMessage.error(uiText(e instanceof Error?e.message:'载入失败'));}finally{if(currentMoldApplication(context))otherPhoneOpening.value=false;}
 }
-async function confirmEngineeringReuse(projectId:number,plan:EngineeringPlan){
+async function confirmEngineeringReuse(projectId:number,plan:EngineeringPlan,reason='工程确认沿用已有模具'){
  await action(async()=>{
   const project=await getProductResearchDetail(projectId);if((project.workflow.revision?.stage||project.currentStepNo)!==5)throw Error('适配关系可以先维护；项目正式采用请在模具设计阶段办理，不会跳过研发步骤');
-  const relations=await Promise.all(plan.specifications.map(row=>getManufacturingRelation(row.manufacturingRelationId!)));const sets=[...new Set(relations.map(row=>row.moldSetId))];if(sets.length!==1)throw Error('本次沿用须明确同一实物套，不同模具请分别办理');
-  const updated=await researchAction(projectId,'mold_link',project.workflow.version,{moldSetId:sets[0],reuseConfirmed:true,reason:'采用逐规格工程确认的共模及制造关系',engineeringPlan:plan});if(projectId===id.value)detail.value=updated;collaboration.changed();moldApplicationEditor.value?.invalidate?.();ElMessage.success(uiText('已确认沿用，原编码、物料与历史保留，未发起新审批'));await refresh();
+  const relations=plan.identityMode==='mold_only'?await resolveMoldSharing(projectId,plan):await Promise.all(plan.specifications.map(row=>getManufacturingRelation(row.manufacturingRelationId!)));const sets=[...new Set(relations.map(row=>row.moldSetId))];if(sets.length!==1)throw Error('本次沿用须明确同一实物套，不同模具请分别办理');
+  const updated=await researchAction(projectId,'mold_link',project.workflow.version,{moldSetId:sets[0],reuseConfirmed:true,reason,engineeringPlan:plan});if(projectId===id.value)detail.value=updated;collaboration.changed();moldApplicationEditor.value?.invalidate?.();ElMessage.success(uiText('已确认沿用，未新增实物套；成品保持自身手机码'));await refresh();
  });
 }
 function editDrawerApplication(row:MoldApplication){const project=row.sourceSnapshot?.research?.projectId||row.productLineId;if(project)void editMoldApplication(row.applicationId,project);}
@@ -1310,6 +1353,7 @@ async function viewMaterial(m: DevelopmentMaterial) {
 }
 async function publish() {
   await action(async () => {
+    if(!identityConfirmed.value)throw Error('请先完成本项目发模并确认产品编码，再形成正式包');
     if (
       missing.value.length &&
       (!publication.risk || !publication.reason.trim() || !publication.dueDate)
@@ -1602,6 +1646,13 @@ function resultLabel(value: string) {
           <div class="row-actions"><template v-if="editable&&actualStage===4"><el-button link data-readiness-target="previous-stage" @click="returnPrevious(2)">{{ uiText("返回画图") }}</el-button><el-button link @click="returnPrevious(3)">{{ uiText("重新3D打样") }}</el-button></template><el-button v-else-if="editable && actualStage > 1" link data-readiness-target="previous-stage" @click="returnPrevious()">{{ uiText("退回上一阶段") }}</el-button></div>
         </div>
         <div v-if="moldSupplier&&![1,5,7].includes(stage.step)" class="toolbar"><span>{{ uiText("开模供应商：") }}{{suppliers.find(s=>s.supplierCode===moldSupplier?.supplierCode)?.supplierName||moldSupplier.supplierCode}}</span><el-button v-if="editable&&detail.canChangeSupplier" link @click="openSupplierChange(moldSupplier)">{{ uiText("更换供应商") }}</el-button></div>
+        <section v-if="identity&&stage.step>=2" class="work-section" data-readiness-target="product-identity">
+          <div class="section-heading"><h3>{{uiText('产品编码')}} {{identity.productCode||uiText('待拟定')}}</h3><el-tag :type="identity.state==='confirmed'?'success':'warning'">{{uiText(productIdentityStateName(identity.state))}}</el-tag><el-button v-if="canProposeIdentity" :disabled="busy" @click="openProductIdentity">{{uiText(identity.state==='invalid_held'?'重新确认原拟定码':'填写／维护拟定编码')}}</el-button></div>
+          <p class="muted">{{uiText(identity.state==='confirmed'?'已完成最终发模，正式编码已写入产品资料。':'拟定中也占用编码；完成本项目发模后才正式生效，退回或停止会使拟定码失效。')}} <template v-if="identity.moldPrefix">{{uiText('模具前缀：')}}{{identity.moldPrefix}}</template></p>
+          <p v-if="identity.pinned&&identity.state!=='confirmed'" class="muted">{{uiText('已有业务引用，不能换码；失效后需明确重新确认原码。')}}</p>
+          <p v-if="stage.step===8&&!identityConfirmed" class="muted">{{uiText('请先完成本项目发模并确认编码，再形成正式包。')}}</p>
+          <el-button v-if="stage.step===8&&workflow.finalized&&detail.canPublish&&!published&&identityConfirmed" :disabled="busy" @click="publicationOpen=true">{{uiText('形成正式包')}}</el-button>
+        </section>
         <StageReadinessChecklist v-if="stage.step===actualStage" ref="readinessPanel" :product-id="id" :version="version" :stage="stage.step" :draft="stageDraft" :writable="editable" :busy="busy" @checked="readinessChecks=$event?.checks||[]" @locate="locateStageGap"/>
         <div class="development-workspace"><el-tabs v-model="tab" class="stage-tabs" :class="{'single-work-tab':![6,7].includes(stage.step)}" :before-leave="beforeStageTabLeave">
           <el-tab-pane :label="stage.step===6?uiText('制作与试模'):stage.step===7?uiText('试产资料'):''" name="work">
@@ -1628,7 +1679,7 @@ function resultLabel(value: string) {
               <template v-else-if="stage.step===8&&!confirmedPlan.needsMold"><p>{{ uiText("本项目已确认无需开模，发模不适用。") }}</p><el-button link @click="inspect(workflow.noMold,'无需开模依据')">{{ uiText("查看确认依据") }}</el-button></template>
               <template v-else-if="stage.step===8">
                 <h3 class="work-heading">{{ uiText("本批发模与物流") }}</h3>
-                <div class="toolbar"><el-button v-if="user.hasPermission('schedule:read')" @click="openSource('/mold-schedules',{projectId:id})">{{ uiText("登记实际发模／物流") }}</el-button><el-button v-if="editable" type="primary" :disabled="busy" @click="confirmShipmentBatch">{{ uiText("确认本批发模") }}</el-button><el-button v-if="workflow.finalized&&detail.canPublish&&!published" @click="publicationOpen=true">{{ uiText("形成正式包") }}</el-button><el-button v-if="canMaintainPublished" @click="openTask('start_revision')">{{ uiText("发起资料修订") }}</el-button></div>
+                <div class="toolbar"><el-button v-if="user.hasPermission('schedule:read')" @click="openSource('/mold-schedules',{projectId:id})">{{ uiText("登记实际发模／物流") }}</el-button><el-button v-if="editable" type="primary" :disabled="busy" @click="confirmShipmentBatch">{{ uiText("确认本批发模") }}</el-button><el-button v-if="workflow.finalized&&detail.canPublish&&!published&&!identity" @click="publicationOpen=true">{{ uiText("形成正式包") }}</el-button><el-button v-if="canMaintainPublished" @click="openTask('start_revision')">{{ uiText("发起资料修订") }}</el-button></div>
                 <article v-for="m in molds" :key="m.moldSetId" class="mold-row" :data-readiness-target="`shipment:${m.moldSetId}`"><strong>{{m.assetNumber||m.setName}}</strong><span>{{m.compatibleModels}}</span><span>{{m.actualShipDate||uiText('尚未发模')}}</span><el-button link @click="openSource('/mold-schedules',{projectId:id,moldSetId:m.moldSetId})">{{ uiText("查看／维护") }}</el-button></article>
                 <el-form class="step-fields" label-position="top" :disabled="!editable||busy"><el-form-item :label='uiText("本批模具套")' required><el-select v-model="stepForm.moldSetIds" multiple><el-option v-for="m in molds" :key="m.moldSetId" :value="m.moldSetId" :label="m.assetNumber||m.setName||String(m.moldSetId)"/></el-select></el-form-item><el-form-item :label='uiText("墨西哥收货地点／接收方")' required data-readiness-target="shipment"><el-input v-model="stepForm.recipient"/></el-form-item><el-form-item :label='uiText("物流说明")'><el-input v-model="stepForm.notes" type="textarea" autosize/></el-form-item><el-form-item :label='uiText("更正已确认批次时填写原因")'><el-input v-model="stepForm.reason" type="textarea" autosize/></el-form-item></el-form><article v-for="batch in (workflow.shipmentBatches as Form[]||[])" :key="batch.id" class="business-row"><strong>{{ uiText("发模批次 ") }}{{batch.id}}</strong><span>{{batch.recipient}} · {{batch.confirmedBy}} · {{batch.confirmedAt}}</span><el-button link @click="inspect(batch,'已确认发模批次')">{{ uiText("查看本批依据") }}</el-button></article>
               </template>
@@ -1879,6 +1930,16 @@ function resultLabel(value: string) {
                       >
                     </div>
                   </article>
+                  <article v-for="link in moldShareAdoptions" :key="link.moldShareConfirmation.confirmationId" class="business-row">
+                    <strong>{{uiText('仅共模采用')}} #{{link.moldShareConfirmation.confirmationId}} · {{uiText('实物套')}} #{{link.moldSetId}}</strong>
+                    <div v-for="(coding,index) in link.ownPhoneCoding" :key="index">
+                      <p>{{uiText('自身机型成品编码')}}：{{coding.codes?.join(' / ')||uiText('待补齐生成条件')}}</p>
+                      <p v-for="message in coding.missingMessages" :key="message">{{uiText(message)}}</p>
+                    </div>
+                    <p>{{link.reason}}</p>
+                    <p v-for="snapshot in link.moldShareConfirmation.moldSnapshots" :key="snapshot.relationId">{{snapshot.mappingSnapshots?.map((mapping:any)=>`${mapping.referencePhoneName} · ${mapping.moldCode} · V${mapping.version} · ${mapping.evidence}`).join('；')}}</p>
+                    <el-button v-if="editable&&actualStage>=5&&link.ownPhoneCoding?.some((coding:any)=>coding.status==='pending')" :disabled="busy" @click="action(()=>command('mold_share_coding',{confirmationId:link.moldShareConfirmation.confirmationId}))">{{uiText('补齐资料后续办编码')}}</el-button>
+                  </article>
                   <article
                     v-for="a in applications.filter((a) => !a.moldSetId&&stage.step!==5)"
                     :key="a.applicationId"
@@ -2093,7 +2154,7 @@ function resultLabel(value: string) {
               >
 
               <SupplierFeedbackPanel ref="supplierFeedbackPanel" :records="detail.supplierFeedback||[]" :restricted="detail.supplierFeedbackRestricted" :next-supplier-pending="nextMoldSupplierPending" :suppliers="suppliers" :materials="currentMaterials" :assignments="((workflow.planDraft as Form)?.supplierAssignments||(workflow.plan as Form)?.supplierAssignments||[])" :editable="editable&&!!detail.canChangeSupplier&&!plan.suppliersRestricted" :busy="busy" :context="supplierFeedbackContext" :error="error" :default-supplier-code="moldSupplier?.supplierCode" @save="submitSupplierFeedback" @upload="prepareUpload()" @view="viewMaterial" @download="downloadMaterial"/>
-              <EngineeringBasisPanel v-if="stage.step===7" :assignments="plan.supplierAssignments||[]" @update:assignments="plan.supplierAssignments=$event" :selected="keys" @update:selected="updateMaterialKeys" :materials="currentMaterials" :suppliers="suppliers" :product-specific-code="detail.productSpecificCode" :can-maintain-product-identity="!!detail.canMaintainProductIdentity" :persisted-assignments="((workflow.planDraft as Form)?.supplierAssignments||(workflow.plan as Form)?.supplierAssignments||[])" :can-change-supplier="editable&&!!detail.canChangeSupplier&&!plan.suppliersRestricted" @change-supplier="openSupplierChange" @identity="openProductIdentity" :summary="detail.engineering" :editable="materialsEditable" :assignments-editable="editable" :suppliers-restricted="!!plan.suppliersRestricted" :can-select-supplier="canSelectSupplier" :can-confirm="!!detail.canConfirmEngineering&&editable" :can-manage-supplier="user.hasPermission('supplier:view')" :busy="busy" v-model:reason="engineeringReason" @confirm="confirmEngineering" @engineering="openEngineering" @suppliers="openSupplierMaterials" @locate="locateEngineeringGap"/>
+              <EngineeringBasisPanel v-if="stage.step===7" :assignments="plan.supplierAssignments||[]" @update:assignments="plan.supplierAssignments=$event" :selected="keys" @update:selected="updateMaterialKeys" :materials="currentMaterials" :suppliers="suppliers" :product-specific-code="detail.productSpecificCode" :product-identity="detail.productIdentity" :can-maintain-product-identity="!!detail.canMaintainProductIdentity" :persisted-assignments="((workflow.planDraft as Form)?.supplierAssignments||(workflow.plan as Form)?.supplierAssignments||[])" :can-change-supplier="editable&&!!detail.canChangeSupplier&&!plan.suppliersRestricted" @change-supplier="openSupplierChange" @identity="openProductIdentity" :summary="detail.engineering" :editable="materialsEditable" :assignments-editable="editable" :suppliers-restricted="!!plan.suppliersRestricted" :can-select-supplier="canSelectSupplier" :can-confirm="!!detail.canConfirmEngineering&&editable" :can-manage-supplier="user.hasPermission('supplier:view')" :busy="busy" v-model:reason="engineeringReason" @confirm="confirmEngineering" @engineering="openEngineering" @suppliers="openSupplierMaterials" @locate="locateEngineeringGap"/>
               <ResearchMaterialsPanel ref="materialsPanel" :materials="stage.step<7?currentMaterials.filter(m=>!['bom','process'].includes(m.type)):currentMaterials" :selected="keys" @update:selected="updateMaterialKeys" :editable="editable" :selectable="materialsEditable" :busy="busy" :hide-engineering="stage.step<7" @upload="prepareUpload" @files="prepareLocalUpload" @view="viewMaterial" @download="downloadMaterial" @remove="removeMaterial" @engineering="openEngineering" @refresh="action(reloadMaterials)">
                 <template #notice><Product3dMaterials v-if="[2,3].includes(stage.step)" :materials="currentMaterials" :selected="keys" :saved-references="savedProduct3dReferences" :uploadable="editable" :selectable="materialsEditable" :busy="busy" @update:selected="updateMaterialKeys" @upload="prepareProduct3dUpload" @view="viewMaterial"/><section v-for="application in originalApplicationFiles" :key="application.applicationId" class="original-application-files" :aria-label="uiText('原LEMOS审批附件 {value0}',{value0:(application.approvalNo||application.applicationId)})"><header><div><strong>{{ uiText("原LEMOS审批附件") }}</strong><span>{{application.approvalNo||uiText('申请 #{value0}',{value0:(application.applicationId)})}} · {{application.files.length}}{{ uiText(" 份") }}</span></div><el-button v-if="application.canArchiveFiles&&application.files.some((file:any)=>file.downloadStatus!=='downloaded'&&file.downloadStatus!=='pending_upload')" :disabled="busy" @click="archiveApplicationFiles(application)">{{application.files.some((file:any)=>file.downloadStatus==='download_failed')?uiText('重试归档原附件'):uiText('归档原审批附件')}}</el-button></header><p>{{ uiText("原审批资料仅供查看，不自动作为本阶段评审采用版本。") }}</p><div class="original-file-grid"><MoldApplicationFile v-for="file in application.files" :key="`${application.applicationId}:${file.attachmentId}`" :application-id="application.applicationId" :file="file" :active="tab==='work'" compact/></div></section></template>
               </ResearchMaterialsPanel>
@@ -2151,6 +2212,15 @@ function resultLabel(value: string) {
         ></template
       ></el-dialog
     >
+    <el-dialog v-model="identityOpen" :title="uiText('拟定产品编码')" width="min(460px,94vw)" :close-on-click-modal="false" :close-on-press-escape="!busy" :show-close="!busy">
+      <el-form label-position="top" :disabled="busy">
+        <el-form-item :label="uiText('拟定产品编码')" required><el-input v-model="identityInput" maxlength="3" placeholder="NAB" :readonly="identity?.pinned||identity?.state==='invalid_held'"/></el-form-item>
+        <p>{{uiText('产品以 N 开头，后接两位字母；模具前缀对应为 M 开头。保存时再次查重并占号。')}}</p>
+        <el-button :disabled="busy" @click="checkIdentity">{{uiText('检查是否可用')}}</el-button><span v-if="identityAvailability!==null" role="status">{{uiText(identityAvailability?'当前可用，保存时将再次校验':'编码已被占用，请重新拟定')}}</span>
+        <el-form-item :label="uiText('维护／重新确认原因')" :required="identity?.state==='invalid_held'"><el-input v-model="identityReason" type="textarea" maxlength="2000"/></el-form-item>
+      </el-form>
+      <template #footer><el-button :disabled="busy" @click="identityOpen=false">{{uiText('取消')}}</el-button><el-button type="primary" :loading="busy" :disabled="!canProposeIdentity" @click="saveIdentity">{{uiText(identity?.state==='invalid_held'?'重新确认原码':'保存并占号')}}</el-button></template>
+    </el-dialog>
     <el-dialog
       v-model="snapshotOpen"
       :title="snapshotTitle"

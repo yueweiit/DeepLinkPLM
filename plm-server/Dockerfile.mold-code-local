@@ -1,0 +1,10 @@
+FROM docker.m.daocloud.io/library/maven:3.9-eclipse-temurin-17 AS build
+WORKDIR /build
+COPY pom.xml .
+COPY src ./src
+RUN mvn package -DskipTests -B -q
+
+FROM yuewei-plm-server:local-listing-phone-fix-20261112
+USER root
+COPY --from=build --chown=plm:plm /build/target/*.jar /app/app.jar
+USER plm

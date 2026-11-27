@@ -3,6 +3,8 @@ import { t as uiText } from '@/locales'
 
 import { useRoute } from 'vue-router'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useMediaQuery } from '@vueuse/core'
+import { Filter, Search } from '@element-plus/icons-vue'
 import { getOperationLogs, getSystemUsers, type OperationLogItem, type OperationLogQuery } from '@/api/modules/system'
 import type { PilotUser } from '@/types/pilot'
 import { useUserStore } from '@/stores/user'
@@ -15,6 +17,9 @@ const projectId=computed(()=>Number(route.query.projectId)||undefined);
 const user = useUserStore(), accounts = ref<PilotUser[]>([]), operatorUserId = ref<number>(), action = ref('')
 const timeRange = ref<[string,string] | null>(null), page = ref(1), size = ref(50), error = ref(''), selected = ref<OperationLogItem>(), detailVisible = ref(false)
 const request = useCachedRequest(getOperationLogs)
+const compact = useMediaQuery('(max-width: 680px)')
+const mobileFiltersExpanded = ref(false)
+const activeMobileFilterCount = computed(() => Number(operatorUserId.value != null) + Number(Boolean(timeRange.value)))
 const rows = computed(() => request.hasCurrentData.value ? request.data.value?.content || [] : [])
 const total = computed(() => request.data.value?.totalElements || 0)
 let timer: ReturnType<typeof setTimeout> | undefined, generation = 0
@@ -54,15 +59,25 @@ onBeforeUnmount(()=>{generation++;clearTimeout(timer)})
   <PageContainer class="operation-log-page" :title="projectId?uiText('系统日志 · 本项目'):uiText('系统日志')">
     <template #actions><el-button @click="load(true)">{{ uiText("刷新日志") }}</el-button></template>
     <section class="page-panel operation-log-panel">
-      <div class="log-filters">
+      <div class="log-filters log-filters--desktop">
         <el-select v-if="!projectId" v-model="operatorUserId" clearable filterable :placeholder='uiText("全部真实账号")' :aria-label='uiText("操作账号")'><el-option v-for="account in accounts" :key="account.userId" :value="account.userId" :label="uiText('{value0} · {value1}{value2}',{value0:(account.displayName),value1:(account.username),value2:(account.status==='inactive'?'（已停用）':'')})" /></el-select>
         <el-input v-model="action" clearable :placeholder="projectId?uiText('操作类型，如 supplier_change'):uiText('动作代码，如 AUTH_LOGIN')" :aria-label='uiText("动作代码")' />
         <el-date-picker v-model="timeRange" type="datetimerange" value-format="YYYY-MM-DDTHH:mm:ss" start-placeholder="开始时间（服务器本地）" end-placeholder="结束时间（服务器本地）" range-separator="至" :aria-label='uiText("操作时间范围")' />
         <el-button @click="clearFilters">{{ uiText("清除筛选") }}</el-button>
       </div>
+      <div class="log-filters log-filters--mobile">
+        <el-input v-model="action" clearable :placeholder="projectId?uiText('操作类型'):uiText('动作代码')" :aria-label='uiText("动作代码")' @keyup.enter="reset" />
+        <el-button type="primary" :icon="Search" :aria-label='uiText("搜索")' :title='uiText("搜索")' @click="reset" />
+        <el-button :type="mobileFiltersExpanded || activeMobileFilterCount ? 'primary' : 'default'" :icon="Filter" :aria-label='uiText("更多筛选")' :title='uiText("更多筛选")' :aria-expanded="mobileFiltersExpanded" @click="mobileFiltersExpanded=!mobileFiltersExpanded" />
+        <div v-if="mobileFiltersExpanded" class="log-filters__advanced">
+          <el-select v-if="!projectId" v-model="operatorUserId" clearable filterable :placeholder='uiText("全部真实账号")' :aria-label='uiText("操作账号")'><el-option v-for="account in accounts" :key="account.userId" :value="account.userId" :label="uiText('{value0} · {value1}{value2}',{value0:(account.displayName),value1:(account.username),value2:(account.status==='inactive'?'（已停用）':'')})" /></el-select>
+          <el-date-picker v-model="timeRange" type="datetimerange" value-format="YYYY-MM-DDTHH:mm:ss" start-placeholder="开始时间（服务器本地）" end-placeholder="结束时间（服务器本地）" range-separator="至" :aria-label='uiText("操作时间范围")' />
+          <el-button @click="clearFilters">{{ uiText("清除筛选") }}</el-button>
+        </div>
+      </div>
 
       <el-alert v-if="error || request.error.value" :title="error || request.error.value" type="error" :closable="false" />
-      <FixedTableViewport v-slot="{tableHeight}" fill :refresh-key="rows"><el-table :data="rows" :height="tableHeight" v-loading="request.loading.value" row-key="logId" border class="operation-log-table">
+      <FixedTableViewport class="operation-log-table-wrap" v-slot="{tableHeight}" fill :refresh-key="rows"><el-table :data="rows" :height="tableHeight" v-loading="request.loading.value" row-key="logId" border class="operation-log-table">
         <el-table-column :label='uiText("记录时间")' width="180"><template #default="{row}">{{ timestamp(row.createdAt) }}</template></el-table-column>
         <el-table-column :label='uiText("真实操作者")' min-width="180"><template #default="{row}"><strong>{{ display(row.operatorUserName) }}</strong><small v-if="row.operatorUserId!=null">{{ uiText("账号 ID ") }}{{ row.operatorUserId }}<span v-if="loginName(row.operatorUserId)"> · {{ loginName(row.operatorUserId) }}</span></small></template></el-table-column>
         <el-table-column prop="action" :label='uiText("动作代码")' min-width="230" />
@@ -72,7 +87,22 @@ onBeforeUnmount(()=>{generation++;clearTimeout(timer)})
         <el-table-column :label='uiText("已有详情")' fixed="right" width="110"><template #default="{row}"><el-button link type="primary" @click="open(row)">{{ uiText("查看详情") }}</el-button></template></el-table-column>
         <template #empty>{{ uiText("暂无符合条件的实际操作记录。") }}</template>
       </el-table></FixedTableViewport>
-      <el-pagination v-model:current-page="page" v-model:page-size="size" :page-sizes="[20,50,100]" :total="total" layout="total,sizes,prev,pager,next,jumper" @current-change="load()" />
+      <div class="operation-log-cards" v-loading="request.loading.value" data-test="operation-log-mobile-list">
+        <article v-for="row in rows" :key="row.logId" class="operation-log-card">
+          <header>
+            <div><strong>{{ display(row.action) }}</strong><small>{{ timestamp(row.createdAt) }}</small></div>
+            <el-tag :type="row.result==='success'?'success':'info'">{{ row.result==='success'?uiText('成功'):display(row.result) }}</el-tag>
+          </header>
+          <dl>
+            <div><dt>{{ uiText("真实操作者") }}</dt><dd>{{ display(row.operatorUserName) }}<span v-if="row.operatorUserId!=null"> · {{ loginName(row.operatorUserId) || `ID ${row.operatorUserId}` }}</span></dd></div>
+            <div><dt>{{ uiText("业务对象") }}</dt><dd>{{ display(row.businessName) }}<small>{{ display(row.businessType) }} · ID {{ display(row.businessId) }}<span v-if="row.businessCode"> · {{ row.businessCode }}</span></small></dd></div>
+            <div><dt>{{ uiText("请求追踪 ID") }}</dt><dd>{{ display(row.requestId) }}</dd></div>
+          </dl>
+          <el-button link type="primary" @click="open(row)">{{ uiText("查看详情") }}</el-button>
+        </article>
+        <el-empty v-if="!request.loading.value && !rows.length" :description="uiText('暂无符合条件的实际操作记录。')" />
+      </div>
+      <el-pagination v-model:current-page="page" v-model:page-size="size" :page-sizes="[20,50,100]" :total="total" :layout="compact ? 'prev,pager,next' : 'total,sizes,prev,pager,next,jumper'" @current-change="load()" />
     </section>
     <el-drawer v-model="detailVisible" :title='uiText("已有操作详情")' size="min(1100px,95vw)"><section v-if="selected" class="log-detail">
       <dl><dt>{{ uiText("真实操作者（历史名称）") }}</dt><dd>{{ display(selected.operatorUserName) }}{{ uiText(" · 账号 ID ") }}{{ display(selected.operatorUserId) }}</dd><dt>{{ uiText("记录时间") }}</dt><dd>{{ timestamp(selected.createdAt) }}</dd><dt>{{ uiText("动作代码") }}</dt><dd>{{ selected.action }}</dd><dt>{{ uiText("业务对象") }}</dt><dd>{{ display(selected.businessType) }} · {{ display(selected.businessId) }} · {{ display(selected.businessName) }}</dd><dt>{{ uiText("请求追踪 ID") }}</dt><dd>{{ display(selected.requestId) }}</dd></dl>
@@ -85,4 +115,8 @@ onBeforeUnmount(()=>{generation++;clearTimeout(timer)})
 .operation-log-page{height:100%;min-height:0;display:flex;flex-direction:column}.operation-log-page>:deep(header){flex:none}
 .operation-log-panel{flex:1;min-height:0}.operation-log-panel>.log-filters,.operation-log-panel>.log-note,.operation-log-panel>.el-alert,.operation-log-panel>.el-pagination{flex:none}
 .operation-log-panel{display:flex;flex-direction:column;gap:16px;min-width:0}.log-filters{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.log-filters>.el-select{width:240px}.log-filters>.el-input{min-width:280px;flex:1}.log-filters :deep(.el-date-editor){min-width:400px;flex:1}.log-note{margin:0;font-size:12px;color:#718399;line-height:1.8}.operation-log-table small{display:block;color:#748399;font-size:12px;margin-top:6px}.operation-log-panel .el-pagination{justify-content:flex-end}.log-detail{display:flex;flex-direction:column;gap:20px}.log-detail dl{display:grid;grid-template-columns:190px minmax(0,1fr);gap:14px;margin:0}.log-detail dt{color:#718399}.log-detail dd{margin:0;overflow-wrap:anywhere}.log-detail pre{margin:0;padding:20px;background:#f4f7fb;border:1px solid #e1e8f2;border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7;font-size:13px}@media(max-width:680px){.log-filters :deep(.el-date-editor){min-width:0;width:100%;flex-basis:100%}.log-detail dl{grid-template-columns:1fr}}
+.operation-log-cards{display:none;min-width:0;gap:10px}.operation-log-card{min-width:0;padding:12px;border:1px solid var(--el-border-color-lighter);border-radius:8px;background:var(--el-bg-color);overflow-wrap:anywhere}.operation-log-card>header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.operation-log-card>header strong,.operation-log-card>header small,.operation-log-card dd small{display:block}.operation-log-card>header small,.operation-log-card dd small{margin-top:4px;color:var(--el-text-color-secondary);font-size:12px}.operation-log-card dl{display:grid;gap:8px;margin:12px 0}.operation-log-card dl>div{display:grid;grid-template-columns:92px minmax(0,1fr);gap:8px}.operation-log-card dt{color:var(--el-text-color-secondary)}.operation-log-card dd{min-width:0;margin:0;overflow-wrap:anywhere}.operation-log-card .el-button{min-height:36px}
+@media(max-width:680px){.operation-log-table-wrap{display:none}.operation-log-cards{display:grid}.operation-log-panel{gap:12px}.log-filters>.el-select,.log-filters>.el-input,.log-filters :deep(.el-date-editor){width:100%;min-width:0;flex:1 1 100%}.operation-log-panel .el-pagination{justify-content:center}.operation-log-card dl>div{grid-template-columns:84px minmax(0,1fr)}}
+.log-filters--mobile{display:none}
+@media(max-width:680px){.log-filters--desktop{display:none}.log-filters--mobile{display:grid;grid-template-columns:minmax(0,1fr) 40px 40px;align-items:center;gap:6px}.log-filters--mobile>.el-input,.log-filters--mobile>.el-button{min-width:0;margin:0}.log-filters--mobile>.el-input :deep(.el-input__wrapper){min-height:40px}.log-filters--mobile>.el-button{width:40px;height:40px;min-height:40px;padding:0}.log-filters__advanced{display:grid;grid-column:1/-1;grid-template-columns:1fr;gap:8px;padding-top:8px;border-top:1px solid var(--el-border-color-lighter)}.log-filters__advanced>.el-select,.log-filters__advanced :deep(.el-date-editor){width:100%;min-width:0}.log-filters__advanced>.el-button{justify-self:end}}
 </style>

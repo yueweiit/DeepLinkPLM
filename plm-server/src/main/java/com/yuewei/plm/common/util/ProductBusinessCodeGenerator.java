@@ -18,22 +18,43 @@ public class ProductBusinessCodeGenerator {
     public static final String MOLD_PREFIX = "M";
     public static final String PRODUCT_STATE_PREFIX = "N";
     public static final String DEFAULT_FINAL_OPERATION_CODE = "4030";
+    public static final String SHARED_PRODUCT_MAPPING_CODE_REGEX = "N([A-Z]{2})([0-9]{4})([DJH])([0-9]{4})([A-Z0-9]{2})";
     public static final String TPU_MATERIAL_CODE = "10";
     public static final String PC_MATERIAL_CODE = "20";
     public static final String PRODUCT_STATE_CODE_REGEX = "N([A-Z]{2})[0-9]{4}([0-9]{4})[A-Z0-9]{2}";
     /** Product prefix (MBA) + two-digit material (10) + four-digit phone (1199). */
-    public static final String COMPLETE_MOLD_CODE_REGEX = "M[A-Z]{2}[0-9]{6}";
+    public static final String COMPLETE_MOLD_CODE_REGEX = "M[A-Z]{2}[0-9]{2}[DJH]?[0-9]{4}";
     private static final Pattern COMPLETE_MOLD_CODE_PATTERN = Pattern.compile(COMPLETE_MOLD_CODE_REGEX);
+    private static final Pattern SHARED_PRODUCT_MAPPING_CODE_PATTERN = Pattern.compile(SHARED_PRODUCT_MAPPING_CODE_REGEX);
     private static final Pattern COMPLETE_MOLD_CODES_IN_TEXT = Pattern.compile("(?i)(?<![A-Z0-9_-])" + COMPLETE_MOLD_CODE_REGEX + "(?![A-Z0-9_-])");
     // Five-character source prefixes remain readable as catalogue evidence, without a phone identity.
-    private static final Pattern IMPORTED_MOLD_CODE_PATTERN = Pattern.compile("([A-Z]{3})([0-9]{2})([0-9]{4})?");
-    private static final Pattern MOLD_CODE_PATTERN = Pattern.compile("(?i)(?<![A-Z0-9_-])[A-Z]{3}\\d{2,}(?![A-Z0-9_-])");
+    private static final Pattern IMPORTED_MOLD_CODE_PATTERN = Pattern.compile("([A-Z]{3})([0-9]{2})(?:([DJH]?)([0-9]{4}))?");
+    private static final Pattern MOLD_CODE_PATTERN = Pattern.compile("(?i)(?<![A-Z0-9_-])[A-Z]{3}(?:[0-9]{2}[DJH][0-9]{4}|[0-9]{2,})(?![A-Z0-9_-])");
 
     public String generateMoldCode(String productSpecificCode, String materialCode, String phoneModelCode) {
         String product = requiredSegment(productSpecificCode, "[A-Z]{2}", "产品特定编码须为两位英文字母");
         String material = requiredSegment(materialCode, "[0-9]{2}", "材质编码须为两位数字");
         String phone = requiredSegment(phoneModelCode, "[0-9]{4}", "手机型号编码须为四位数字");
         return MOLD_PREFIX + product + material + phone;
+    }
+
+    /** Version 2 is opt-in: the legacy three-argument contract stays unchanged. */
+    public String generateMoldCode(String productSpecificCode, String materialCode, String phoneModelCode, String holeType) {
+        String legacy = generateMoldCode(productSpecificCode, materialCode, phoneModelCode);
+        String marker = ManufacturingHole.moldMarker(holeType);
+        if (marker.isEmpty()) throw validation("新模具编码请选择大孔(D)、精孔(J)或混合(H)，历史其他孔型须先由工程明确");
+        return legacy.substring(0, 5) + marker + legacy.substring(5);
+    }
+
+    public static String moldPhoneCode(String value) {
+        if (!isCompleteMoldCode(value)) throw new BusinessException(ErrorCodeConstants.VALIDATION_ERROR, "请提供完整模具编码");
+        String code=value.trim().toUpperCase(Locale.ROOT);
+        return code.substring(code.length()-4);
+    }
+
+    public static String moldHoleMarker(String value) {
+        if (!isCompleteMoldCode(value)) throw new BusinessException(ErrorCodeConstants.VALIDATION_ERROR, "请提供完整模具编码");
+        return value.trim().length()==10 ? value.trim().substring(5,6).toUpperCase(Locale.ROOT) : "";
     }
 
     public String generateProductStateCode(String productSpecificCode, String operationCode,
@@ -43,6 +64,31 @@ public class ProductBusinessCodeGenerator {
         String phone = requiredSegment(phoneModelCode, "[0-9]{4}", "手机型号编码须为四位数字");
         String color = requiredSegment(colorCode, "[A-Z0-9]{2}", "颜色编码须为两位字母或数字");
         return PRODUCT_STATE_PREFIX + product + operation + phone + color;
+    }
+
+    /** Shared finished-product identity; ordinary SKU codes keep using generateProductStateCode. */
+    public String generateSharedProductMappingCode(String productSpecificCode, String operationCode,
+                                                   String holeType, String referencePhoneModelCode,
+                                                   String colorCode) {
+        String product = requiredSegment(productSpecificCode, "[A-Z]{2}", "产品特定编码须为两位英文字母");
+        String operation = requiredSegment(operationCode, "[0-9]{4}", "工序编码须为四位数字");
+        String marker = ManufacturingHole.moldMarker(holeType);
+        if (!StringUtils.hasText(marker)) throw validation("共用成品映射请选择大孔(D)、精孔(J)或混合(H)");
+        String phone = requiredSegment(referencePhoneModelCode, "[0-9]{4}", "基准手机型号编码须为四位数字");
+        String color = requiredSegment(colorCode, "[A-Z0-9]{2}", "颜色编码须为两位字母或数字");
+        return PRODUCT_STATE_PREFIX + product + operation + marker + phone + color;
+    }
+
+    public SharedProductMappingCodeParts parseSharedProductMappingCode(String value) {
+        String code = requiredCode(value, "共用成品映射码不能为空");
+        Matcher parsed = SHARED_PRODUCT_MAPPING_CODE_PATTERN.matcher(code);
+        if (!parsed.matches()) throw validation("共用成品映射码长度或字段格式不正确: " + code);
+        String product = parsed.group(1), operation = parsed.group(2), marker = parsed.group(3);
+        String phone = parsed.group(4), color = parsed.group(5);
+        String hole = switch (marker) { case "D" -> "large"; case "J" -> "precision"; case "H" -> "mixed"; default -> throw validation("孔型标记无效"); };
+        String expected = generateSharedProductMappingCode(product, operation, hole, phone, color);
+        if (!expected.equals(code)) throw validation("共用成品映射码与系统规则不一致: " + code);
+        return new SharedProductMappingCodeParts(code, product, operation, hole, phone, color);
     }
 
     public String generateProductLineCode(String productSpecificCode, String operationCode) {
@@ -144,7 +190,7 @@ public class ProductBusinessCodeGenerator {
             && !Objects.equals(productSpecificCode, normalizeCode(expectedProductSpecificCode))) {
             throw validation("模具编码产品特定编码与钉钉字段不一致: " + code);
         }
-        String phoneModelCode = parsed.group(3);
+        String phoneModelCode = parsed.group(4);
         if (StringUtils.hasText(expectedPhoneModelCode)
             && !Objects.equals(phoneModelCode, requiredSegment(expectedPhoneModelCode, "[0-9]{4}", "手机型号编码须为四位数字"))) {
             throw validation("模具编码手机型号编码与业务字段不一致: " + code);
@@ -188,4 +234,8 @@ public class ProductBusinessCodeGenerator {
     public record ProductStateCodeParts(String productStateCode, String productSpecificCode, String operationCode,
                                         String phoneModelCode, String colorCode, boolean finishedProduct,
                                         String expectedProductStateCode) {}
+
+    public record SharedProductMappingCodeParts(String code, String productSpecificCode, String operationCode,
+                                                 String holeType, String referencePhoneModelCode,
+                                                 String colorCode) {}
 }

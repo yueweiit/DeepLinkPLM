@@ -2,6 +2,7 @@
 import { t as uiText } from '@/locales'
 
 import { computed, onMounted, reactive, ref, watch, nextTick } from 'vue'
+import { Filter, Search } from '@element-plus/icons-vue'
 import { ElMessage,ElMessageBox } from 'element-plus'
 import { useRouter,useRoute } from 'vue-router'
 import {useCollaborationWorkspace} from '@/stores/collaborationWorkspace'
@@ -95,11 +96,11 @@ onMounted(setup)
 </script>
 
 <template>
-  <main class="market-watch" :aria-label='uiText("开模申请市场机型")'>
+  <main class="market-watch" :class="{'mobile-filters-open':moreFilters}" :aria-label='uiText("开模申请市场机型")'>
     <header class="page-head"><h2>{{ uiText("开模申请") }}</h2><span class="total">{{ uiText("共 ") }}{{result?.totalElements||0}}{{ uiText(" 款") }}</span><div class="actions"><el-button size="small" @click="router.push('/mold-applications')">{{ uiText("开模申请进度") }}</el-button><el-popover placement="bottom-end" trigger="click" :width="160" :persistent="false"><template #reference><el-button size="small">{{ uiText("资料与来源") }}</el-button></template><div class="secondary-actions"><el-button v-if="canMaintain" size="small" text @click="router.push({path:'/phone-model-codes'})">{{ uiText("手机编码资料") }}</el-button><el-button v-if="user.hasPermission('mold-application:convert')" size="small" text @click="historyReview=true">{{ uiText("历史补链与缺项") }}</el-button><el-button v-if="canMaintain" size="small" text @click="salesCatalogVisible=true">{{ uiText("在售产品与审批别名") }}</el-button><el-button size="small" text @click="archive()">{{ uiText("历史市场资料维护") }}</el-button><el-button v-if="canMatch" size="small" text :loading="reconciling" @click="reconcile">{{ uiText("一键关联手机资料") }}</el-button><el-button v-if="config?.enabled&&canMatch" size="small" text :loading="pricesRefreshing" @click="retryPrices">{{ uiText("批量更新手机价格") }}</el-button><el-button v-if="config?.enabled" size="small" text :loading="syncing" @click="refresh">{{ uiText("刷新来源") }}</el-button></div></el-popover><el-button v-if="canCreate" type="primary" size="small" @click="editApplication()">{{ uiText("手动发起申请") }}</el-button></div></header>
     <el-alert v-if="config&&!config.enabled" :title='uiText("市场来源同步已关闭，显示已缓存资料；仍可手动发起申请")' type="info" :closable="false"/>
     <el-alert v-if="submittedId" :title='uiText("开模申请已提交，可在申请进度查看审批及后续建档")' type="success" :closable="true" @close="submittedId=undefined"><el-button link @click="openApplication(submittedId!)">{{ uiText("查看申请进度") }}</el-button></el-alert>
-      <section class="filters"><el-input v-model="query.keyword" size="small" clearable :placeholder='uiText("搜索手机／型号编码／产品／模具刻码")' @keyup.enter="filter"/><el-select v-model="query.productLineId" size="small" clearable filterable :placeholder='uiText("全部产品／款式")' @change="filter"><el-option v-for="line in productLines" :key="line.productLineId" :value="line.productLineId" :label="line.productName"/></el-select><el-button size="small" @click="moreFilters=!moreFilters" :aria-expanded="moreFilters">{{ uiText("更多筛选") }}</el-button><el-button size="small" type="primary" @click="filter">{{ uiText("查询") }}</el-button><el-button size="small" @click="reset">{{ uiText("重置") }}</el-button></section>
+      <section class="filters"><el-input v-model="query.keyword" size="small" clearable :placeholder='uiText("搜索手机／型号编码／产品／模具刻码")' @keyup.enter="filter"/><el-select class="market-filter-product" v-model="query.productLineId" size="small" clearable filterable :placeholder='uiText("全部产品／款式")' @change="filter"><el-option v-for="line in productLines" :key="line.productLineId" :value="line.productLineId" :label="line.productName"/></el-select><el-button class="market-filter-toggle" size="small" :icon="Filter" :aria-label='uiText("更多筛选")' :title='uiText("更多筛选")' @click="moreFilters=!moreFilters" :aria-expanded="moreFilters">{{ uiText("更多筛选") }}</el-button><el-button class="market-filter-search" size="small" type="primary" :icon="Search" :aria-label='uiText("查询")' :title='uiText("查询")' @click="filter">{{ uiText("查询") }}</el-button><el-button class="market-filter-reset" size="small" @click="reset">{{ uiText("重置") }}</el-button></section>
       <section v-if="moreFilters" class="advanced"><el-select v-model="query.coverageState" size="small" clearable :placeholder='uiText("实物／适配状态")' @change="filter"><el-option v-for="(name,key) in states" :key="key" :value="key" :label="name"/></el-select><el-select v-model="query.brandId" size="small" clearable filterable :placeholder='uiText("全部品牌")' @change="filter"><el-option v-for="b in brands" :key="b.brandId" :value="b.brandId" :label="b.name"/></el-select><el-select v-model="query.country" size="small" clearable :placeholder='uiText("来源国家／地区")' @change="filter"><el-option v-for="country in ['MX','CN','KR','GLOBAL']" :key="country" :value="country" :label="country"/></el-select><el-select v-model="query.matchState" size="small" clearable :placeholder='uiText("手机匹配状态")' @change="filter"><el-option value="matched" :label='uiText("已关联标准手机")'/><el-option value="unmatched" :label='uiText("待匹配")'/><el-option value="ambiguous" :label='uiText("匹配有歧义")'/></el-select></section>
       <section class="status-bar" role="tablist" :aria-label='uiText("开模机会视图")'><button v-for="view in views" :key="view.value" role="tab" :aria-selected="query.opportunityView===view.value" :class="[view.value,{active:query.opportunityView===view.value}]" @click="viewFilter(view.value)">{{uiText(String((view.label) ?? ''))}} {{stats?.opportunities?.[view.value]??(view.value==='all'?stats?.total||0:0)}}</button><span class="sync">{{ uiText("最后成功同步 ") }}{{date(result?.sync.lastSuccessAt)}}</span></section>
       <el-alert v-if="error||result?.sync.lastError" :title="error||uiText('来源同步失败：{value0}；当前显示上次成功同步资料',{value0:(result?.sync.lastError)})" type="error" :closable="false"><el-button link size="small" @click="error?load():refresh()">{{ uiText("重试") }}</el-button></el-alert>
@@ -145,4 +146,30 @@ onMounted(setup)
 .status-bar button{border:1px solid transparent;background:#f3f5f8}.status-bar button.active{border-color:#9fc1f0;background:#eaf2ff;font-weight:600}.status-bar .molded{color:#21754e}.status-bar .to_apply{color:#99631c}.status-bar .making{color:#2867b6}.status-bar .applied{color:#7559a6}.phone-overview-heading{display:flex;align-items:center;gap:16px}.phone-overview-heading header{min-width:0;flex:1}.phone-overview-heading .phone-gallery{max-width:144px;overflow:hidden}.model-detail{min-width:0}.model-detail>section,.model-detail>details{min-width:0}.phone-price-section{padding:12px 0}.price-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:8px}.price-card{padding:12px;border:1px solid #e0e7ef;border-radius:6px;min-width:0;background:#f8fafc}.price-card-heading{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.price-card-heading strong{font-size:18px;color:#213e5d}.price-card-heading span{color:#6c7f94}.price-card p{overflow-wrap:anywhere}.price-empty{padding:10px;background:#f7f9fc;color:#7a8899;border-radius:5px}.secondary-detail{border-top:1px solid #e4e9f0;padding:10px 0}.secondary-detail>summary{cursor:pointer;color:#59738f;line-height:24px}.model-detail a{overflow-wrap:anywhere;word-break:break-word}.source-record{min-width:0}.plan-action{display:flex;align-items:center;gap:8px;color:#7a8899;margin-top:6px}.plan-action .el-button{padding-left:0}.coverage-section{scroll-margin-top:12px}
 </style>
 
+<style scoped>
+@container(max-width:650px){
+  .market-watch>.page-head h2{display:none}
+  .market-watch>.page-head{min-height:32px}
+  .market-watch>.page-head>.actions{margin-left:auto}
+  .market-watch>.filters{display:grid;grid-template-columns:minmax(0,1fr) 40px 40px;align-items:center;gap:6px}
+  .market-watch>.filters>.el-input{grid-column:1;min-width:0;width:100%;flex-basis:auto!important}
+  .market-watch>.filters>.market-filter-product{display:none}
+  .market-watch>.filters>.market-filter-toggle,
+  .market-watch>.filters>.market-filter-search{width:40px;height:40px;min-height:40px;padding:0;overflow:hidden;font-size:0}
+  .market-watch>.filters>.market-filter-toggle :deep(.el-icon),
+  .market-watch>.filters>.market-filter-search :deep(.el-icon){font-size:18px}
+  .market-watch.mobile-filters-open>.filters>.market-filter-product{display:flex;grid-column:1/-1;width:100%;min-width:0}
+  .market-watch>.filters>.market-filter-reset{display:none}
+  .market-watch.mobile-filters-open>.filters>.market-filter-reset{display:inline-flex;grid-column:1/-1;justify-self:end;width:auto;height:32px;min-height:32px;font-size:12px}
+}
+</style>
+
 <style>.phone-overview-drawer.el-drawer{width:min(920px,96vw)!important;max-width:96vw}.phone-overview-drawer .el-drawer__header{margin-bottom:0;padding:16px 20px;border-bottom:1px solid #e6ebf2;font-size:16px}.phone-overview-drawer .el-drawer__body{padding:16px 20px;min-width:0;overflow-x:hidden;font-size:12px}.phone-overview-drawer .el-button{font-size:12px;min-height:28px}.phone-overview-drawer .el-button--small{height:28px}:global(.market-archive-drawer .el-drawer__body){min-height:0;overflow:hidden;display:flex;flex-direction:column}.market-archive-drawer .archive-ledger{flex:1;min-height:0}</style>
+
+<style scoped>
+@container(max-width:650px){
+ .market-watch>.status-bar{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+ .market-watch>.status-bar::-webkit-scrollbar{display:none}
+ .market-watch>.status-bar>button,.market-watch>.status-bar>.sync{flex:none;white-space:nowrap}
+}
+</style>

@@ -12,8 +12,8 @@ const emit=defineEmits<{
   create:[];edit:[id:number];progress:[id:number];archive:[application:MoldApplication];'other-phone':[]
 }>()
 // Match ProductBusinessCodeGenerator's complete identifiers and text boundaries; approval prose is not a code.
-const completeMoldCode=/^M[A-Z]{2}[0-9]{6}$/i
-const moldCodeInText=/(?<![A-Z0-9_-])M[A-Z]{2}[0-9]{6}(?![A-Z0-9_-])/gi
+const completeMoldCode=/^M[A-Z]{2}[0-9]{2}[DJH]?[0-9]{4}$/i
+const moldCodeInText=/(?<![A-Z0-9_-])M[A-Z]{2}[0-9]{2}[DJH]?[0-9]{4}(?![A-Z0-9_-])/gi
 function displayMoldCodes(application:MoldApplication){
   const structured=application.researchCoding?.generatedMoldCodes
   // An explicit structured result, including [], cannot be replaced by an older reservation or approval text.

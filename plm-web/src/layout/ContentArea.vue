@@ -40,15 +40,19 @@ watch(() => userStore.token, () => positions.clear())
 </template>
 
 <style scoped>
-.content-body {flex:1;min-height:0;min-width:0;}
+.content-body {flex:1;min-height:0;min-width:0;max-width:100%;}
 .research-return {display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:4px 0 8px;font-size:12px;color:#64748b;}
 .content-area {
   display:flex;flex-direction:column;
   flex: 1;
   min-height: 0;
+  min-width: 0;
   padding: 20px;
   overflow-y: auto;
   overflow-x: hidden;
 }
 .content-area--collaboration { padding:12px; overflow:hidden; }
+@media(max-width:767px){
+ .content-area--collaboration{overflow-x:hidden;overflow-y:auto}
+}
 </style>

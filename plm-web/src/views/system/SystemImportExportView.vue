@@ -207,7 +207,7 @@ onMounted(loadBatches)
         </div>
         <strong>{{ batches.length }}{{ uiText(" 批") }}</strong>
       </div>
-      <FixedTableViewport v-slot="{ tableHeight }" compact :refresh-key="batches">
+      <FixedTableViewport class="import-batch-table" v-slot="{ tableHeight }" compact :refresh-key="batches">
       <el-table :data="batches" :height="tableHeight" border stripe>
         <el-table-column prop="importBatchId" :label='uiText("批次ID")' width="90" />
         <el-table-column prop="objectType" :label='uiText("对象")' width="120" />
@@ -224,6 +224,22 @@ onMounted(loadBatches)
         <el-table-column prop="createdBy" :label='uiText("操作人")' width="120" />
       </el-table>
       </FixedTableViewport>
+      <div class="import-batch-cards">
+        <article v-for="batch in batches" :key="batch.importBatchId" class="import-batch-card">
+          <header>
+            <div><strong>#{{ batch.importBatchId }} · {{ batch.fileName }}</strong><small>{{ objectOptions.find(item => item.value === batch.objectType)?.label || batch.objectType }}</small></div>
+            <el-tag effect="light">{{ batch.status }}</el-tag>
+          </header>
+          <dl>
+            <div><dt>{{ uiText("总数") }}</dt><dd>{{ batch.totalCount }}</dd></div>
+            <div><dt>{{ uiText("成功") }}</dt><dd>{{ batch.successCount }}</dd></div>
+            <div><dt>{{ uiText("失败") }}</dt><dd>{{ batch.failCount }}</dd></div>
+            <div><dt>{{ uiText("导入时间") }}</dt><dd>{{ formatDate(batch.createdAt) }}</dd></div>
+            <div><dt>{{ uiText("操作人") }}</dt><dd>{{ batch.createdBy }}</dd></div>
+          </dl>
+        </article>
+        <el-empty v-if="!loading && !batches.length" :description="uiText('暂无导入批次')" />
+      </div>
     </section>
   </PageContainer>
 </template>
@@ -306,6 +322,57 @@ onMounted(loadBatches)
   background: #f8fafc;
 }
 
+.import-batch-cards {
+  display: none;
+}
+
+.import-batch-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+
+.import-batch-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.import-batch-card strong,
+.import-batch-card small {
+  display: block;
+}
+
+.import-batch-card small {
+  margin-top: 5px;
+  color: #64748b;
+}
+
+.import-batch-card dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 12px 0 0;
+}
+
+.import-batch-card dl > div {
+  min-width: 0;
+}
+
+.import-batch-card dt {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.import-batch-card dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1000px) {
   .import-export-layout,
   .import-preview-summary {
@@ -315,6 +382,17 @@ onMounted(loadBatches)
   .import-upload-row,
   .export-filter-row {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .import-batch-table {
+    display: none;
+  }
+
+  .import-batch-cards {
+    display: grid;
+    gap: 10px;
   }
 }
 </style>

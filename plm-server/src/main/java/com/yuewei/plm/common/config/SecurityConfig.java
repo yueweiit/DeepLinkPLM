@@ -101,10 +101,11 @@ public class SecurityConfig {
             "Content-Type",
             "X-Request-Id",
             "If-Match",
+            "X-PLM-Session-Check",
             "Accept",
             "Origin"
         ));
-        configuration.setExposedHeaders(List.of("X-Request-Id"));
+        configuration.setExposedHeaders(List.of("X-Request-Id", "X-PLM-Session-Expires-At"));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
 
