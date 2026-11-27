@@ -80,6 +80,11 @@ small{display:block;margin-top:2px;color:#62758b;font-size:12px}.swatch{display:
 .code-link,.detail-link{background:none;border:0;cursor:pointer}.code-link{font:13px/1.4 ui-monospace,Menlo,Consolas,monospace;text-align:left;color:#2064b5;padding:7px 0;overflow-wrap:anywhere}.code-link:hover{text-decoration:underline}
 .num{text-align:right;font-variant-numeric:tabular-nums}.end{width:34px;padding-inline:2px 10px}.detail-link{color:#5b7189;font-size:20px;min-width:26px}
 .identity-row:hover td:not(.style-cell){background:#f8fafd}.identity-row.picked td:not(.style-cell){background:#edf4ff}.narrow{display:none}
+@container (width > 660px) {
+  th:not(:last-child), td:not(:last-child) {
+    border-inline-end: 1px solid var(--plm-color-border);
+  }
+}
 @container(max-width:660px){
   .ledger-table,.ledger-table thead,.ledger-table tbody{display:block;width:100%}
   thead tr{display:block}thead th{display:none}thead th.pick{display:flex;position:static;width:100%;align-items:center;gap:7px;padding:3px 10px}
