@@ -46,7 +46,20 @@ public class PilotUserService {
   jdbc.queryForObject("select pg_advisory_xact_lock(610091001)",(rs,n)->true);
   if(id!=null)jdbc.queryForList("select user_id from sys_user where deleted_flag=0 and all_permissions=true order by user_id for update");
   Map<String,Object> before=new LinkedHashMap<>();
-  if(id!=null){var old=jdbc.queryForList("select u.display_name \"displayName\",u.department_name \"departmentName\",u.status,u.all_permissions \"allPermissions\",p.role_code role,p.permissions::text \"permissionsJson\",p.all_objects \"allObjects\",p.dingtalk_user_id \"dingtalkUserId\",p.version_no version from sys_user u left join plm_pilot_account p on p.user_id=u.user_id where u.user_id=?",id);if(!old.isEmpty()){before.putAll(old.get(0));before.put("permissions",readList(Objects.toString(before.remove("permissionsJson"),"[]")));}before.put("scopes",jdbc.queryForList("select entity_type \"entityType\",entity_id \"entityId\" from plm_pilot_scope where user_id=? order by entity_type,entity_id",id));before.put("fieldGroups",jdbc.queryForList("select field_group from plm_collaboration_assignment where user_id=? order by field_group",String.class,id));}
+  Set<Scope> previousScopes=new LinkedHashSet<>();
+  Set<String> previousGroups=new LinkedHashSet<>();
+  if(id!=null){
+   var old=jdbc.queryForList("select u.display_name \"displayName\",u.department_name \"departmentName\",u.status,u.all_permissions \"allPermissions\",p.role_code role,p.permissions::text \"permissionsJson\",p.all_objects \"allObjects\",p.dingtalk_user_id \"dingtalkUserId\",p.version_no version from sys_user u left join plm_pilot_account p on p.user_id=u.user_id where u.user_id=?",id);
+   if(!old.isEmpty()){
+    before.putAll(old.get(0));
+    before.put("permissions",readList(Objects.toString(before.remove("permissionsJson"),"[]")));
+   }
+   previousScopes.addAll(jdbc.query("select entity_type,entity_id from plm_pilot_scope where user_id=? order by entity_type,entity_id",
+     (row,index)->new Scope(row.getString("entity_type"),row.getLong("entity_id")),id));
+   before.put("scopes",previousScopes);
+   previousGroups.addAll(jdbc.queryForList("select field_group from plm_collaboration_assignment where user_id=? order by field_group",String.class,id));
+   before.put("fieldGroups",previousGroups);
+  }
   if(!PilotAccessService.ROLE_PERMISSIONS.containsKey(role))throw invalid("试点角色无效");
   var permissions=input.permissions()==null?PilotAccessService.ROLE_PERMISSIONS.get(role):List.copyOf(new LinkedHashSet<>(input.permissions()));
   var allowedPermissions=new HashSet<>(PilotAccessService.ROLE_PERMISSIONS.get(role));allowedPermissions.addAll(optionalPermissions(role));
@@ -56,22 +69,49 @@ public class PilotUserService {
   if(id!=null){var old=jdbc.queryForList("select u.username,u.all_permissions,p.version_no from sys_user u left join plm_pilot_account p on p.user_id=u.user_id where u.user_id=? and u.deleted_flag=0 for update of u",id);if(old.isEmpty())throw invalid("账号不存在");if(!input.username().equals(old.get(0).get("username")))throw invalid("登录账号创建后不能修改");Object version=old.get(0).get("version_no");if(version!=null&&(input.beforeVersion()==null||((Number)version).longValue()!=input.beforeVersion()))throw new BusinessException(40901,"账号授权已变更，请刷新后核对");if(Boolean.TRUE.equals(old.get(0).get("all_permissions"))&&(!admin||status.equals("inactive"))){Long count=jdbc.queryForObject("select count(*) from sys_user where deleted_flag=0 and status='active' and all_permissions=true",Long.class);if(count==null||count<=1)throw invalid("不能停用或降权最后一位管理员");}}
   if(id==null&&(input.password()==null||input.password().length()<12))throw invalid("新账号须设置至少12位密码");
   if(input.password()!=null&&!input.password().isBlank()&&input.password().length()<12)throw invalid("新密码须至少12位");
-  List<Scope> scopes=input.scopes()==null?List.of():input.scopes();for(Scope s:scopes){String sql=switch(s.entityType()){case "item"->"select count(*) from plm_collaboration_item where item_id=? and deleted_flag=0";case "mold"->"select count(*) from plm_collaboration_mold_set where mold_set_id=? and deleted_flag=0";case "product"->"select count(*) from plm_product where product_id=? and deleted_flag=0";case "file"->"select count(*) from plm_attachment where attachment_id=? and deleted_flag=0";case "partner"->"select count(*) from plm_partner_record where record_id=? and deleted_flag=0";case "customer"->"select count(*) from plm_customer where customer_id=? and deleted_flag=0";case "supplier_profile"->"select count(*) from plm_supplier_profile where supplier_id=? and deleted_flag=0";default->throw invalid("授权类型无效");};if(jdbc.queryForObject(sql,Long.class,s.entityId())==0)throw invalid("授权对象不存在："+s.entityType()+" #"+s.entityId());}
+  var scopes=new LinkedHashSet<Scope>(input.scopes()==null?List.of():input.scopes());
+  String ding=input.dingtalkUserId()==null||input.dingtalkUserId().isBlank()?null:input.dingtalkUserId().trim();
   Set<String> allowedGroups=switch(role){case "supplier"->Set.of("engineering","logistics");case "mexico"->Set.of("mexico");case "finance","overseas_sales"->Set.of();default->Set.of("market","engineering","logistics","mexico","production");};
   List<String> groups=input.fieldGroups()==null?switch(role){case "supplier"->List.of("engineering","logistics");case "mexico"->List.of("mexico");case "domestic"->List.of("market","engineering","logistics","production");default->List.of();}:input.fieldGroups();if(!allowedGroups.containsAll(groups))throw invalid("字段职责超出固定角色范围");
-  String ding=input.dingtalkUserId()==null||input.dingtalkUserId().isBlank()?null:input.dingtalkUserId().trim();
+  var requestedGroups=new LinkedHashSet<>(groups);
+  // Editing only action permissions must preserve existing assignments, including archived references.
+  boolean operationsOnly=role.equals(before.get("role")) && status.equals(before.get("status"))
+    && Objects.equals(before.get("allPermissions"),admin) && Objects.equals(before.get("allObjects"),admin||input.allObjects())
+    && Objects.equals(before.get("dingtalkUserId"),ding) && input.displayName().trim().equals(before.get("displayName"))
+    && input.departmentName().trim().equals(before.get("departmentName")) && (input.password()==null||input.password().isBlank())
+    && previousScopes.equals(scopes) && previousGroups.equals(requestedGroups);
+  if(!operationsOnly)validateScopeObjects(scopes);
   if(ding!=null&&jdbc.queryForObject("select count(*) from plm_pilot_account where dingtalk_user_id=? and user_id<>?",Long.class,ding,id==null?-1:id)>0)throw invalid("钉钉身份已关联其他账号");
   if(id==null){if(jdbc.queryForObject("select count(*) from sys_user where lower(username)=lower(?)",Long.class,input.username())>0)throw invalid("登录账号已存在");id=jdbc.queryForObject("insert into sys_user(user_code,username,login_name,user_name,display_name,department_name,password_hash,formal_flag,all_permissions,status,created_by,updated_by) values(?,?,?,?,?,?,?,1,?,?,?,?) returning user_id",Long.class,input.username(),input.username(),input.username(),input.displayName().trim(),input.displayName().trim(),input.departmentName().trim(),encoder.encode(input.password()),admin,status,actor.username(),actor.username());}
   else {jdbc.update("update sys_user set user_name=?,display_name=?,department_name=?,all_permissions=?,status=?,updated_at=now(),updated_by=? where user_id=?",input.displayName().trim(),input.displayName().trim(),input.departmentName().trim(),admin,status,actor.username(),id);if(input.password()!=null&&!input.password().isBlank())jdbc.update("update sys_user set password_hash=? where user_id=?",encoder.encode(input.password()),id);}
   jdbc.update("insert into plm_pilot_account(user_id,role_code,permissions,all_objects,dingtalk_user_id,created_by,updated_by) values(?,?,?::jsonb,?,?,?,?) on conflict(user_id) do update set role_code=excluded.role_code,permissions=excluded.permissions,all_objects=excluded.all_objects,dingtalk_user_id=excluded.dingtalk_user_id,version_no=plm_pilot_account.version_no+1,updated_at=now(),updated_by=excluded.updated_by",id,role,toJson(permissions),admin||input.allObjects(),ding,actor.username(),actor.username());
-  jdbc.update("delete from plm_pilot_scope where user_id=?",id);for(var scope:new LinkedHashSet<>(scopes))jdbc.update("insert into plm_pilot_scope(user_id,entity_type,entity_id) values(?,?,?)",id,scope.entityType(),scope.entityId());
-  jdbc.update("delete from plm_collaboration_assignment where user_id=?",id);for(String group:new LinkedHashSet<>(groups))jdbc.update("insert into plm_collaboration_assignment(user_id,field_group) values(?,?)",id,group);
+  if(!operationsOnly){
+   jdbc.update("delete from plm_pilot_scope where user_id=?",id);
+   for(var scope:scopes)jdbc.update("insert into plm_pilot_scope(user_id,entity_type,entity_id) values(?,?,?)",id,scope.entityType(),scope.entityId());
+   jdbc.update("delete from plm_collaboration_assignment where user_id=?",id);
+   for(String group:requestedGroups)jdbc.update("insert into plm_collaboration_assignment(user_id,field_group) values(?,?)",id,group);
+  }
   Map<String,Object> after=new LinkedHashMap<>();
-  after.put("role",role);after.put("status",status);after.put("scopes",new LinkedHashSet<>(scopes));after.put("permissions",permissions);after.put("fieldGroups",new LinkedHashSet<>(groups));
+  after.put("role",role);after.put("status",status);after.put("scopes",scopes);after.put("permissions",permissions);after.put("fieldGroups",requestedGroups);
   after.put("displayName",input.displayName().trim());after.put("departmentName",input.departmentName().trim());after.put("allPermissions",admin);after.put("allObjects",admin||input.allObjects());after.put("dingtalkUserId",ding);
   // Resolved before mutation, so changing this account cannot change the audit identity.
   logs.logRequired(OperationLogCreateCommand.builder().action("PILOT_USER_GRANTS_SAVE").businessType("PILOT_USER").businessId(String.valueOf(id)).businessCode(input.username()).businessName(input.displayName()).detailJson(toJson(Map.of("before",before,"after",after,"passwordChanged",input.password()!=null&&!input.password().isBlank()))).request(request).build(),actor);
   return Map.of("userId",id,"saved",true);
+ }
+ private void validateScopeObjects(Set<Scope> scopes){
+  for(Scope s:scopes){
+   String sql=switch(s.entityType()){
+    case "item"->"select count(*) from plm_collaboration_item where item_id=? and deleted_flag=0";
+    case "mold"->"select count(*) from plm_collaboration_mold_set where mold_set_id=? and deleted_flag=0";
+    case "product"->"select count(*) from plm_product where product_id=? and deleted_flag=0";
+    case "file"->"select count(*) from plm_attachment where attachment_id=? and deleted_flag=0";
+    case "partner"->"select count(*) from plm_partner_record where record_id=? and deleted_flag=0";
+    case "customer"->"select count(*) from plm_customer where customer_id=? and deleted_flag=0";
+    case "supplier_profile"->"select count(*) from plm_supplier_profile where supplier_id=? and deleted_flag=0";
+    default->throw invalid("授权类型无效");
+   };
+   if(jdbc.queryForObject(sql,Long.class,s.entityId())==0)throw invalid("授权对象不存在："+s.entityType()+" #"+s.entityId());
+  }
  }
  private List<String> readList(String raw){try{return json.readValue(raw,json.getTypeFactory().constructCollectionType(List.class,String.class));}catch(Exception e){throw invalid("权限配置无效");}}
  private String toJson(Object object){try{return json.writeValueAsString(object);}catch(Exception e){throw invalid("授权内容无效");}}
