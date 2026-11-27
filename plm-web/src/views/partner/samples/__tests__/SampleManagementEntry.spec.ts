@@ -196,6 +196,16 @@ describe('stable same-type sample entry',()=>{
   site.vm.$emit('update:modelValue','MX');await flushPromises()
   expect(wrapper.find('.cn').exists()).toBe(false);expect(wrapper.find('.mx').exists()).toBe(true)
  })
+ it('offers viewing and labels on shared read-only samples while hiding mutation actions',async()=>{
+  const row={...identity(),ledgerReadOnly:true}
+  api.flat.mockResolvedValue(pageOf([row]));api.detail.mockResolvedValue(row)
+  await start();allCheckbox().vm.$emit('change',true);await flushPromises()
+  expect(wrapper.get('.selection-actions').text()).toContain('批量打印标签')
+  expect(wrapper.get('.selection-actions').text()).not.toContain('批量设置位置')
+  await wrapper.get('.code-link').trigger('click');await flushPromises()
+  expect(wrapper.get('.detail-actions').text()).toContain('打印')
+  for(const action of ['设置位置','改数量','删除登记','借出'])expect(wrapper.get('.detail-actions').text()).not.toContain(action)
+ })
  it('renders authorized style photos and sums each country from actual positions',async()=>{
   const pos=(site:string,onhand:number)=>({name:'库位',site,onhand,available:onhand,retained:0,damaged:0})
   const sample={...identity(),positions:[pos('CN',3),pos('CN',5),pos('MX',2)],photo:{sampleIdentityId:71,id:401}}

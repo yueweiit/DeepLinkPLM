@@ -22,7 +22,7 @@ public class SampleIdentityController {
  @PostMapping("/bulk-actions/{action}") public Object bulk(@PathVariable String action,@RequestBody Map<String,Object> input,HttpServletRequest r){return ok(actions.bulk(action,input),r);}
  @GetMapping("/{id}/colors") public Object colors(@PathVariable long id,HttpServletRequest r){return ok(actions.colorOptions(id),r);}
  @PostMapping("/{id}/color-correction-preview") public Object previewColor(@PathVariable long id,@RequestBody Map<String,Object> input,HttpServletRequest r){return ok(actions.previewColor(id,input),r);}
- @GetMapping("/{id}") public Object detail(@PathVariable long id,HttpServletRequest r){return ok(identities.detail(id),r);}
+ @GetMapping("/{id}") public Object detail(@PathVariable long id,HttpServletRequest r){return ok("ledger".equals(r.getParameter("view"))?identities.ledgerDetail(id):identities.detail(id),r);}
  @PostMapping public Object create(@RequestBody Map<String,Object> input,HttpServletRequest r){return ok(identities.ensure(samples.identitySource(input),input),r);}
  @PostMapping("/{id}/actions/{action}") public Object action(@PathVariable long id,@PathVariable String action,@RequestBody Map<String,Object> input,HttpServletRequest r){return ok(actions.action(id,action,input),r);}
  @PostMapping("/batches/{batchId}/identity") public Object bind(@PathVariable long batchId,@RequestBody Map<String,Object> input,HttpServletRequest r){return ok(actions.bind(batchId,input),r);}

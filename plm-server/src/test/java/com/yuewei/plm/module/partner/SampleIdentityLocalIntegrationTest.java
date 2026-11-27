@@ -117,6 +117,35 @@ class SampleIdentityLocalIntegrationTest {
   var receipt=receive(2,"readable-scope");String label=text(receipt.get("sampleCode"));restricted=true;user=2;
   assertThatThrownBy(()->registry.resolve(label)).hasMessageContaining("不存在或未获授权");allowed.add(number(receipt.get("id")));assertThat(registry.resolve(label)).containsEntry("sampleIdentityId",receipt.get("sampleIdentityId"));
  }
+ @Test void fullLedgerReadsStockAcrossScopesWithoutGrantingSourceAccessOrMutation(){
+  var receipt=receive(3,"whole-ledger");long id=number(receipt.get("sampleIdentityId")),batch=number(receipt.get("id"));
+  var other=receive(4,"whole-ledger-second");assertThat(other.get("sampleIdentityId")).isEqualTo(id);
+  jdbc.update("update plm_partner_record set data=data||'{\"sourceSnapshot\":{\"internalNote\":\"private\"}}'::jsonb where record_id in (?,?)",id,batch);
+  restricted=true;user=2;role="domestic";
+  assertThat(maps(registry.page(Map.of("domain","partner","view","ledger")).get("content"))).isEmpty();
+  doReturn(new PilotAccessService.Access(new CurrentUser(user,"ledger-reader","台账验收",false),role,List.of("partner:view","samples:write","samples:view-all","file:read"),false,true)).when(access).access();
+  for(long file=901;file<=903;file++)jdbc.update("insert into plm_attachment(attachment_id,file_name,content_type) values(?,?,'image/png')",file,"img-"+file);
+  jdbc.update("insert into plm_partner_file(record_id,attachment_id,purpose) values(?,901,'photo'),(?,902,'material'),(?,903,'photo'),(?,903,'cooperation_cost')",batch,batch,batch,number(other.get("id")));
+  doReturn("true").when(access).visibleSqlClause(eq("file"),anyString());
+  registry.requirePhoto(id,901);
+  for(long file:List.of(902L,903L))assertThatThrownBy(()->registry.requirePhoto(id,file)).hasMessageContaining("照片不存在或未获授权");
+  var rows=maps(registry.page(Map.of("domain","partner","view","ledger")).get("content"));
+  assertThat(rows).singleElement().satisfies(row->assertThat(row).containsEntry("ledgerReadOnly",true).doesNotContainKey("sourceSnapshot"));
+  var detail=registry.ledgerDetail(id);assertThat(number(map(detail.get("balances")).get("onhand"))).isEqualTo(7);
+  assertThat(maps(detail.get("batches"))).isEmpty();
+  assertThat(maps(registry.page(Map.of("domain","partner")).get("content"))).isEmpty();
+  assertThat(registry.resolve(text(receipt.get("sampleCode")))).containsEntry("sampleIdentityId",id);
+  assertThat(maps(registry.query(Map.of("ids",List.of(id),"filters",Map.of("view","ledger"),"details",true)).get("content"))).hasSize(1);
+  assertThatThrownBy(()->registry.requireVisible(id,true)).hasMessageContaining("未获授权");
+  assertThatThrownBy(()->registry.visibleBatches(id,true)).hasMessageContaining("未获授权");
+  allowed.add(batch);
+  var mixed=registry.ledgerDetail(id);
+  assertThat(mixed).doesNotContainKey("ledgerReadOnly");
+  assertThat(number(map(mixed.get("balances")).get("onhand"))).isEqualTo(7);
+  assertThat(maps(mixed.get("batches"))).extracting(b->number(b.get("id"))).containsExactly(batch);
+  assertThat(number(map(registry.detail(id).get("balances")).get("onhand"))).isEqualTo(3);
+  assertThat(registry.resolve(text(other.get("code")))).containsEntry("type","identity").doesNotContainKey("batchId");
+ }
  @Test void catalogRenameUpdatesSyAndSpDisplayAndSearchWithoutRewritingReceiptFacts(){
   String rid=UUID.randomUUID().toString();long origin=jdbc.queryForObject("insert into plm_partner_record(kind,code,name,status,version,owner_user_id,data) values('selection','SL-CURRENT','供应商原目录','draft',2,1,'{\"catalogSource\":true}') returning record_id",Long.class);
   jdbc.update("insert into plm_partner_selection_row values(?,?::uuid,2,1,?::jsonb,false)",origin,rid,encode(store.json,Map.of("name","凡影精孔手机壳","supplierCode","SUP-A","color","蓝色","material","PC","unitPrice","3.80","currency","CNY")));

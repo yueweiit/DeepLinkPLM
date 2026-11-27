@@ -7,7 +7,7 @@ export interface PilotUser {
  allPermissions: boolean; roleCode: PilotRole | null; allObjects: boolean | null; dingtalkUserId: string | null
  permissions: string[]; fieldGroups: string[]; scopes: PilotScope[]; version: number | null
 }
-export interface PilotRoleDefinition { roleCode: PilotRole; permissions: string[] }
+export interface PilotRoleDefinition { roleCode: PilotRole; permissions: string[]; optionalPermissions?: string[] }
 export interface PilotUserInput {
  username: string; displayName: string; departmentName: string; roleCode: PilotRole; status: 'active' | 'inactive'
  allObjects: boolean; dingtalkUserId: string; permissions: string[]; fieldGroups: string[]; scopes: PilotScope[]; password: string; beforeVersion: number | null
