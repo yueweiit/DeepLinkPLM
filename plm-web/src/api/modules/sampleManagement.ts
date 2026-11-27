@@ -1,5 +1,5 @@
 import request,{unwrapResponse,authorizedPreviewOptions} from '../request'
-import type {SampleCandidates,SampleIdentity,SamplePage,SampleResolution,SampleShipment,SampleShipmentInput,SampleLocationOption,SampleLocationInputData,SampleLocationMoveResult,SampleStyleGroup,SampleSupplierOption,SampleLocationReference} from '@/types/sampleManagement'
+import type {SampleCandidates,SampleIdentity,SamplePage,SampleResolution,SampleShipment,SampleShipmentInput,SampleLocationOption,SampleLocationInputData,SampleLocationMoveResult,SampleSupplierOption,SampleLocationReference} from '@/types/sampleManagement'
 export const sampleIdentities=async(params:Record<string,unknown>={})=>unwrapResponse<SamplePage<SampleIdentity>>(await request.get('/sample-identities',{params}))
 export interface SampleIdentityQueryInput {filters?:Record<string,unknown>;groupKeys?:string[];ids?:number[];details?:boolean}
 export const querySampleIdentities=async(data:SampleIdentityQueryInput)=>unwrapResponse<{content:SampleIdentity[];totalElements:number}>(await request.post('/sample-identities/query',data,{suppressErrorToast:true}))
@@ -29,7 +29,6 @@ export const saveSampleLocation=async(data:SampleLocationInputData,id?:number)=>
 export const deleteSampleLocation=async(id:number,data:{requestId:string;version:number})=>unwrapResponse<SampleLocationOption>(await request.delete(`/sample-locations/${id}`,{data}))
 export const setSampleLocations=async(data:Record<string,unknown>)=>unwrapResponse<SampleLocationMoveResult>(await request.post('/sample-identities/bulk-actions/move',data))
 
-export const sampleStyleGroups=async(params:Record<string,unknown>={})=>unwrapResponse<SamplePage<SampleStyleGroup>>(await request.get('/sample-identities',{params:{...params,groupBy:'style'}}))
 export const sampleIdentityOptions=async()=>unwrapResponse<{suppliers:SampleSupplierOption[]}>(await request.get('/sample-identities/options'))
 export const sampleLocationReferences=async(id:number)=>unwrapResponse<{id:number;referenced:boolean;referenceCount:number;onhand:number;events:number;records:number;batches:number;references:SampleLocationReference[]}>(await request.get(`/sample-locations/${id}/references`))
 export const sampleIdentityPhoto=async(id:number,fileId:number,options?:{signal?:AbortSignal})=>(await request.get<Blob>(`/sample-identities/${id}/photos/${fileId}/preview`,authorizedPreviewOptions(options))).data
