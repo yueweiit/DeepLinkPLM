@@ -24,6 +24,7 @@ import com.yuewei.plm.module.bom.repository.ProductBomRepository;
 import com.yuewei.plm.module.bom.repository.ProductBomRouteColorRepository;
 import com.yuewei.plm.module.bom.repository.ProductBomRouteFormalSelectionRepository;
 import com.yuewei.plm.module.bom.repository.ProductBomRouteRepository;
+import com.yuewei.plm.module.bom.service.BomConfirmationState;
 import com.yuewei.plm.module.bom.service.ProductBomService;
 import com.yuewei.plm.module.bom.vo.ProductBomItemVO;
 import com.yuewei.plm.module.bom.vo.ProductBomVO;
@@ -290,10 +291,14 @@ public class ProductBomServiceImpl implements ProductBomService {
     @Override
     @Transactional
     public ProductBomVO confirmCurrentVersion(Long bomId, HttpServletRequest request) {
-        lock(bomId);
+        BomConfirmationState.lock(jdbc,bomId);
         ProductBom bom = getBomOrThrow(bomId);
         access.requirePermission("bom:publish");access.requireProduct(bom.getProductId());
         access.requireEngineeringMaintenance();
+        String expected = request == null ? null : request.getHeader("If-Match");
+        if (expected != null && !expected.equals("\"" + BomConfirmationState.revision(jdbc,bomId) + "\"")) {
+            throw new BusinessException(ErrorCodeConstants.CODE_CONFLICT,"适用范围或正式版本已变化，请重新核对");
+        }
         if(STATUS_RELEASED.equals(bom.getStatus())){releaseDelivery.released(bom);return getById(bomId);}
         if(!Set.of("reviewing",STATUS_FROZEN).contains(bom.getStatus())||"test".equals(bom.getBomType()))throw new BusinessException(ErrorCodeConstants.VALIDATION_ERROR,"请先提交审核；只有审核中或冻结的正式候选版本可确认发布");
         Product product = getProductOrThrow(bom.getProductId());
@@ -343,7 +348,7 @@ public class ProductBomServiceImpl implements ProductBomService {
     @Override
     @Transactional
     public ProductBomVO cancelCurrentConfirmation(Long bomId, HttpServletRequest request) {
-        lock(bomId);
+        BomConfirmationState.lock(jdbc,bomId);
         ProductBom bom = getBomOrThrow(bomId);
         access.requirePermission("bom:publish");access.requireProduct(bom.getProductId());
         Product product = getProductOrThrow(bom.getProductId());

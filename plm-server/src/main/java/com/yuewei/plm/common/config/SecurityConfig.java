@@ -100,6 +100,7 @@ public class SecurityConfig {
             "Authorization",
             "Content-Type",
             "X-Request-Id",
+            "If-Match",
             "Accept",
             "Origin"
         ));

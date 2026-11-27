@@ -15,13 +15,27 @@ export interface CatalogOptions {series:CatalogSeries[];brands:{id:string;name:s
 export interface CatalogQuery {page:number;size:number;keyword?:string;seriesCode?:string;brandId?:string;listingStatus?:string;productionStatus?:string}
 export interface RouteNode {id:number;nodeCode:string;localNodeCode?:string;name:string;stepNo:number;operationCode:string;x?:number;y?:number;config?:Record<string,unknown>}
 export interface RouteEdge {id:number;fromNodeId:number;toNodeId:number;edgeNo:number;relationType:string;label?:string;condition?:unknown}
-export interface ScopedMaterial {id:number;lineNo:number;inventoryId:number;childCode:string;childName:string;quantity:string;unit:string;unitRaw?:string;unitCn?:string;unitEs?:string;componentRowId?:string;nodeId:number;nodeCode:string;nodeName:string;operationCode:string;articleSpecific:boolean;unitPrice?:string;currency?:string;stockUnit?:string;mesEffectiveUnit?:string;unitProjection?:unknown}
-export interface ScopedRecipe {bomId:number;projectId:number;bomCode:string;internalBomCode:string;outputQty:string;parentCode:string;parentName:string;specification?:string;sourceVersion:string;versionNo:string;status:string;confirmedBy?:string;confirmedAt?:string;bomRouteId:number;processId:number;routeCode:string;routeName:string;items:ScopedMaterial[];graph:{nodes:RouteNode[];edges:RouteEdge[]}}
+export interface ScopedMaterial {id:number;lineNo:number;inventoryId:number;childCode:string;childName:string;quantity:string;unit:string|null;unitRaw?:string;unitCn?:string;unitEs?:string;componentRowId?:string;nodeId:number;nodeCode:string;nodeName:string;operationCode:string;articleSpecific:boolean;unitPrice?:string;currency?:string;stockUnit?:string;mesEffectiveUnit?:string;unitProjection?:unknown}
+export interface ScopedRecipe {displayVersion?:string;engineeringState?:EngineeringState;bomId:number;projectId:number;bomCode:string;internalBomCode:string;outputQty:string;parentCode:string;parentName:string;specification?:string;sourceVersion:string;versionNo:string;status:string;confirmedBy?:string;confirmedAt?:string;bomRouteId:number;processId:number;routeCode:string;routeName:string;items:ScopedMaterial[];graph:{nodes:RouteNode[];edges:RouteEdge[]}}
+export type EngineeringState = 'pending' | 'released' | 'history' | 'conflict'
+export type BomCatalogColor = Pick<CurrentSku,'sourceId'|'objectId'|'objectType'|'itemCode'|'seriesCode'|'seriesName'|'modelName'|'modelCode'|'colorShortCode'|'colorNameZh'|'colorNameEs'|'commercialVersion'> & {
+  matched?:boolean; colorCode?:string; seriesNameEs?:string; productionStatus?:ProductionStatus
+  recipes: {bomId:number; bomRouteId:number; routeCode:string; version:string; state:EngineeringState}[]
+}
+export interface BomCatalogProduct {key:string; seriesCode:string; seriesName:string; seriesNameEs?:string; modelCount:number}
+export interface BomCatalogGroup {key:string; colors:BomCatalogColor[]}
+export interface BomScopeArticle {code:string;model?:string}
+export interface BomConfirmationScope {revision:string;count:number;articles:BomScopeArticle[];removedCount:number;removedArticles:BomScopeArticle[];previousVersions:string[]}
+export async function getCurrentBomProducts(query:CatalogQuery){return unwrapPage<BomCatalogProduct>(await request.get('/products/current-catalog/bom-products',{params:query}))}
+export async function getCurrentBomGroups(query:CatalogQuery & {productKey:string}){return unwrapPage<BomCatalogGroup>(await request.get('/products/current-catalog/bom-groups',{params:query}))}
+export async function getBomConfirmationScope(sourceId:string,bomId:number,routeId:number) {
+  return unwrapResponse<BomConfirmationScope>(await request.get(`/products/current-catalog/${encodeURIComponent(sourceId)}/bom-scope`,{params:{bomId,routeId}}))
+}
 export interface CurrentSkuDetail {source:Record<string,unknown>;objectType:'product'|'partner';objectId:number;manufacturing:ScopedRecipe[]}
 export async function getMasterDataStatus(){return unwrapResponse<MasterDataStatus>(await request.get('/master-data/status'))}
 export async function getCurrentCatalog(query:CatalogQuery){return unwrapPage<CurrentSku>(await request.get('/products/current-catalog',{params:query}))}
 export async function getCurrentCatalogOptions(){return unwrapResponse<CatalogOptions>(await request.get('/products/current-catalog/options'))}
-export async function getCurrentSku(id:string){return unwrapResponse<CurrentSkuDetail>(await request.get(`/products/current-catalog/${encodeURIComponent(id)}`))}
+export async function getCurrentSku(id:string,versions=false){return unwrapResponse<CurrentSkuDetail>(await request.get(`/products/current-catalog/${encodeURIComponent(id)}`,{params:versions?{versions:true}:undefined}))}
 export async function getLocalSnapshots(){return unwrapResponse<Array<{name:string;hash:string;capturedAt:string}>>(await request.get('/master-data/snapshots'))}
 export interface ImportPreview {importId:string;sourceHash:string;originalHash:string;seriesCodes:string[];skuCount:number;listedCount:number;unlistedCount:number;purchasedCount:number;warnings:unknown[];gaps:unknown[];remoteBusinessWrites:number}
 export async function previewLocalSnapshot(snapshotName:string){return unwrapResponse<ImportPreview>(await request.post('/master-data/preview',{snapshotName}))}

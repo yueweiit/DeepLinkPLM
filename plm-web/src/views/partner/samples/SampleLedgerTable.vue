@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {computed,ref} from 'vue'
 import {t} from '@/locales'
+import {productColorSwatches as colors} from '@/utils/productColorSwatches'
 import type {SampleIdentity,SampleLocationSite} from '@/types/sampleManagement'
 import PartnerPhoto from '../PartnerPhoto.vue'
 
@@ -45,7 +46,7 @@ function inStock(sample:SampleIdentity,site:'CN'|'MX'){
   if(!positions?.length || positions.some(p=>!p.site && p.onhand>0))return sample.balances.onhand===0?'0':'—'
   return positions.reduce((sum,p)=>sum+(p.site===site?p.onhand:0),0).toLocaleString()
 }
-const colors:Record<string,string>={黑色:'#30343b',白色:'#fff',酒红:'#903b4a',酒红色:'#903b4a',豆沙粉色:'#d6a3a6',玫红色:'#bf4c76',米白色:'#eee5cf',蓝色:'#647da9',绿色:'#55856a',红色:'#c94a48',灰色:'#90959d'}
+
 </script>
 <template>
   <div ref="scrollArea" class="ledger-scroll">
