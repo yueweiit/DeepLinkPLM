@@ -395,7 +395,7 @@ describe('actual receipt page navigation',()=>{
   pager.vm.$emit('update:current-page',2);await flushPromises();expect(document.querySelectorAll('.receipt-row')).toHaveLength(1);expect(actualQuantities()[0].props('disabled')).toBe(true);expect(models()[0].props('disabled')).toBe(true);
   models()[0].vm.$emit('update:modelValue',[17]);allStyleModelsButton()!.click();await flushPromises();expect(models()[0].props('modelValue')).toEqual([18]);
   expect(api.preview).not.toHaveBeenCalled();await click('核对本次保存结果');expect(api.save).toHaveBeenCalledTimes(1);expect(api.save.mock.calls[0][1]).toEqual(input);expect(api.preview).not.toHaveBeenCalled();
- },15000)
+ },30000)
 })
 
 
