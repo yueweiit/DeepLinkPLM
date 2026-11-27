@@ -44,6 +44,53 @@ class BomCatalogPostgresTest {
 
     String productKey(){return catalog.bomProducts(new MasterDataCatalogService.Query()).getContent().get(0).get("key").toString();}
 
+    @Test void processCatalogScopesProductsAndRetainsEachOccurrenceOfAnOperation() {
+        when(access.visibleSqlClause("product","p.product_id")).thenReturn("p.product_id in (100,103)");
+        jdbc.update("update plm_product set product_name='亮甲' where product_id=100");
+        jdbc.update("update plm_process set status='locked' where process_id=1000");
+        jdbc.update("update plm_process set product_id=104 where process_id=2000");
+        jdbc.update("update plm_process set product_id=null where process_id=3000");
+        jdbc.update("update plm_product set deleted_flag=1 where product_id=103");
+        jdbc.update("update plm_process set product_id=103 where process_id=4000");
+        jdbc.update("insert into plm_process(process_id,process_code) values(75,'OP')");
+        jdbc.update("insert into plm_process(process_id,parent_process_id,sequence_no,operation_master_process_id) values (76,1000,2,75),(77,1000,3,75),(78,2000,2,75)");
+        jdbc.update("""
+            insert into plm_master_data_source(source_system,source_kind,source_id,object_id,object_type,source_code,source_data)
+            values ('mes','process_flows','r1',1000,'process','R1','{"product_code":"A"}'),
+                   ('mes','process_flows','r2',2000,'process','R2','{"product_code":"B"}'),
+                   ('mes','process_flows','r3',3000,'process','R3','{}'),
+                   ('mes','process_flows','r4',4000,'process','R4','{}'),
+                   ('mes','operation_templates','retired',4000,'process','OP-RETIRED','{}'),
+                   ('mes','mes_product','a',100,'product','A','{"product_name_es":"Arco"}'),
+                   ('mes','operation_templates','op',75,'process','OP','{}')
+            """);
+        jdbc.update("insert into plm_master_data_source(source_system,source_kind,object_id,source_id) select 'mes','process_flow_steps',id,id::text from unnest(array[100001,76,77]) id");
+        jdbc.update("insert into plm_master_data_source(source_system,source_kind,object_id,source_id,batch_hash) values ('mes','operation_templates',75,'former-op','old'),('mes','process_flows',1000,'former-route','old')");
+        jdbc.update("insert into plm_process(process_id,parent_process_id,sequence_no) values(79,1000,4)");
+        jdbc.update("insert into plm_process_edge(edge_id,from_process_id,to_process_id,route_id) values(31,76,77,1000),(32,77,79,1000)");
+        jdbc.update("insert into plm_master_data_source(source_system,source_kind,object_id,source_id,batch_hash) values ('mes','process_flow_step_edges',31,'e1','one'),('mes','process_flow_step_edges',32,'e2','old')");
+        jdbc.update("update plm_process_edge set relation_type='finish_to_start',label='旧标签',condition_json='{\"old\":true}',edge_no=10 where edge_id=31");
+        jdbc.update("update plm_master_data_source set source_data='{\"relation_type\":\"start_to_start\",\"label\":null,\"condition_json\":null,\"edge_no\":50}' where source_id='e1'");
+        var result=catalog.processes();
+        var visible=records(result,"routes");
+        assertThat(visible).hasSize(1);
+        assertThat(visible.get(0)).containsEntry("sourceCode","R1").containsEntry("seriesName","亮甲")
+            .containsEntry("seriesNameEs","Arco").containsEntry("routeStatus","locked").containsEntry("productId",100L);
+        assertThat(visible.get(0).get("operationIds").toString()).isEqualTo("[null,75,75]");
+        assertThat(records(result,"operations")).extracting(r->r.get("sourceCode")).containsExactly("OP");
+        var graph=catalog.graph(1000,true);
+        assertThat(records(graph,"nodes")).hasSize(3).filteredOn(r->Objects.equals(r.get("operationId"),75L)).hasSize(2);
+        assertThat(records(graph,"edges")).extracting(r->r.get("id")).containsExactly(31L);
+        var newEdge=records(graph,"edges").get(0);
+        assertThat(newEdge).containsEntry("edgeNo",50).containsEntry("relationType","start_to_start").containsEntry("label",null);
+        assertThat(newEdge.get("condition").toString()).isEqualTo("null");
+        var olderGraph=records(catalog.graph(1000),"edges");
+        assertThat(olderGraph).hasSize(2);
+        assertThat(olderGraph.get(0)).containsEntry("relationType","finish_to_start").containsEntry("label","旧标签");
+        verify(access).requirePermission("process:view");
+        verify(access,times(2)).requireProcess(1000L);
+    }
+
     @Test void productsPageIndependentlyAndScopeModelsBySourceIdentity(){
         jdbc.update("insert into plm_master_data_source(source_system,source_kind,source_id,source_code,object_id,object_type,source_data) select source_system,source_kind,'other-sku',source_code,object_id,object_type,jsonb_set(source_data,'{productSeriesId}',to_jsonb('other-series'::text)) from plm_master_data_source where source_id='a'");
         var q=new MasterDataCatalogService.Query();q.setSize(1);

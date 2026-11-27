@@ -43,7 +43,8 @@ type DetailSectionKey = 'overview' | 'operations' | 'attachments' | 'changes' | 
 
 const route = useRoute()
 const masterDataStatus=ref<MasterDataStatus>(),legacy=ref(false)
-onMounted(async()=>{try{masterDataStatus.value=await getMasterDataStatus()}catch{/* Explicit legacy fallback on older backends. */}})
+const catalogChecked=ref(false)
+const showHistory=computed(()=>catalogChecked.value && (!masterDataStatus.value?.ready || legacy.value || !!route.query.routeId))
 const router = useRouter()
 const loading = ref(false)
 const snapshot = ref<ProcessCenterSnapshot | null>(null)
@@ -461,19 +462,25 @@ watch(
   { immediate: true }
 )
 
-onMounted(async () => {
-  await Promise.all([loadOperationMasterRows(), loadRouteTemplateRows(), loadSnapshot()])
+watch(showHistory, async visible => {
+  if (visible) await Promise.all([loadOperationMasterRows(), loadRouteTemplateRows(), loadSnapshot()])
 })
+onMounted(async () => {
+  try { masterDataStatus.value=await getMasterDataStatus() }
+  catch { /* Older installations use the original process center. */ }
+  finally { catalogChecked.value=true }
+})
+function returnToCurrent() {
+  legacy.value=false
+  if (route.query.routeId) void router.replace({query:{...route.query,routeId:undefined}})
+}
 </script>
 
 <template>
-  <PageContainer
-    :title='uiText("工艺管理")'
-    :description='uiText("集中维护工序库、标准工艺路线，并查看项目工艺路线、工序结构、资料挂接和版本追溯。")'
-  >
-    <CurrentProcessList v-if="masterDataStatus?.ready&&!legacy&&!route.query.routeId" @history="legacy=true"/>
-    <template v-else>
-    <el-button v-if="masterDataStatus?.ready" size="small" @click="legacy=false">{{ uiText("返回本期 MES 工艺") }}</el-button>
+  <section v-if="!catalogChecked" v-loading="true" class="process-page"/>
+  <section v-else-if="!showHistory" class="process-page"><CurrentProcessList @history="legacy=true"/></section>
+  <PageContainer v-else :title='uiText("工艺管理")'>
+    <el-button v-if="masterDataStatus?.ready" size="small" @click="returnToCurrent">{{ uiText("返回本期 MES 工艺") }}</el-button>
     <section class="process-management-tabs">
       <el-segmented v-model="activeManagementTab" :options="processTabOptions" />
     </section>
@@ -947,11 +954,12 @@ onMounted(async () => {
         </template>
       </div>
     </el-drawer>
-    </template>
   </PageContainer>
 </template>
 
 <style scoped>
+.process-page{padding:20px;min-width:0}
+@media(max-width:760px){.process-page{padding:12px}}
 .process-management-tabs {
   margin-bottom: 14px;
 }

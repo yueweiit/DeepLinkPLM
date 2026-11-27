@@ -1,6 +1,6 @@
 create table plm_master_data_source(source_system text,source_kind text,source_id text,source_code text,source_data jsonb not null default '{}', source_status text,organization_id text default 'org', object_id bigint,object_type text,phone_model_id bigint,batch_hash text default 'one',observed_at timestamp);
 create table plm_master_data_import(source_hash text,status text,committed_at timestamp);
-create table plm_product(product_id bigint primary key, deleted_flag int default 0, production_status text);
+create table plm_product(product_id bigint primary key, deleted_flag int default 0, production_status text, product_name text);
 create table plm_phone_model_member(id bigint,code_item_id bigint);
 create table plm_code_item(code_item_id bigint);
 create table plm_product_bom(product_bom_id bigint primary key,product_id bigint,bom_code text,output_inventory_code text,output_inventory_name text,quantity numeric,custom_bom_specification text,version_no text,status text,confirmed_by text,confirmed_at timestamp,source_product_bom_id bigint,source_type text,deleted_flag int default 0);
@@ -9,7 +9,7 @@ create table plm_product_bom_route_formal_selection(product_bom_id bigint,produc
 create table plm_product_bom_item(product_bom_item_id bigint primary key, line_no int, inventory_id bigint,item_code text,item_name text,quantity numeric(18,8),uom_code text,unit_raw text,unit_cn text,unit_es text, component_row_id text, unit_cost_snapshot numeric,currency_code text, deleted_flag int default 0);
 create table plm_bom_item_target(product_bom_route_id bigint,product_bom_item_id bigint,process_id bigint,article_codes text[]);
 create table plm_process(process_id bigint,product_id bigint,process_type text,parent_process_id bigint,
-node_code text,local_node_code text,process_name text,sequence_no int,position_x int,position_y int,operation_master_process_id bigint,process_code text,process_param_json jsonb,deleted_flag int default 0);
+node_code text,local_node_code text,process_name text,sequence_no int,position_x int,position_y int,operation_master_process_id bigint,process_code text,process_param_json jsonb,deleted_flag int default 0,status text);
 create table plm_process_edge(edge_id bigint,from_process_id bigint,to_process_id bigint,edge_no int,relation_type text,label text,condition_json jsonb,route_id bigint, deleted_flag int default 0);
 create table plm_inventory(inventory_id bigint,stock_uom text);
 insert into plm_master_data_import values('one','committed',now());
