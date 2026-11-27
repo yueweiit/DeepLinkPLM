@@ -2,6 +2,18 @@
 import ui from './es-ui.json'
 import dynamic from './es-dynamic.json'
 export default {
+  '收起筛选': 'Ocultar filtros',
+  '展开筛选': 'Mostrar filtros',
+  '登记状态': 'Estado del registro',
+  '批量操作': 'Acciones en lote',
+  '打印标签': 'Imprimir etiquetas',
+  '导出标签': 'Exportar etiquetas',
+  '已选 {selected} / {total} 种': '{selected} / {total} muestras seleccionadas',
+  '每页样品数': 'Muestras por página',
+  '自定义…': 'Personalizar…',
+  '自定义每页条数': 'Cantidad por página',
+  '应用': 'Aplicar',
+  '请输入 1 至 2000 的整数': 'Introduce un número entero entre 1 y 2000',
   '新增手机型号': 'Agregar modelo de teléfono',
   '型号名称': 'Nombre del modelo',
   '重试品牌': 'Reintentar marcas',

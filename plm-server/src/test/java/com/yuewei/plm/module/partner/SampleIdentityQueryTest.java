@@ -22,7 +22,7 @@ class SampleIdentityQueryTest {
  private List<Map<String,Object>> rows(InvocationOnMock call){
   String statement=call.getArgument(0);sql.add(statement);
   if(statement.contains("r.kind='sample_identity'")){var heads=List.of(head(1,10,12,21),head(2,10,13,21),head(3,11,14,22));if(statement.contains("r.record_id=?")){long id=number(call.getArgument(1));return heads.stream().filter(h->number(h.get("id"))==id).toList();}return heads;}
-  if(statement.contains("from plm_supplier_profile"))return missingSupplierProfile?List.of():List.of(d("supplier_code","SUP-A","supplier_name",currentSupplierName,"short_code","PJ"));
+  if(statement.contains("from plm_supplier_profile"))return missingSupplierProfile?List.of():List.of(d("supplier_code","SUP-A","supplier_name",currentSupplierName,"short_code","PJ","profile_short_name","品俊"));
   if(statement.contains("b.kind='sample'")){var batches=List.of(d("id",101L,"code","SP-000101","version",4L,"sample_identity_id",1L,"data","{}"),d("id",102L,"code","SP-000102","version",1L,"sample_identity_id",2L,"data","{}"),d("id",103L,"code","SP-000103","version",1L,"sample_identity_id",3L,"data","{}"));if(cached)for(var b:batches)b.put("data",encode(json,d("balances",d("positions",List.of(d("name","mx","good",7,"retained",0,"damaged",0,"onhand",7,"available",7)),"loans",List.of(),"transits",List.of()))));return batches;}
   if(statement.contains("from plm_partner_event"))return List.of(event(1,101,"receive",d("qty",3,"location","cn")),event(2,101,"receive",d("qty",5,"location","MX")),event(3,101,"loan",d("qty",2,"location","mx","person","当地借用人","due","2026-11-10")),event(4,101,"dispatch",d("qty",1,"location","cn","shipmentId",501,"shipmentRowId","one","destination","MX")),event(5,102,"receive",d("qty",1,"location","mx")),event(6,103,"receive",d("qty",9,"location","cn")));
   if(statement.contains("join plm_attachment"))return List.of(d("record_id",101L,"id",901L,"name","实际照片.png","type","image/png"));
@@ -41,13 +41,34 @@ class SampleIdentityQueryTest {
  @Test void supplierShortNameSearchAndGroupExpansionFilterBeforePagination(){
   var grouped=query.page(Map.of("groupBy","style","keyword","pj"));String key=text(maps(grouped.get("content")).get(0).get("groupKey"));var detail=query.page(Map.of("groupKey",key,"page","2","size","1"));assertThat(detail).containsEntry("totalElements",2L);assertThat(maps(detail.get("content"))).hasSize(1);assertThat(query.options(Map.of("keyword","PJ")).toString()).contains("历史停用供方","SUP-A");
  }
+ @Test void flatLedgerSizesReturnEveryIdentityOnceAcrossTheTwoThousandBoundary(){
+  mexico=false;
+  var headers=java.util.stream.LongStream.rangeClosed(1,2003).mapToObj(i->head(i,10,12,21)).toList();
+  doReturn(headers).when(jdbc).queryForList(contains("as ledger_read_only,r.record_id"),any(Object[].class));
+  var first=query.page(Map.of("view","ledger","size","2000"));
+  var last=query.page(Map.of("view","ledger","size","3000","page","2"));
+  assertThat(first).containsEntry("size",2000L).containsEntry("totalPages",2L).containsEntry("totalElements",2003L);
+  assertThat(maps(first.get("content"))).hasSize(2000);
+  assertThat(last).containsEntry("size",2000L);
+  assertThat(maps(last.get("content"))).extracting(r->number(r.get("sampleIdentityId"))).containsExactly(2001L,2002L,2003L);
+  var custom=query.page(Map.of("view","ledger","size","375","page","3"));
+  assertThat(maps(custom.get("content"))).hasSize(375).first().satisfies(r->assertThat(r.get("sampleIdentityId")).isEqualTo(751L));
+ }
+ @Test void ledgerRetainsTheLegacyDefaultAndUngroupedOperationalPageLimit(){
+  assertThat(query.page(Map.of("view","ledger"))).containsEntry("size",50L);
+  assertThat(query.page(Map.of("view","ledger","size","0"))).containsEntry("size",1L);
+  assertThat(query.page(Map.of("size","2000"))).containsEntry("size",100L);
+  assertThat(query.page(Map.of("view","ledger","groupBy","style","size","2000"))).containsEntry("size",100L);
+  assertThat(maps(query.page(Map.of("view","ledger","size","2000","page",Long.toString(Long.MAX_VALUE))).get("content"))).isEmpty();
+ }
  @Test void currentSupplierCodesAndOriginalSyCodesSearchTheSameRowsBeforePagination(){
   for(String keyword:List.of("SY-PJ-1","SY-1")){var result=query.page(Map.of("keyword",keyword,"size","1"));assertThat(result).containsEntry("totalElements",1L);assertThat(maps(result.get("content"))).singleElement().satisfies(row->assertThat(row).containsEntry("sampleCode","SY-PJ-1").containsEntry("code","SY-1").containsEntry("originalSampleCode","SY-1"));}
   assertThat(sql.stream().filter(s->s.contains("from plm_supplier_profile")).count()).isEqualTo(2);verify(jdbc,never()).update(anyString(),any(Object[].class));
  }
  @Test void supplierRenameUsesCurrentProfileForDisplayAndOptionsWhileMainSearchRetainsTheRecordedName(){
   recordedSupplierName="历史旧供方";currentSupplierName="当前新供方";
-  for(String keyword:List.of("当前新供方","PJ","历史旧供方")){var result=query.page(Map.of("groupBy","style","keyword",keyword));assertThat(result).containsEntry("totalElements",1L);assertThat(maps(result.get("content")).get(0)).containsEntry("supplierCode","SUP-A").containsEntry("supplierName","当前新供方");}
+  for(String keyword:List.of("当前新供方","PJ","品俊","历史旧供方")){var result=query.page(Map.of("groupBy","style","keyword",keyword));assertThat(result).containsEntry("totalElements",1L);assertThat(maps(result.get("content")).get(0)).containsEntry("supplierCode","SUP-A").containsEntry("supplierName","当前新供方");}
+  assertThat(maps(query.options(Map.of("keyword","品俊")).get("suppliers"))).singleElement().satisfies(s->assertThat(s).containsEntry("supplierProfileShortName","品俊").containsEntry("shortName","PJ"));
   assertThat(query.options(Map.of("keyword","当前新供方")).toString()).contains("SUP-A","当前新供方");assertThat(query.options(Map.of("keyword","PJ")).toString()).contains("SUP-A","当前新供方");
   verify(jdbc,never()).update(anyString(),any(Object[].class));
  }
